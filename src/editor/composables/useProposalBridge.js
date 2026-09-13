@@ -3,7 +3,7 @@ import { findTargetText } from '../../services/ai/tools/textMatch.js'
 import { matchInCleanContent } from '../../services/ai/tools/edit.js'
 import { PROPOSAL_APPLY_EVENT, DIFF_OPEN_EVENT } from '../../shared/proposalEvents.js'
 
-const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
+const SOURCE_REQUIRED = 'Open Source before applying a Markdown proposal to this Graph entry.'
 
 export function computeDiffFromReview(review, fileContent) {
   if (!review?.targetText) return null
@@ -38,46 +38,64 @@ export function computeCompoundDiff(reviews, fileContent) {
   return { original: fileContent, modified }
 }
 
-export function useProposalBridge({ getDocContent, applyChange, getDocPath, activateDiff, activateBatchDiff, openFileForDiff, stashFileReviews }) {
+export function useProposalBridge({ getDocContent, applyChange, getDocPath, activateDiff, activateBatchDiff, openFileForDiff, stashFileReviews, canApply = () => true }) {
   const pendingProposal = ref(null)
   let unlistenApply = null
   let unlistenDiff = null
+  let disposed = false
 
   async function setup() {
-    if (!isTauri) return
+    if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return
     const { listen } = await import('@tauri-apps/api/event')
     const { invoke } = await import('@tauri-apps/api/core')
+    if (disposed) return
 
-    unlistenApply = await listen(PROPOSAL_APPLY_EVENT, (event) => {
+    function report(payload, status, detail) {
+      return invoke('proposal_respond', {
+        result: { id: payload.id, sessionId: payload.sessionId || payload.threadId, status, detail },
+      }).catch(() => {})
+    }
+
+    function requireSource() {
+      if (!canApply()) throw new Error(SOURCE_REQUIRED)
+    }
+
+    const stopApply = await listen(PROPOSAL_APPLY_EVENT, async (event) => {
+      if (disposed) return
       const payload = event.payload
-      const docContent = getDocContent()
-      const match = findTargetText(docContent, payload.targetText)
-
-      if (match) {
+      try {
+        requireSource()
+        const targetPath = payload.absolutePath || payload.path
+        if (!targetPath || targetPath !== getDocPath()) {
+          throw new Error('This proposal belongs to another document. Open its Source tab before applying it.')
+        }
+        const docContent = getDocContent()
+        const match = findTargetText(docContent, payload.targetText)
+        if (!match) return report(payload, 'not-found', 'Target text not found in the current document')
         applyChange(match.from, match.to, payload.replacement)
-        invoke('proposal_respond', {
-          result: {
-            id: payload.id,
-            sessionId: payload.sessionId || payload.threadId,
-            status: 'applied',
-            detail: 'Change applied successfully',
-          },
-        }).catch(() => {})
-      } else {
-        invoke('proposal_respond', {
-          result: {
-            id: payload.id,
-            sessionId: payload.sessionId || payload.threadId,
-            status: 'not-found',
-            detail: 'Target text not found in the current document',
-          },
-        }).catch(() => {})
+        return report(payload, 'applied', 'Change applied successfully')
+      } catch (error) {
+        return report(payload, 'conflict', error?.message || String(error))
       }
     })
+    if (disposed) { stopApply(); return }
+    unlistenApply = stopApply
 
-    unlistenDiff = await listen(DIFF_OPEN_EVENT, async (event) => {
-      const payload = event.payload
+    const stopDiff = await listen(DIFF_OPEN_EVENT, async ({ payload }) => {
+      if (disposed) return
+      try {
+        await openDiff(payload)
+      } catch (error) {
+        const proposals = payload.batch ? payload.files || [] : [payload]
+        await Promise.all(proposals.filter(proposal => proposal.id).map(proposal => (
+          report({ ...proposal, sessionId: proposal.sessionId || payload.sessionId }, 'conflict', error?.message || String(error))
+        )))
+      }
+    })
+    if (disposed) stopDiff()
+    else unlistenDiff = stopDiff
 
+    async function openDiff(payload) {
       // Batch mode: payload has a `files` array
       if (payload.batch && payload.files && activateBatchDiff) {
         const docContent = getDocContent()
@@ -95,7 +113,7 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
           }
           return { path: f.path || getDocPath(), original, modified, proposalId: f.id }
         })
-        activateBatchDiff(fileList, { sessionId: payload.sessionId })
+        await activateBatchDiff(fileList, { sessionId: payload.sessionId })
         return
       }
 
@@ -104,6 +122,8 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
         if (openFileForDiff) {
           await openFileForDiff(payload.path, payload.original || payload.replacement || '')
         }
+        if (disposed) return
+        requireSource()
 
         const review = {
           proposalId: payload.id,
@@ -131,12 +151,15 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
         if (openFileForDiff) {
           await openFileForDiff(payload.path, payload.original)
         }
+        if (disposed) return
+        requireSource()
         activateDiff(payload.original, payload.modified, { review: { ids: [payload.id], sessionId: payload.sessionId, path: payload.path } })
         return
       }
 
       // Single-file mode (computes diff from targetText/replacement on current doc)
       if (!activateDiff) return
+      requireSource()
       const docContent = getDocContent()
       const original = docContent
       let modified = docContent
@@ -153,10 +176,11 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
       if (original !== modified) {
         activateDiff(original, modified)
       }
-    })
+    }
   }
 
   function cleanup() {
+    disposed = true
     if (unlistenApply) { unlistenApply(); unlistenApply = null }
     if (unlistenDiff) { unlistenDiff(); unlistenDiff = null }
   }

@@ -495,12 +495,58 @@ describe('canonical renderer tool runtime', () => {
       status: 'pending_review',
     })
 
-    expect(editor.mimirOpen).toHaveBeenCalledWith('/work/a.md')
+    expect(editor.mimirOpen).toHaveBeenCalledWith('/work/a.md', { source: true })
     expect(editor.mimirReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
       id: 'proposal-lean',
       path: '/work/a.md',
       sessionId: 'agent-lean',
     }))
+  })
+
+  it.each(['editor.propose', 'files.edit'])('prepares the current Graph Source before %s reads a proposal target', async tool => {
+    const active = { path: '/work/graph/jon.md', kind: 'graph', dirty: true, content: 'Saved title' }
+    const editor = {
+      mimirActive: vi.fn(() => ({ ...active })),
+      mimirOpen: vi.fn(async (path, options) => {
+        expect(path).toBe(active.path)
+        expect(options).toEqual({ source: true })
+        Object.assign(active, { kind: 'text', dirty: false, content: 'Current title' })
+        return { ...active }
+      }),
+    }
+    createMimirTools.mockImplementation(context => ({
+      edit: { execute: vi.fn(async () => context.getDocument()) },
+    }))
+    await expect(executeToolRequest({ tool, input: { target: '@editor', old_text: 'Current title', new_text: 'New title' } }, { editor }))
+      .resolves.toMatchObject({ kind: 'text', content: 'Current title' })
+    expect(editor.mimirOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not create a proposal when its Graph draft cannot enter Source', async () => {
+    const editor = {
+      mimirActive: vi.fn(() => ({ path: '/work/graph/jon.md', kind: 'graph', dirty: true })),
+      mimirOpen: vi.fn(async () => { throw new Error('Source conflict') }),
+    }
+    await expect(executeToolRequest({ tool: 'editor.propose', input: { old_text: 'old', new_text: 'new' } }, { editor }))
+      .rejects.toThrow('Source conflict')
+    expect(createMimirTools).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalledWith('proposal_create', expect.anything())
+  })
+
+  it.each(['editor.propose', 'files.edit'])('rejects %s if navigation changes during Source opening', async tool => {
+    let active = { path: '/work/graph/jon.md', kind: 'graph' }
+    let finishOpen
+    const editor = {
+      mimirActive: vi.fn(() => ({ ...active })),
+      mimirOpen: vi.fn(() => new Promise(resolve => { finishOpen = resolve })),
+    }
+    const pending = executeToolRequest({ tool, input: { target: '@editor', path: active.path, old_text: 'same', new_text: 'new' } }, { editor })
+    const rejection = expect(pending).rejects.toThrow('active document changed')
+    active = { path: '/work/other.md', kind: 'text' }
+    finishOpen({ path: '/work/graph/jon.md', kind: 'text' })
+    await rejection
+    expect(createMimirTools).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalledWith('proposal_create', expect.anything())
   })
 
   it('returns structured errors and cancels pending calls without replying late', async () => {

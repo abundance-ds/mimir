@@ -1,4 +1,8 @@
 import { singleDiffTargetsFile } from '../workspaceDiffProjection.js'
+import { graphSource, saveGraphSource } from '../../services/businessGraph.js'
+import { graphDocumentState, isGraphSourceCandidate } from '../../stores/graphDocuments.js'
+
+const SOURCE_REQUIRED = 'Open Source before applying a Markdown review to this Graph entry.'
 
 export function proposalIdsFromReviewMeta(meta) {
   if (!meta) return []
@@ -33,6 +37,10 @@ export function useDiffReview({
   function requireActiveSingleDiffTarget() {
     const target = resolveSingleDiffTarget()
     if (target && singleDiffTargetsFile(diffStore, currentFile.value)) {
+      if (target.kind === 'graph') {
+        diffStore.setReviewError?.(SOURCE_REQUIRED)
+        return { ok: false, error: SOURCE_REQUIRED }
+      }
       return { ok: true, target }
     }
     const error = 'This review belongs to another file. Open its tab before you respond.'
@@ -45,6 +53,10 @@ export function useDiffReview({
       const error = 'The review target is no longer open. Reopen the proposal before you respond.'
       diffStore.setReviewError?.(error)
       return { ok: false, error }
+    }
+    if (target.kind === 'graph') {
+      diffStore.setReviewError?.(SOURCE_REQUIRED)
+      return { ok: false, error: SOURCE_REQUIRED }
     }
     diffStore.deactivate()
     if (content != null) {
@@ -96,6 +108,41 @@ export function useDiffReview({
     for (const file of allFiles) {
       if (file.status !== 'accepted' || file.applied) continue
       try {
+        const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
+        const graph = openFile?.graph ? null : await graphSource(file.path)
+        if (file.graphSourceRevision != null && !openFile?.graph && !graph) {
+          throw new Error('This Graph source is unavailable. Reopen the proposal after its scope is mounted.')
+        }
+        if (openFile && graph) {
+          if (openFile.dirty || openFile.content !== graph.content) {
+            throw new Error('This Graph source changed. Save or reload its tab before applying the proposal.')
+          }
+          openFile.graph = graphDocumentState(graph)
+        }
+        const graphFile = openFile?.graph ? openFile : null
+        if (graphFile) {
+          if (graphFile.graph.unavailable) throw new Error('This Graph source is unavailable. Its draft is kept.')
+          if (graphFile.kind === 'graph') {
+            if (graphFile.dirty || !await fileManager.setGraphView(graphFile, 'source')) throw new Error(SOURCE_REQUIRED)
+          }
+          await fileManager.waitForFile?.(graphFile)
+          if (!fileManager.openFiles.includes(graphFile) || graphFile.path !== file.path || graphFile.kind === 'graph') {
+            throw new Error('This Graph tab changed. Open the proposal again.')
+          }
+          if (graphFile.content !== file.original && graphFile.content !== file.modified) {
+            throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
+          }
+          if (graphFile.content !== file.modified) {
+            graphFile.content = file.modified
+            fileManager.markDirty(graphFile)
+          }
+          if (graphFile.dirty) await fileManager.save(graphFile)
+          // save() owns revision and dirty state, including edits made while
+          // its write was pending. Never mark this tab clean here.
+          file.applied = true
+          file.error = null
+          continue
+        }
         const active = currentFile.value?.path === file.path
         if (active) {
           if (currentFile.value.content !== file.original) {
@@ -105,15 +152,15 @@ export function useDiffReview({
           fileManager.markDirty()
           activeEditorChanged = true
         } else {
-          const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
-          const currentContent = openFile
+          const currentContent = graph?.content ?? (openFile
             ? openFile.content
-            : (await invoke('read_text_file', { path: file.path })).content
+            : (await invoke('read_text_file', { path: file.path })).content)
           if (currentContent !== file.original && currentContent !== file.modified) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
           if (currentContent !== file.modified) {
-            await invoke('write_text_file', { path: file.path, content: file.modified })
+            if (graph) await saveGraphSource({ path: file.path, content: file.modified, expectedRevision: file.graphSourceRevision ?? graph.sourceRevision })
+            else await invoke('write_text_file', { path: file.path, content: file.modified })
           }
           if (openFile) {
             openFile.content = file.modified
@@ -196,10 +243,7 @@ export function useDiffReview({
         // follows proposal_respond can deactivate the diff store mid-flight,
         // and a post-await read would then apply reset ('') content.
         const modified = diffStore.modifiedContent
-        const lifecycle = await respondToDiffReview('applied')
-        if (!lifecycle.ok) return lifecycle
-        fileManager.clearFileReviews(target)
-        return applyDiffResult(modified, target)
+        return completeReview(target, 'applied', modified)
       }
     }
   }
@@ -236,10 +280,7 @@ export function useDiffReview({
       } else {
         // Same pre-await snapshot rule as accept: see onDiffAcceptAll.
         const original = diffStore.originalContent
-        const lifecycle = await respondToDiffReview('rejected')
-        if (!lifecycle.ok) return lifecycle
-        fileManager.clearFileReviews(target)
-        return applyDiffResult(original, target)
+        return completeReview(target, 'rejected', original)
       }
     }
   }
@@ -261,11 +302,21 @@ export function useDiffReview({
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
     else if (proposalIdsFromReviewMeta(diffStore.reviewMeta).length > 0) {
       const status = content === diffStore.originalContent ? 'rejected' : 'applied'
+      return completeReview(target, status, content)
+    }
+    return applyDiffResult(content, target)
+  }
+
+  async function completeReview(target, status, content) {
+    if (target.graph) target.reviewPending = true
+    try {
       const lifecycle = await respondToDiffReview(status)
       if (!lifecycle.ok) return lifecycle
       fileManager.clearFileReviews(target)
+      return applyDiffResult(content, target)
+    } finally {
+      if (target.graph) target.reviewPending = false
     }
-    return applyDiffResult(content, target)
   }
 
   function onDiffNavigateChunk(index) {
@@ -278,6 +329,7 @@ export function useDiffReview({
 
   function activateDiffForCurrentFile(original, modified, opts) {
     const file = currentFile.value
+    if (file?.kind === 'graph') throw new Error(SOURCE_REQUIRED)
     const path = file?.path || ''
     flushEditorContent({ bridge: 'flush' })
     diffStore.activate({
@@ -289,9 +341,15 @@ export function useDiffReview({
     })
   }
 
-  function activateBatchDiff(fileList, meta) {
+  async function activateBatchDiff(fileList, meta) {
     flushEditorContent({ bridge: 'flush' })
-    diffStore.activateBatch({ fileList, sessionId: meta?.sessionId })
+    const rows = await Promise.all(fileList.map(async file => {
+      const open = fileManager.openFiles?.find(candidate => candidate.path === file.path)
+      if (open?.graph) return { ...file, graphSourceRevision: open.graph.sourceRevision }
+      const graph = isGraphSourceCandidate(file.path) ? await graphSource(file.path) : null
+      return { ...file, graphSourceRevision: graph?.sourceRevision ?? null }
+    }))
+    diffStore.activateBatch({ fileList: rows, sessionId: meta?.sessionId })
     reviewTabActive.value = true
   }
 

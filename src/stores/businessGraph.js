@@ -11,6 +11,7 @@ import {
   moveGraphNodeScope,
   openBusinessGraph,
   queryGraph,
+  refreshBusinessGraph,
   restoreGraphNode,
   searchGraph,
   updateGraphNode,
@@ -29,6 +30,7 @@ const MAX_SUMMARY_EVENTS = 2_000
 
 export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const status = ref(null)
+  const changedSources = ref(null)
   const nodes = ref([])
   const diagnostics = ref([])
   const events = ref([])
@@ -53,8 +55,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const selectedNode = ref(null)
   const requestedNodeId = ref('')
   const selectedNeighbors = ref([])
-  const inspectionHistory = ref([])
-  const inspectionHistoryIndex = ref(-1)
   const lastDeletion = ref(null)
   const projectRoot = ref('')
   const teamRoot = ref('')
@@ -65,6 +65,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   let searchGeneration = 0
   let eventLoadGeneration = 0
   let deletionTimer = null
+  let lifecycleGeneration = 0
+  let nodeLoadGeneration = 0
 
   const scopes = computed(() => status.value?.scopes || [])
   const selectedScopes = computed(() => (
@@ -105,29 +107,25 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
     return actors
   })
-  const historyBack = computed(() => (
-    inspectionHistory.value[inspectionHistoryIndex.value - 1] || null
-  ))
-  const historyForward = computed(() => (
-    inspectionHistory.value[inspectionHistoryIndex.value + 1] || null
-  ))
-
   // The first projection only needs the node query, so the change listener is
   // installed before it (no file change can slip through the mount window) and
   // diagnostics plus change history hydrate after the board is already on
   // screen instead of holding the loading state open.
-  async function start(workspace) {
+  async function start(workspace, { mountedStatus = null } = {}) {
     const nextProject = String(workspace || '').trim()
     if (!nextProject) {
       reset()
       return
     }
+    stop()
+    const generation = lifecycleGeneration
     loading.value = true
     error.value = ''
     try {
       const workspaceConfig = cachedWorkspaceConfig(nextProject)
       workspaceProjectId.value = String(workspaceConfig?.project || '').trim()
-      const mounted = await openBusinessGraph(nextProject)
+      const mounted = mountedStatus || await openBusinessGraph(nextProject)
+      if (generation !== lifecycleGeneration) return false
       const nextTeam = mounted?.scopes?.find(scope => scope.kind === 'team')?.root || ''
       workspaceGraphScope.value = workspaceConfig?.graphScope === 'workspace'
         ? 'workspace'
@@ -136,52 +134,66 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       teamRoot.value = nextTeam
       applyStatus(mounted)
       eventOffset.value = 0
-      await startListening()
-      await loadNodes()
+      await startListening(generation)
+      if (generation !== lifecycleGeneration) return false
+      await loadNodes(generation)
+      if (generation !== lifecycleGeneration) return false
     } catch (cause) {
+      if (generation !== lifecycleGeneration) return false
       error.value = errorMessage(cause)
       loading.value = false
       throw cause
     }
     loading.value = false
     try {
-      await loadAuxiliary()
+      await loadAuxiliary(generation)
     } catch (cause) {
-      error.value = errorMessage(cause)
+      if (generation === lifecycleGeneration) error.value = errorMessage(cause)
     }
+    return generation === lifecycleGeneration
   }
 
-  async function refresh({ quiet = false } = {}) {
+  async function refresh({ quiet = false, reconcile = false } = {}) {
     if (!status.value) return
+    const generation = lifecycleGeneration
     if (!quiet) refreshing.value = true
     try {
-      await Promise.all([loadNodes(), loadAuxiliary()])
+      // Only the explicit Refresh action requests disk reconciliation.
+      // Watcher, mutation, and scope updates already have a current index.
+      if (reconcile) await refreshBusinessGraph()
+      if (generation !== lifecycleGeneration) return
+      await Promise.all([loadNodes(generation), loadAuxiliary(generation)])
+      if (generation !== lifecycleGeneration) return
       error.value = ''
       if (searchQuery.value.trim()) await search(searchQuery.value)
       if (selectedNode.value?.id) await reloadSelected()
     } catch (cause) {
+      if (generation !== lifecycleGeneration) return
       error.value = errorMessage(cause)
       if (!quiet) throw cause
     } finally {
-      refreshing.value = false
+      if (generation === lifecycleGeneration) refreshing.value = false
     }
   }
 
-  async function loadNodes() {
+  async function loadNodes(generation = lifecycleGeneration) {
+    const request = ++nodeLoadGeneration
     const result = await queryGraph({ scopeIds: activeScopeIds.value, limit: 500 })
+    if (generation !== lifecycleGeneration || request !== nodeLoadGeneration) return
     nodes.value = Array.isArray(result?.items) ? result.items : []
     status.value = {
       ...status.value,
       nodeCount: result?.total ?? nodes.value.length,
-      graphRevision: result?.graphRevision ?? status.value.graphRevision,
+      graphRevision: result?.graphRevision ?? status.value?.graphRevision,
     }
   }
 
-  async function loadAuxiliary() {
+  async function loadAuxiliary(generation = lifecycleGeneration) {
     const [nextDiagnostics] = await Promise.all([
       graphDiagnostics(),
       loadEventPage(eventOffset.value),
     ])
+    if (generation !== lifecycleGeneration) return
     diagnostics.value = Array.isArray(nextDiagnostics) ? nextDiagnostics : []
     status.value = { ...status.value, diagnosticCount: diagnostics.value.length }
   }
@@ -281,49 +293,18 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     searching.value = false
   }
 
-  async function openNode(id, origin = projectionState()) {
+  async function openNode(id) {
     const node = await getGraphNode(id)
     if (!node) throw new Error(`Graph node not found: ${id}`)
     const neighbors = await graphNeighbors(id, { scopeIds: activeScopeIds.value })
     selectedNode.value = node
     selectedNeighbors.value = Array.isArray(neighbors) ? neighbors : []
-    const current = inspectionHistory.value[inspectionHistoryIndex.value]
-    if (current?.id !== node.id) {
-      const next = inspectionHistory.value.slice(0, inspectionHistoryIndex.value + 1)
-      next.push({
-        id: node.id,
-        kind: node.kind,
-        title: historyTitle(node),
-        origin,
-      })
-      inspectionHistory.value = next.slice(-24)
-      inspectionHistoryIndex.value = inspectionHistory.value.length - 1
-    }
     return node
   }
 
-  async function navigateHistory(direction) {
-    const index = inspectionHistoryIndex.value + Math.sign(Number(direction) || 0)
-    const item = inspectionHistory.value[index]
-    if (!item) return
-    restoreProjection(item.origin)
-    const [node, neighbors] = await Promise.all([
-      getGraphNode(item.id),
-      graphNeighbors(item.id, { scopeIds: activeScopeIds.value }),
-    ])
-    if (!node) throw new Error(`Graph node not found: ${item.id}`)
-    selectedNode.value = node
-    selectedNeighbors.value = Array.isArray(neighbors) ? neighbors : []
-    inspectionHistoryIndex.value = index
-  }
-
-  function closeInspector({ restore = true } = {}) {
-    const origin = inspectionHistory.value[0]?.origin
+  function closeInspector() {
     selectedNode.value = null
     selectedNeighbors.value = []
-    inspectionHistory.value = []
-    inspectionHistoryIndex.value = -1
-    if (restore && origin) restoreProjection(origin)
   }
 
   async function create(create) {
@@ -346,7 +327,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       scopeId: create.scopeId || defaultWriteScope(create.kind),
     })
     await refresh({ quiet: true })
-    await openNode(created.id)
     return created
   }
 
@@ -368,14 +348,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       })
       if (selectedNode.value?.id === updated.id) selectedNode.value = updated
       replaceSummary(updated)
-      const historyItem = inspectionHistory.value[inspectionHistoryIndex.value]
-      if (historyItem?.id === updated.id) {
-        inspectionHistory.value[inspectionHistoryIndex.value] = {
-          ...historyItem,
-          kind: updated.kind,
-          title: historyTitle(updated),
-        }
-      }
       return updated
     } catch (cause) {
       if (before) selectedNode.value = before
@@ -401,17 +373,18 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     return moved
   }
 
-  async function remove(id, expectedRevision = null) {
+  async function remove(id, expectedRevision = null, expectedSourcePath = null) {
     const node = selectedNode.value?.id === id
       ? cloneGraphValue(selectedNode.value)
       : await getGraphNode(id)
     const result = await deleteGraphNode({
       id,
+      ...(expectedSourcePath ? { expectedSourcePath } : {}),
       expectedRevision: expectedRevision
         || node?.provenance?.sourceRevision
         || node?.sourceRevision,
     })
-    closeInspector({ restore: false })
+    closeInspector()
     await refresh({ quiet: true })
     clearTimeout(deletionTimer)
     lastDeletion.value = {
@@ -431,7 +404,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     clearTimeout(deletionTimer)
     lastDeletion.value = null
     await refresh({ quiet: true })
-    await openNode(restored.id)
     return restored
   }
 
@@ -480,15 +452,24 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       : retained
   }
 
-  async function startListening() {
+  async function startListening(generation) {
     if (unlisten) return
-    unlisten = await listenForGraphChanges(() => {
+    const cleanup = await listenForGraphChanges(payload => {
+      if (generation !== lifecycleGeneration) return
+      changedSources.value = payload
       clearTimeout(refreshTimer)
       refreshTimer = setTimeout(() => void refresh({ quiet: true }), 80)
     })
+    if (generation !== lifecycleGeneration) cleanup?.()
+    else unlisten = cleanup
   }
 
   function stop() {
+    lifecycleGeneration += 1
+    nodeLoadGeneration += 1
+    changedSources.value = null
+    loading.value = false
+    refreshing.value = false
     clearTimeout(refreshTimer)
     clearTimeout(deletionTimer)
     refreshTimer = null
@@ -513,8 +494,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     activeScopeIds.value = []
     selectedNode.value = null
     selectedNeighbors.value = []
-    inspectionHistory.value = []
-    inspectionHistoryIndex.value = -1
     lastDeletion.value = null
     searchQuery.value = ''
     searchResults.value = []
@@ -534,26 +513,11 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       graphNeighbors(id, { scopeIds: activeScopeIds.value }),
     ])
     if (!node) {
-      closeInspector({ restore: false })
+      closeInspector()
       return
     }
     selectedNode.value = node
     selectedNeighbors.value = Array.isArray(neighbors) ? neighbors : []
-  }
-
-  function projectionState() {
-    return {
-      section: section.value,
-      view: view.value,
-      searchQuery: searchQuery.value,
-    }
-  }
-
-  function restoreProjection(origin) {
-    if (!origin) return
-    section.value = origin.section || section.value
-    view.value = origin.view || view.value
-    if (origin.searchQuery !== searchQuery.value) void search(origin.searchQuery || '')
   }
 
   function defaultWriteScope(kind = '') {
@@ -599,12 +563,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     else nodes.value.unshift(summary)
   }
 
-  function historyTitle(node) {
-    return String(node?.title || '').trim() || `Untitled ${node?.kind || 'object'}`
-  }
-
   return {
     status,
+    changedSources,
     nodes,
     diagnostics,
     events,
@@ -626,10 +587,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     selectedNode,
     requestedNodeId,
     selectedNeighbors,
-    inspectionHistory,
-    inspectionHistoryIndex,
-    historyBack,
-    historyForward,
     lastDeletion,
     projectRoot,
     teamRoot,
@@ -653,7 +610,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     prepareSearch,
     clearSearch,
     openNode,
-    navigateHistory,
     closeInspector,
     create,
     update,

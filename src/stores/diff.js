@@ -57,6 +57,7 @@ export const useDiffStore = defineStore('diff', () => {
       original: f.original,
       modified: f.modified,
       proposalId: f.proposalId || null,
+      ...(f.graphSourceRevision != null ? { graphSourceRevision: f.graphSourceRevision } : {}),
       status: 'pending',
       applied: false,
       lifecycleResolved: false,

@@ -32,7 +32,7 @@ export function useTabManagement({
   const closeConfirmFileName = computed(() => {
     const f = closeConfirmFile.value
     if (!f) return ''
-    return f.path ? basename(f.path) : 'Untitled'
+    return f.graph?.draft?.title || f.graph?.node?.title || (f.path ? basename(f.path) : 'Untitled')
   })
 
   const discardConfirmFileName = computed(() => {
@@ -130,9 +130,18 @@ export function useTabManagement({
   }
 
   async function confirmFileClose(file) {
-    if (!file?.dirty) return 'clean'
+    if (file?.reviewPending) return 'cancel'
+    const pausedSource = file?.graph && cancelAutoSave(file)
+    const resume = () => {
+      fileManager.resumeGraphSave?.(file)
+      if (pausedSource) resumeAutoSave(file)
+    }
+    fileManager.pauseGraphSave?.(file)
+    try { await fileManager.waitForFile?.(file) }
+    catch { /* Keep the existing confirmation available after a failed save. */ }
+    if (!file?.dirty) { resume(); return 'clean' }
     const action = await showCloseConfirmation(file)
-    if (action === 'cancel') return 'cancel'
+    if (action === 'cancel') { resume(); return 'cancel' }
     if (action === 'save') {
       const index = fileManager.openFiles.indexOf(file)
       if (index < 0) return 'cancel'
@@ -141,6 +150,8 @@ export function useTabManagement({
         return await saveCurrentFile({ source: 'manual' }) ? 'saved' : 'cancel'
       } catch {
         return 'cancel'
+      } finally {
+        resume()
       }
     }
     return 'discard'

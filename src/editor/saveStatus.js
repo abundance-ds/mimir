@@ -13,6 +13,8 @@ function status(label, tone, action = null, title = '', detail = '', detailTone 
 export function fileDisplayName(file, { untitledIndex } = {}) {
   if (!file) return ''
   if (file.meta?.scratchpad) return 'Scratchpad'
+  if (file.graph?.node) return (file.dirty && file.kind === 'graph'
+    ? file.graph.draft?.title : file.graph.node.title) || 'Untitled entry'
   if (file.path) return basename(file.path)
   const n = untitledIndex ?? 1
   return n === 1 ? 'Untitled.md' : `Untitled-${n}.md`

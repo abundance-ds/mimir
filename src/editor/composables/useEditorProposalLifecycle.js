@@ -1,4 +1,4 @@
-import { watch } from 'vue'
+import { nextTick, watch } from 'vue'
 import {
   computeCompoundDiff,
   computeDiffFromReview,
@@ -22,23 +22,41 @@ export function useEditorProposalLifecycle({
   const unlisteners = []
   let registerTimer = null
   let disposed = false
+  const sourceRequired = 'Open Source before applying a Markdown proposal to this Graph entry.'
+
+  function canApply() {
+    return fileManager.currentFile?.kind !== 'graph' && Boolean(editorSurfaceRef.value)
+  }
 
   const bridge = useProposalBridge({
     getDocContent: () => currentEditorContent(),
-    applyChange: (from, to, text) => editorSurfaceRef.value?.replaceRange(from, to, text),
+    canApply,
+    applyChange: (from, to, text) => {
+      if (!canApply()) throw new Error(sourceRequired)
+      editorSurfaceRef.value.replaceRange(from, to, text)
+    },
     getDocPath: () => fileManager.currentFile?.path ?? '',
-    activateDiff: (original, modified, options) => (
-      activateDiff(original, modified, options)
-    ),
+    activateDiff: (original, modified, options) => {
+      if (!canApply()) throw new Error(sourceRequired)
+      return activateDiff(original, modified, options)
+    },
     activateBatchDiff: (fileList, meta) => activateBatchDiff(fileList, meta),
-    openFileForDiff: (path, content) => fileManager.openFile(path, content),
+    openFileForDiff: async (path, content) => {
+      const file = await fileManager.openFile(path, content)
+      if (file?.kind === 'graph' && !await fileManager.setGraphView(file, 'source')) {
+        throw new Error('Save the Graph draft before opening Source.')
+      }
+      await nextTick()
+      if (file && fileManager.currentFile !== file) throw new Error('The active document changed. Open the proposal again.')
+      return file
+    },
     stashFileReviews: review => (
       fileManager.setFileReviews(fileManager.currentFile, [review])
     ),
   })
 
   const stopActiveFileWatch = watch(
-    () => fileManager.activeFileIndex,
+    () => [fileManager.activeFileIndex, fileManager.currentFile?.kind],
     () => {
       const file = fileManager.currentFile
       if (file?.reviews) {
@@ -144,7 +162,7 @@ export function useEditorProposalLifecycle({
   }
 
   function activateDiffFromReviews(file) {
-    if (!file?.reviews?.length) return false
+    if (!file?.reviews?.length || file.kind === 'graph') return false
     if (fileManager.currentFile === file) flushEditorContent()
     const content = file.content || ''
     const diff = file.reviews.length === 1
@@ -173,10 +191,11 @@ export function useEditorProposalLifecycle({
 
   async function checkProposalsForFile(file) {
     if (!file?.path || file.reviews || !hasTauriRuntime()) return
+    const path = file.path
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      const proposals = await invoke('get_proposals_for_path', { path: file.path })
-      if (!proposals.length || disposed) return
+      const proposals = await invoke('get_proposals_for_path', { path })
+      if (!proposals.length || disposed || file.path !== path || !fileManager.openFiles.includes(file)) return
       fileManager.setFileReviews(file, proposals.map(proposalToReview))
       // Only activate the diff if this file is still current; a tab switch
       // during the await must not leave a stale diff active.
@@ -191,6 +210,7 @@ export function useEditorProposalLifecycle({
     stopRegistrationWatch()
     clearTimeout(registerTimer)
     unlisteners.splice(0).forEach(stop => stop())
+    bridge.cleanup()
     unregisterDocuments()
   }
 

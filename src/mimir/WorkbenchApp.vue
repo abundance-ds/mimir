@@ -165,6 +165,10 @@
         @review-git-with-agent="startGitReviewWithAgent"
         @diagnostic="showDiagnostic"
         @scratchpad-reveal="onScratchpadReveal"
+        @open-graph-node="openGraphNode"
+        @open-graph-file="openFileInEditor"
+        @open-graph-activity="selectActivity"
+        @open-graph-meeting="openScribeMeeting"
       />
     </template>
   </WorkbenchShell>
@@ -219,7 +223,6 @@ import { useFileStore } from '../stores/files.js'
 import { prepareScratchpad } from '../services/scratchpad.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
-import { useBusinessGraphStore } from '../stores/businessGraph.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useTrackerStore } from '../stores/tracker.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
@@ -947,8 +950,9 @@ async function processMeetingRecordRequests() {
     while (workbenchReady && pendingMeetingRecordRequests.length) {
       const request = pendingMeetingRecordRequests.shift()
       try {
-        await meetings.refresh()
         await onLaunch('app:scribe')
+        if (request.action !== 'record') continue
+        await meetings.refresh()
         await meetings.start({
           title: `${request.appName} meeting`,
           candidateId: request.candidateId,
@@ -1023,11 +1027,15 @@ async function openScribeMeeting(meetingId) {
   }
 }
 
-async function openGraphNode(nodeId) {
-  const graph = useBusinessGraphStore()
-  graph.requestedNodeId = nodeId
-  await onLaunch('app:business-graph')
-  if (workbench.activeActivityId !== 'app:business-graph') graph.requestedNodeId = ''
+async function openGraphNode(request) {
+  try {
+    await editorRef.value?.mimirOpenGraph(request)
+    focusNarrowPane('editor')
+    workbench.setPaneState('editor', 'expanded')
+    diagnostic.value = ''
+  } catch (cause) {
+    diagnostic.value = `Entry could not open: ${errorMessage(cause)}`
+  }
 }
 
 async function stopMeetingCapture() {

@@ -96,6 +96,20 @@ describe('sessionPersist', () => {
     ])
   })
 
+  it('persists one dirty Graph draft but only identity and mode for clean or discarded Graph tabs', () => {
+    const graph = { node: { id: 'note' }, sourceRevision: 'old', draft: { body: 'Unsaved details' }, version: 2 }
+    const dirty = { path: '/graph/note.md', kind: 'graph', content: 'Saved raw source', graph, dirty: true }
+    const clean = { path: '/graph/clean.md', kind: 'text', content: 'Clean raw source', graph: { ...graph, node: { id: 'clean' } }, dirty: false }
+    const state = makeState({ openFiles: ref([dirty, clean]) })
+    expect(createSessionSnapshot(state).openFiles).toEqual([
+      { path: dirty.path, kind: 'graph', graph, content: 'Saved raw source', dirty: true },
+      { path: clean.path, kind: 'text', graph: { nodeId: 'clean', restoreView: 'text' } },
+    ])
+    expect(createSessionSnapshot(state, { discardedFiles: [dirty] }).openFiles[0]).toEqual({
+      path: dirty.path, kind: 'graph', graph: { nodeId: 'note', restoreView: 'graph' },
+    })
+  })
+
   it('persists project ownership without adding it to global files', () => {
     const state = makeState({
       openFiles: ref([

@@ -15,6 +15,18 @@ export function getGraphNode(id) {
   return invoke('graph_get', { id: requiredId(id) })
 }
 
+export function graphSource(path) {
+  return invoke('graph_source', { path: requiredPath(path, 'graph source') })
+}
+
+export function saveGraphSource(request) {
+  return invoke('graph_source_save', { request })
+}
+
+export function serializeGraphSource(node) {
+  return invoke('graph_source_serialize', { node })
+}
+
 export function queryGraph(query = {}) {
   return invoke('graph_query', { query: normalizeQuery(query) })
 }
@@ -24,6 +36,28 @@ export function searchGraph(query, { scopeIds = [], limit = 25 } = {}) {
     query: String(query || '').trim(),
     scopeIds: normalizeStrings(scopeIds),
     limit,
+  })
+}
+
+export function lookupGraph(query, { scopeIds = [], limit = 12 } = {}) {
+  return invoke('graph_lookup', {
+    query: String(query || '').trim(),
+    scopeIds: normalizeStrings(scopeIds),
+    limit: Math.min(50, Math.max(1, Math.floor(Number(limit) || 12))),
+  })
+}
+
+export function graphLinkTargets(ids, { scopeIds = [] } = {}) {
+  return invoke('graph_link_targets', {
+    ids: normalizeStrings(ids),
+    scopeIds: normalizeStrings(scopeIds),
+  })
+}
+
+export function graphReferences(id, { scopeIds = [] } = {}) {
+  return invoke('graph_references', {
+    id: requiredId(id),
+    scopeIds: normalizeStrings(scopeIds),
   })
 }
 
@@ -81,6 +115,7 @@ export function moveGraphNodeScope(request, actor = localGraphActor()) {
       id: requiredId(request.id),
       targetScopeId: requiredId(request.targetScopeId),
       ...(request.expectedRevision ? { expectedRevision: String(request.expectedRevision) } : {}),
+      ...(request.expectedSourcePath ? { expectedSourcePath: String(request.expectedSourcePath) } : {}),
     },
     actor,
   })

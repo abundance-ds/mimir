@@ -164,4 +164,41 @@ describe('external file sync', () => {
     expect(onReloaded).not.toHaveBeenCalled()
     sync.dispose()
   })
+
+  it.each(['graph', 'text'])('refreshes %s Graph tabs with a native revision snapshot', async kind => {
+    await files.openFile('/graph/item.md', 'before')
+    const file = files.currentFile
+    file.kind = kind
+    file.graph = { sourceRevision: 'old', draft: { title: 'Before' } }
+    files.refreshGraphDocument = vi.fn(async target => {
+      target.content = 'native source'
+      target.graph.sourceRevision = 'new'
+      return true
+    })
+    const sync = createSync()
+
+    await expect(sync.refreshChangedPaths({ paths: [file.path] })).resolves.toEqual([true])
+    expect(files.refreshGraphDocument).toHaveBeenCalledWith(file)
+    expect(readFile).not.toHaveBeenCalled()
+    expect(file.graph.sourceRevision).toBe('new')
+    expect(file.previewRevision).toBeUndefined()
+    expect(onReloaded).toHaveBeenCalledWith(file)
+    sync.dispose()
+  })
+
+  it('ignores raw event content for a dirty Graph draft and delegates its snapshot check', async () => {
+    await files.openFile('/graph/item.md', 'before')
+    const file = files.currentFile
+    file.kind = 'graph'
+    file.dirty = true
+    file.graph = { sourceRevision: 'old', draft: { title: 'My draft' } }
+    files.refreshGraphDocument = vi.fn(async () => false)
+    const sync = createSync()
+
+    expect(sync.applyEventContent({ path: file.path, content: 'unversioned source' })).toBe(false)
+    await vi.waitFor(() => expect(files.refreshGraphDocument).toHaveBeenCalledWith(file))
+    expect(file).toMatchObject({ content: 'before', dirty: true, graph: { sourceRevision: 'old', draft: { title: 'My draft' } } })
+    expect(onReloaded).not.toHaveBeenCalled()
+    sync.dispose()
+  })
 })

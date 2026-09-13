@@ -29,6 +29,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'path_exists', 'workspace_paths_status', 'create_dir', 'list_dir',
   // unified business graph
   'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
+  'graph_lookup', 'graph_link_targets', 'graph_references', 'graph_source', 'graph_source_save', 'graph_source_serialize',
   'graph_neighbors', 'graph_diagnostics', 'graph_refresh', 'graph_update',
   'graph_create', 'graph_move_scope', 'graph_delete', 'graph_restore', 'graph_migration_report',
   'graph_context', 'graph_events',

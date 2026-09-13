@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core'
+import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { ref, watch } from 'vue'
 import {
   createGraphNode,
@@ -39,6 +41,15 @@ export function useWorkspaceBootstrap({
   prepareEditorWorkspaceSwitch = () => {},
   requestWorkspaceSetup = async () => null,
 }) {
+  const graph = useBusinessGraphStore()
+  let disposed = false
+  let graphTransitionDepth = 0
+  const stopGraphSourceWatch = watch(() => graph.changedSources, change => {
+    if (!change || disposed || graphTransitionDepth || graph.loading) return
+    void Promise.resolve(editorFiles.refreshGraphDocuments?.(change)).catch(cause => {
+      if (!disposed) diagnostic.value = `Graph documents could not refresh: ${errorMessage(cause)}`
+    })
+  })
   const initialized = ref(false)
   const responsiveZone = ref('wide')
   const viewportWidth = ref(window.innerWidth)
@@ -300,9 +311,18 @@ export function useWorkspaceBootstrap({
   }
 
   async function openWorkspace(path, { persist = true, activate = true, create = false } = {}) {
+    if (disposed) return false
+    const previousPath = workspaceFiles.workspacePath
+    const mountIntent = { root: '', status: null }
+    let workspaceOpened = false
+    graphTransitionDepth += 1
     try {
-      const configuration = await ensureWorkspaceConfiguration(path, { create })
-      if (configuration === false) return false
+      const configuration = await ensureWorkspaceConfiguration(path, { create, mountIntent })
+      if (disposed) return false
+      if (configuration === false) {
+        await restoreGraphMount(mountIntent, previousPath)
+        return false
+      }
       if (create && configuration === null && window.__TAURI_INTERNALS__) {
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('create_dir', { path })
@@ -310,12 +330,18 @@ export function useWorkspaceBootstrap({
         await setManagedProjectEnabled(path, false)
       }
       await prepareEditorWorkspaceSwitch()
+      if (disposed) return false
       rememberActiveActivity(workspaceFiles.workspacePath)
       await workspaceFiles.openWorkspace(path)
+      if (disposed) return false
+      workspaceOpened = true
       if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
         void Promise.resolve(managedProjectStatus(path)).catch(() => {})
       }
-      const graphWarning = await mountBusinessGraph(path)
+      const graphWarning = await mountBusinessGraph(path, {
+        mountedStatus: mountIntent.root === String(path || '').trim() ? mountIntent.status : null,
+      })
+      if (disposed) return false
       ensureCoreActivities(path)
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
@@ -336,9 +362,13 @@ export function useWorkspaceBootstrap({
       queueInterruptedAgentsForActiveProject()
       return true
     } catch (cause) {
+      if (disposed) return false
+      if (!workspaceOpened) await restoreGraphMount(mountIntent, previousPath)
       const action = create ? 'be created' : 'open'
       diagnostic.value = `Workspace could not ${action}: ${errorMessage(cause)}`
       return false
+    } finally {
+      graphTransitionDepth -= 1
     }
   }
 
@@ -404,10 +434,12 @@ export function useWorkspaceBootstrap({
     }
   }
 
-  async function mountBusinessGraph(projectRoot = workspaceFiles.workspacePath) {
-    if (!projectRoot) return ''
+  async function mountBusinessGraph(projectRoot = workspaceFiles.workspacePath, { mountedStatus = null } = {}) {
+    if (disposed || !projectRoot) return ''
     try {
-      await openBusinessGraph(projectRoot)
+      const ready = await graph.start(projectRoot, { mountedStatus })
+      if (disposed || ready === false) return ''
+      await editorFiles.refreshGraphDocuments?.()
       return ''
     } catch (cause) {
       const message = `Business graph could not open: ${errorMessage(cause)}`
@@ -416,7 +448,13 @@ export function useWorkspaceBootstrap({
     }
   }
 
-  async function ensureWorkspaceConfiguration(path, { create = false } = {}) {
+  async function restoreGraphMount(intent, previousPath) {
+    if (!intent.root || disposed) return
+    if (previousPath) await mountBusinessGraph(previousPath)
+    else graph.reset()
+  }
+
+  async function ensureWorkspaceConfiguration(path, { create = false, mountIntent } = {}) {
     const workspace = String(path || '').trim()
     if (!workspace || !window.__TAURI_INTERNALS__) return null
     let teamRoot = ''
@@ -424,16 +462,24 @@ export function useWorkspaceBootstrap({
       const team = await teamRepositoryStatus()
       if (team?.managed) teamRoot = team.root
     } catch { /* Team setup is optional */ }
+    if (disposed) return false
     if (!teamRoot) return null
 
     let existing = null
     if (!create) existing = await loadWorkspaceConfig(workspace)
 
+    if (disposed) return false
     const graphRoot = create ? teamRoot : workspace
-    await openBusinessGraph(graphRoot)
+    // Setup reads the native index before the workspace is committed. Keep
+    // renderer listeners paused, then adopt this mount after setup succeeds.
+    graph.stop()
+    mountIntent.root = graphRoot
+    mountIntent.status = await openBusinessGraph(graphRoot)
+    if (disposed) return false
 
     if (existing?.project) {
       const linked = await getGraphNode(existing.project)
+      if (disposed) return false
       if (linked?.kind === 'project') return existing
     } else if (existing) {
       return existing
@@ -444,6 +490,7 @@ export function useWorkspaceBootstrap({
       kinds: ['project'],
       limit: 500,
     })
+    if (disposed) return false
     const projects = Array.isArray(result?.items) ? result.items : []
     const draft = await requestWorkspaceSetup({
       path: workspace,
@@ -453,12 +500,7 @@ export function useWorkspaceBootstrap({
         ? 'The linked Project is unavailable. Select another Project or None.'
         : '',
     })
-    if (!draft) {
-      if (workspaceFiles.workspacePath) {
-        await mountBusinessGraph(workspaceFiles.workspacePath)
-      }
-      return false
-    }
+    if (disposed || !draft) return false
 
     if (create) {
       await invoke('create_dir', { path: workspace })
@@ -571,6 +613,9 @@ export function useWorkspaceBootstrap({
   }
 
   function dispose() {
+    disposed = true
+    stopGraphSourceWatch()
+    graph.stop()
     automaticResumeEnabled = false
     automaticResumeQueue = []
     queuedAutomaticResumeIds.clear()

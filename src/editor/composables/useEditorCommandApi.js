@@ -6,6 +6,7 @@ import { inspectWorkspaceEntry } from '../../services/workspaceFileOperations.js
 import { basename } from '../../shared/utils/path.js'
 import { getCommentsFromState } from '../codemirror/comments.js'
 import { computeDiffFromReview } from './useProposalBridge.js'
+import { cloneGraphDocument } from '../../stores/graphDocuments.js'
 
 export function useEditorCommandApi({
   fileManager,
@@ -27,9 +28,11 @@ export function useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
+  onNavigateIntent = () => {},
 }) {
-  async function mimirOpen(path, { preview = false, entry = null, focus = true } = {}) {
+  async function mimirOpen(path, { preview = false, entry = null, focus = true, source = false } = {}) {
     if (!path) throw new Error('path is required')
+    onNavigateIntent()
     if (path.endsWith('/scratchpad.md') && window.__TAURI_INTERNALS__) {
       const canonical = await resolveScratchpad(path)
       if (canonical) { path = canonical; preview = false; entry = { openBehavior: 'text', scratchpad: true } }
@@ -50,23 +53,38 @@ export function useEditorCommandApi({
       inspected.textReadable === false ? 'external' : 'text'
     )
     const content = kind === 'text' ? await readFile(path) : ''
-    await fileManager.openFile(path, content, {
+    const file = await fileManager.openFile(path, content, {
       kind,
       preview,
       meta: inspected,
     })
+    if (source && file?.graph) await openSource(file)
     await nextTick()
-    if (kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
+    if (source && currentFile.value !== file) throw new Error('The active document changed. Open Source again.')
+    if (file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
     if (focus) emitNavigate({ path })
     if (kind === 'text' && focus) restoreEditorFocus()
     return mimirActive()
+  }
+
+  function requireSource() {
+    if (currentFile.value?.kind === 'graph') throw new Error('Open Source before editing the Markdown text.')
+  }
+
+  async function openSource(file) {
+    if (file.kind !== 'graph') return
+    if (!await fileManager.setGraphView(file, 'source')) {
+      throw new Error('Save the Graph draft before opening Source.')
+    }
+    if (currentFile.value !== file) throw new Error('The active document changed. Open Source again.')
   }
 
   function mimirActive({ includeContent = false } = {}) {
     flushEditorContent({ bridge: 'flush' })
     const file = currentFile.value
     if (!file) return null
-    const content = editorSurfaceRef.value?.getContent?.() ?? file.content ?? ''
+    const details = file.kind === 'graph'
+    const content = details ? file.content || '' : editorSurfaceRef.value?.getContent?.() ?? file.content ?? ''
     return {
       path: file.path || null,
       name: editorTabs.value[activeVisibleFileIndex.value]?.name || basename(file.path),
@@ -74,8 +92,12 @@ export function useEditorCommandApi({
       kind: file.kind || 'text',
       preview: Boolean(file.preview),
       index: activeVisibleFileIndex.value,
-      cursor: editorSurfaceRef.value?.getCursor?.() || null,
+      cursor: details ? null : editorSurfaceRef.value?.getCursor?.() || null,
       content: includeContent ? content : undefined,
+      ...(details && includeContent ? {
+        contentSource: 'saved',
+        graphDraft: cloneGraphDocument(file.graph?.draft || {}),
+      } : {}),
     }
   }
 
@@ -94,7 +116,7 @@ export function useEditorCommandApi({
     const active = mimirActive({ includeContent })
     const tabs = mimirTabs()
     const selection = mimirSelection()
-    const view = editorSurfaceRef.value?.getView?.()
+    const view = currentFile.value?.kind === 'graph' ? null : editorSurfaceRef.value?.getView?.()
     const comments = view ? getCommentsFromState(view.state) : []
     const visible = view?.visibleRanges?.[0]
     return {
@@ -118,11 +140,12 @@ export function useEditorCommandApi({
   }
 
   function mimirSelection() {
+    if (currentFile.value?.kind === 'graph') return null
     return editorSurfaceRef.value?.getSelection?.() || null
   }
 
   function mimirComments() {
-    const view = editorSurfaceRef.value?.getView()
+    const view = currentFile.value?.kind === 'graph' ? null : editorSurfaceRef.value?.getView()
     const comments = view ? getCommentsFromState(view.state) : []
     return {
       ...mimirActive(),
@@ -155,11 +178,12 @@ export function useEditorCommandApi({
           ],
         }
       }),
-      prompt: commentPrompt(comments[0]?.id),
+      prompt: view ? commentPrompt(comments[0]?.id) : '',
     }
   }
 
   function mimirCommentAction(action, commentId, text = '') {
+    requireSource()
     const handlers = {
       reply: id => commentMutations.addReply(id, text),
       resolve: commentMutations.resolve,
@@ -172,6 +196,7 @@ export function useEditorCommandApi({
   }
 
   function mimirReplaceSelection(text = '') {
+    requireSource()
     const selection = editorSurfaceRef.value?.getSelection?.()
     if (!selection) throw new Error('No active selection')
     editorSurfaceRef.value?.replaceRange(selection.from, selection.to, text)
@@ -183,6 +208,7 @@ export function useEditorCommandApi({
   }
 
   function mimirSetContent(content = '') {
+    requireSource()
     if (!currentFile.value) throw new Error('No document is open.')
     const current = editorSurfaceRef.value?.getContent?.() || ''
     editorSurfaceRef.value?.replaceRange(0, current.length, content)
@@ -190,11 +216,16 @@ export function useEditorCommandApi({
   }
 
   function mimirReviewProposal(proposal) {
+    requireSource()
     if (!proposal?.id || !proposal?.targetText) {
       throw new Error('A review proposal needs an id and targetText.')
     }
     const file = currentFile.value
     if (!file) throw new Error('No document is open.')
+    const targetPath = proposal.absolutePath || proposal.path
+    if (targetPath && targetPath !== file.path) {
+      throw new Error('This proposal belongs to another document. Open its Source tab before reviewing it.')
+    }
     flushEditorContent({ bridge: 'flush' })
     const review = {
       proposalId: proposal.id,
@@ -224,6 +255,7 @@ export function useEditorCommandApi({
   }
 
   async function mimirReveal({ path, line, column, offset, preview, entry } = {}) {
+    onNavigateIntent()
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
       if (typeof preview === 'boolean') {
@@ -237,11 +269,17 @@ export function useEditorCommandApi({
       }
     }
     const file = currentFile.value
+    if (file?.graph && [line, column, offset].some(Number.isFinite)) await openSource(file)
     if (file?.kind === 'text' && isSvgPath(file.path)
       && [line, column, offset].some(Number.isFinite)) {
       file.previewView = { ...file.previewView, sourceMode: true }
     }
     await nextTick()
+    if (file && currentFile.value !== file) throw new Error('The active document changed. Reveal the location again.')
+    if (file?.kind === 'graph') {
+      restoreEditorFocus()
+      return mimirActive()
+    }
     const view = editorSurfaceRef.value?.getView?.()
     let position = Number.isFinite(offset) ? offset : 0
     if (view && Number.isFinite(line) && line > 0) {
@@ -269,6 +307,7 @@ export function useEditorCommandApi({
   function mimirCycleTab(direction = 1) {
     const length = visibleOpenFiles.value.length
     if (length < 2) return false
+    onNavigateIntent()
     const next = (activeVisibleFileIndex.value + direction + length) % length
     fileManager.setActiveVisibleTab(next)
     return true

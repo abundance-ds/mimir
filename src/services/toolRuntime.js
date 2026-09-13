@@ -348,6 +348,13 @@ async function executeWorkspaceTool(request, options) {
   if (!alias) throw notFoundError(`Tool '${request.tool}' has no renderer handler.`)
 
   const editor = resolveEditor(options, false)
+  if (alias === 'edit' && request.input?.target === '@editor') {
+    const active = editor?.mimirActive?.()
+    if (active?.kind === 'graph') {
+      const opened = await editor.mimirOpen(active.path, { source: true })
+      requireProposalDocument(editor, opened)
+    }
+  }
   const workspacePath = options.getWorkspacePath?.()
     || request.context?.cwd
     || null
@@ -368,7 +375,10 @@ async function executeWorkspaceTool(request, options) {
 
 async function executeEditorProposal(request, options) {
   const editor = resolveEditor(options)
-  if (request.input?.path) await editor.mimirOpen(request.input.path)
+  if (request.input?.path) {
+    const opened = await editor.mimirOpen(request.input.path, { source: true })
+    requireProposalDocument(editor, opened)
+  }
   return executeWorkspaceTool({
     ...request,
     tool: 'files.edit',
@@ -379,6 +389,12 @@ async function executeEditorProposal(request, options) {
       rationale: request.input?.rationale,
     },
   }, options)
+}
+
+function requireProposalDocument(editor, opened) {
+  if (!opened?.path || editor.mimirActive()?.path !== opened.path) {
+    throw new Error('The active document changed. Start the proposal again.')
+  }
 }
 
 function createEditorProposalBridge(editor, request) {

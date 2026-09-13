@@ -193,7 +193,7 @@ class ImageWidget extends WidgetType {
   }
 }
 
-function buildDecorations(view, isEnabled, getFilePath) {
+function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => []) {
   const enabled = isEnabled()
   const { state } = view
 
@@ -211,6 +211,7 @@ function buildDecorations(view, isEnabled, getFilePath) {
   const end = Math.min(state.doc.length, vpTo + 500)
 
   const decos = []
+  const excludedLinks = ownedLinks(state)
 
   syntaxTree(state).iterate({
     from: start,
@@ -235,6 +236,7 @@ function buildDecorations(view, isEnabled, getFilePath) {
       if (!enabled) return
 
       if (name === 'FencedCode' || name === 'CodeBlock') return false
+      if (['Link', 'Autolink'].includes(name) && excludedLinks.some(link => link.from === nFrom && link.to === nTo)) return false
 
       const nodeLine = state.doc.lineAt(nFrom).number
       const onCursorLine = cursorLines.has(nodeLine)
@@ -610,12 +612,12 @@ const livePreviewTheme = EditorView.baseTheme({
   },
 })
 
-export function livePreviewExtension(isEnabled, getFilePath) {
+export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => []) {
   const plugin = ViewPlugin.fromClass(
     class {
       constructor(view) {
         this._enabled = isEnabled()
-        this.decorations = buildDecorations(view, isEnabled, getFilePath)
+        this.decorations = buildDecorations(view, isEnabled, getFilePath, ownedLinks)
       }
 
       update(update) {
@@ -629,7 +631,7 @@ export function livePreviewExtension(isEnabled, getFilePath) {
           update.startState.facet(EditorView.darkTheme) !== update.state.facet(EditorView.darkTheme)
         ) {
           this._enabled = nowEnabled
-          this.decorations = buildDecorations(update.view, isEnabled, getFilePath)
+          this.decorations = buildDecorations(update.view, isEnabled, getFilePath, ownedLinks)
         }
       }
     },

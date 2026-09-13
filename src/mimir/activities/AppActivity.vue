@@ -9,6 +9,7 @@
     @open-activity="$emit('openActivity', $event)"
     @start-work="$emit('startWork', $event)"
     @open-meeting="$emit('openMeeting', $event)"
+    @open-graph-node="$emit('openGraphNode', $event)"
     @diagnostic="$emit('diagnostic', $event)"
   />
   <ScribeApp

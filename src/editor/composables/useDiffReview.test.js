@@ -55,6 +55,131 @@ describe('useDiffReview proposal responses', () => {
     expect(diffStore.filePath).toBe('/doc.md')
   })
 
+  it('refuses a single-file response while Graph Details is active', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'new text', path: '/doc.md', review: { id: 'p1' } })
+    currentFile.value.kind = 'graph'
+    expect(() => review.activateDiffForCurrentFile('old text', 'new text')).toThrow('Open Source')
+    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Open Source') })
+    expect(currentFile.value.content).toBe('old text')
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('saves an unopened Graph batch source through its native revision gate', async () => {
+    const { diffStore, review } = makeReviewHarness()
+    diffStore.activateBatch({ fileList: [{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }] })
+    diffStore.acceptAllFiles()
+    invoke.mockImplementation(async command => command === 'graph_source'
+      ? { content: 'old', sourceRevision: 'revision-1' }
+      : undefined)
+
+    await expect(review.onBatchAllResolved()).resolves.toEqual({ ok: true })
+    expect(invoke).toHaveBeenCalledWith('graph_source_save', {
+      request: { path: '/graph/item.md', content: 'new', expectedRevision: 'revision-1' },
+    })
+    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+  })
+
+  it('retains native Graph identity from review creation when the source is later unmounted', async () => {
+    const { diffStore, review } = makeReviewHarness()
+    invoke.mockImplementation(async command => command === 'graph_source'
+      ? { content: 'old', sourceRevision: 'revision-1' }
+      : undefined)
+    await review.activateBatchDiff([{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }])
+    expect(diffStore.files[0].graphSourceRevision).toBe('revision-1')
+    invoke.mockReset().mockResolvedValue(null)
+    diffStore.acceptAllFiles()
+
+    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    expect(diffStore.files[0].error).toContain('unavailable')
+    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
+  })
+
+  it('guards Graph close throughout a pending single review decision and buffer update', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    const file = currentFile.value
+    file.kind = 'text'
+    file.graph = { sourceRevision: 'r1' }
+    diffStore.activate({ original: 'old text', modified: 'new text', path: file.path, review: { id: 'p1' } })
+    let finish
+    invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    fileManager.markDirty.mockImplementation(target => {
+      expect(target.reviewPending).toBe(true)
+      target.dirty = true
+    })
+    const decision = review.onDiffAcceptAll()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(file.reviewPending).toBe(true)
+    finish()
+    await expect(decision).resolves.toEqual({ ok: true })
+    expect(file).toMatchObject({ content: 'new text', dirty: true, reviewPending: false })
+  })
+
+  it('releases the Graph close guard when reporting fails', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    currentFile.value.graph = { sourceRevision: 'r1' }
+    diffStore.activate({ original: 'old text', modified: 'new text', path: '/doc.md', review: { id: 'p1' } })
+    invoke.mockRejectedValue(new Error('Registry offline'))
+    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false })
+    expect(currentFile.value.reviewPending).toBe(false)
+    expect(currentFile.value.content).toBe('old text')
+  })
+
+  it('keeps a conflicting unopened Graph batch source pending without a generic write fallback', async () => {
+    const { diffStore, review } = makeReviewHarness()
+    diffStore.activateBatch({ fileList: [{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }] })
+    diffStore.acceptAllFiles()
+    invoke.mockImplementation(async command => {
+      if (command === 'graph_source') return { content: 'old', sourceRevision: 'revision-1' }
+      if (command === 'graph_source_save') throw new Error('Graph source changed on disk')
+    })
+
+    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    expect(diffStore.files[0]).toMatchObject({ status: 'pending', error: 'Graph source changed on disk' })
+    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
+  })
+
+  it.each([
+    { kind: 'graph', dirty: true, unavailable: false },
+    { kind: 'text', dirty: false, unavailable: true },
+  ])('protects an open Graph draft or unavailable source: %j', async state => {
+    const { diffStore, fileManager, review } = makeReviewHarness()
+    const target = { id: 8, path: '/graph/item.md', content: 'old', ...state, graph: { sourceRevision: 'old', unavailable: state.unavailable } }
+    fileManager.openFiles.push(target)
+    fileManager.save = vi.fn()
+    fileManager.setGraphView = vi.fn()
+    diffStore.activateBatch({ fileList: [{ path: target.path, original: 'old', modified: 'new', proposalId: 'p1' }] })
+    diffStore.acceptAllFiles()
+
+    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    expect(target.content).toBe('old')
+    expect(fileManager.save).not.toHaveBeenCalled()
+    expect(fileManager.setGraphView).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('uses the open Graph save queue and preserves edits made during its write', async () => {
+    const { diffStore, fileManager, review } = makeReviewHarness()
+    const target = { id: 8, path: '/graph/item.md', kind: 'text', content: 'old', dirty: false, graph: { sourceRevision: 'old' } }
+    fileManager.openFiles.push(target)
+    fileManager.markDirty.mockImplementation(file => { file.dirty = true })
+    fileManager.save = vi.fn(async file => {
+      expect(file.content).toBe('new')
+      file.content = 'edit during save'
+      file.graph.sourceRevision = 'new revision'
+      return false
+    })
+    diffStore.activateBatch({ fileList: [{ path: target.path, original: 'old', modified: 'new', proposalId: 'p1' }] })
+    diffStore.acceptAllFiles()
+
+    await expect(review.onBatchAllResolved()).resolves.toEqual({ ok: true })
+    expect(fileManager.save).toHaveBeenCalledWith(target)
+    expect(target).toMatchObject({ content: 'edit during save', dirty: true, graph: { sourceRevision: 'new revision' } })
+    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+  })
+
   it('does not resolve a single-file review against another active tab', async () => {
     const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
     const target = currentFile.value

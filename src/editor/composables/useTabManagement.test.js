@@ -30,6 +30,8 @@ function setup({
       return true
     }),
     waitForWorkspacePaths: vi.fn(async () => {}),
+    pauseGraphSave: vi.fn(),
+    resumeGraphSave: vi.fn(),
     moveTab: vi.fn(),
     newFile: vi.fn(),
   }
@@ -138,6 +140,25 @@ describe('useTabManagement close safety', () => {
       discardedFiles: [file],
     })
     expect(h.saveCurrentFile).not.toHaveBeenCalled()
+  })
+
+  it('pauses Graph autosave for close confirmation and resumes it on Cancel', async () => {
+    const h = setup({ files: [{ id: 1, path: '/graph/entry.md', kind: 'graph', graph: {}, dirty: true }] })
+    const file = h.fileManager.openFiles[0]
+    const closing = h.manager.confirmFileClose(file)
+    await nextTick()
+    expect(h.fileManager.pauseGraphSave).toHaveBeenCalledWith(file)
+    expect(h.fileManager.resumeGraphSave).not.toHaveBeenCalled()
+    await choose(h.manager, 'cancel')
+    expect(await closing).toBe('cancel')
+    expect(h.fileManager.resumeGraphSave).toHaveBeenCalledWith(file)
+  })
+
+  it('keeps a Graph tab open until its review decision finishes', async () => {
+    const h = setup({ files: [{ id: 1, path: '/graph/entry.md', graph: {}, dirty: false, reviewPending: true }] })
+    expect(await h.manager.confirmFileClose(h.fileManager.openFiles[0])).toBe('cancel')
+    expect(h.manager.closeConfirmFile.value).toBeNull()
+    expect(h.fileManager.closeFile).not.toHaveBeenCalled()
   })
 
   it('cancels close when the dialog is cancelled or a manual save fails', async () => {

@@ -1,5 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 import { EditorView } from '@codemirror/view'
+import { graphLinkId, graphReferencesIn } from './graphLinkSyntax.js'
 
 const WINDOWS_ABSOLUTE = /^[a-zA-Z]:[\\/]/
 const URI_SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
@@ -8,6 +9,8 @@ export function markdownLinkDestination(raw) {
   let target = String(raw || '').trim()
   if (target.startsWith('<') && target.endsWith('>')) target = target.slice(1, -1).trim()
   if (!target || target.startsWith('#')) return null
+  const graphId = graphLinkId(target)
+  if (graphId) return { kind: 'graph', target: graphId }
   if (WINDOWS_ABSOLUTE.test(target)) return { kind: 'file', target }
   if (URI_SCHEME.test(target)) {
     let url
@@ -31,19 +34,21 @@ export function markdownLinkDestination(raw) {
 function linkDestinationIn(node, state) {
   for (let current = node; current; current = current.parent) {
     if (current.name === 'URL') {
-      return markdownLinkDestination(state.sliceDoc(current.from, current.to))
+      const destination = markdownLinkDestination(state.sliceDoc(current.from, current.to))
+      return destination?.kind === 'graph' ? null : destination
     }
     if (current.name === 'Link' || current.name === 'Image' || current.name === 'Autolink') {
       const url = current.getChild('URL')
-      return url
-        ? markdownLinkDestination(state.sliceDoc(url.from, url.to))
-        : null
+      const destination = url ? markdownLinkDestination(state.sliceDoc(url.from, url.to)) : null
+      return destination?.kind === 'graph' ? null : destination
     }
   }
   return null
 }
 
 export function linkDestinationAt(state, pos) {
+  const graphReference = graphReferencesIn(state).find(reference => reference.from <= pos && reference.to >= pos)
+  if (graphReference) return { kind: 'graph', target: graphReference.targetId }
   const tree = ensureSyntaxTree(state, state.doc.length, 200) || syntaxTree(state)
   // A caret position lands between characters. Check both sides so a click at
   // either edge of a link still resolves to it.
@@ -79,10 +84,11 @@ export function markdownLinkOpen({
   preserveRenderedLink = false,
   onOpenFile = () => {},
   onOpenUrl = () => {},
+  onOpenGraph = () => {},
 }) {
   return EditorView.domEventHandlers({
     mousedown(event, view) {
-      if (!enabled() || !preserveRenderedLink) return false
+      if (!enabled(view, event) || !preserveRenderedLink) return false
       const destination = linkDestinationForClick(event, view, selector)
       if (!destination) return false
       // Live Preview reveals Markdown syntax when the caret enters the line.
@@ -91,11 +97,12 @@ export function markdownLinkOpen({
       return true
     },
     click(event, view) {
-      if (!enabled()) return false
+      if (!enabled(view, event)) return false
       const destination = linkDestinationForClick(event, view, selector)
       if (!destination) return false
       event.preventDefault()
       if (destination.kind === 'url') onOpenUrl(destination.target)
+      else if (destination.kind === 'graph') onOpenGraph(destination.target)
       else onOpenFile(destination.target)
       return true
     },

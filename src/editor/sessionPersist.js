@@ -18,12 +18,12 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
   const discarded = new Set(discardedFiles.map(fileIdentity))
 
   for (const [sourceIndex, file] of files.entries()) {
-    if (file.kind && file.kind !== 'text') continue
+    if (file.kind && !['text', 'graph'].includes(file.kind)) continue
     if (discarded.has(fileIdentity(file))) {
       // "Don't Save" means disk is authoritative for path-backed files and
       // an untitled draft must not resurrect on the next launch.
       if (file.path) {
-        persistedFiles.push(pathSessionEntry(file))
+        persistedFiles.push(pathSessionEntry(file, {}, { discard: true }))
         sourceIndexes.push(sourceIndex)
       }
       continue
@@ -53,10 +53,16 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
   }
 }
 
-function pathSessionEntry(file, extra = {}) {
+function pathSessionEntry(file, extra = {}, { discard = false } = {}) {
   return {
     path: file.path,
     ...(file.workspacePath ? { workspacePath: file.workspacePath } : {}),
+    ...(file.graph ? {
+      kind: file.kind,
+      graph: discard || !file.dirty
+        ? { nodeId: file.graph.node?.id || file.graph.nodeId, restoreView: file.kind }
+        : JSON.parse(JSON.stringify(file.graph)),
+    } : {}),
     ...extra,
   }
 }

@@ -32,10 +32,12 @@ export function normalizeSessionEntries(
       continue
     }
     sourceToEntry.set(sourceIndex, existingIndex)
-    if (sourceIndex === activeFileIndex) {
+    const previous = entries[existingIndex]
+    if ((entry.dirty && !previous.dirty) || (sourceIndex === activeFileIndex && Boolean(previous.dirty) === Boolean(entry.dirty))) {
       entries[existingIndex] = {
         ...entry,
         draftId: entries[existingIndex].draftId || entry.draftId,
+        ...(!entry.graph && previous.graph ? { graph: previous.graph, kind: entry.kind || 'text' } : {}),
       }
     }
   }
@@ -97,10 +99,13 @@ function normalizeEntry(raw) {
       ? raw.workspacePath.trim()
       : ''
     const ownership = workspacePath ? { workspacePath } : {}
+    const graph = raw.graph && typeof raw.graph === 'object'
+      ? { graph: raw.graph, kind: raw.kind === 'graph' ? 'graph' : 'text' }
+      : {}
     if (raw.dirty === true && typeof raw.content === 'string') {
-      return { path, ...ownership, content: raw.content, dirty: true }
+      return { path, ...ownership, ...graph, content: raw.content, dirty: true }
     }
-    return { path, ...ownership }
+    return { path, ...ownership, ...graph }
   }
   const content = typeof raw.content === 'string' ? raw.content : ''
   if (!content) return null

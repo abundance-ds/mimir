@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../services/businessGraph.js', () => ({
@@ -11,12 +11,16 @@ vi.mock('../services/businessGraph.js', () => ({
   listenForGraphChanges: vi.fn(),
   openBusinessGraph: vi.fn(),
   queryGraph: vi.fn(),
+  refreshBusinessGraph: vi.fn(),
   restoreGraphNode: vi.fn(),
   searchGraph: vi.fn(),
   updateGraphNode: vi.fn(),
 }))
 
 import {
+  createGraphNode,
+  deleteGraphNode,
+  restoreGraphNode,
   getGraphNode,
   graphDiagnostics,
   graphEvents,
@@ -24,6 +28,7 @@ import {
   listenForGraphChanges,
   openBusinessGraph,
   queryGraph,
+  refreshBusinessGraph,
   searchGraph,
   updateGraphNode,
 } from '../services/businessGraph.js'
@@ -87,6 +92,8 @@ describe('business graph store', () => {
     }))
   })
 
+  afterEach(() => useBusinessGraphStore().stop())
+
   it('mounts and composes all physical scopes by default', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
@@ -105,6 +112,122 @@ describe('business graph store', () => {
     expect(store.issues).toHaveLength(1)
     expect(store.projects).toHaveLength(1)
     expect(store.scopeCounts['project:alpha']).toBe(1)
+  })
+
+  it('adopts a native setup mount without opening it again', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha', { mountedStatus: { scopes, graphRevision: 4 } })
+    expect(openBusinessGraph).not.toHaveBeenCalled()
+    expect(listenForGraphChanges).toHaveBeenCalledOnce()
+    expect(store.projectRoot).toBe('/alpha')
+    expect(store.nodes).toEqual(summaries)
+  })
+
+  it('cannot restore a stopped store from a late native mount', async () => {
+    const store = useBusinessGraphStore()
+    let finish
+    openBusinessGraph.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const pending = store.start('/alpha')
+    store.stop()
+    finish({ scopes, graphRevision: 1 })
+    expect(await pending).toBe(false)
+    expect(store.loading).toBe(false)
+    expect(store.status).toBeNull()
+    expect(listenForGraphChanges).not.toHaveBeenCalled()
+    expect(queryGraph).not.toHaveBeenCalled()
+  })
+
+  it('cleans up a listener that arrives after the store stops', async () => {
+    const store = useBusinessGraphStore()
+    let finish
+    const cleanup = vi.fn()
+    listenForGraphChanges.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const pending = store.start('/alpha')
+    await Promise.resolve()
+    expect(listenForGraphChanges).toHaveBeenCalledOnce()
+    store.stop()
+    finish(cleanup)
+    expect(await pending).toBe(false)
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect(queryGraph).not.toHaveBeenCalled()
+    listenForGraphChanges.mock.calls[0][0]({ graphRevision: 2 })
+    expect(store.changedSources).toBeNull()
+  })
+
+  it('discards the previous mount query after a new workspace is loaded', async () => {
+    const store = useBusinessGraphStore()
+    let finish
+    queryGraph.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const oldMount = store.start('/old')
+    await vi.waitFor(() => expect(queryGraph).toHaveBeenCalledOnce())
+    await store.start('/alpha')
+    finish({ items: [{ id: 'old-only' }], total: 1, graphRevision: 99 })
+    expect(await oldMount).toBe(false)
+    expect(store.projectRoot).toBe('/alpha')
+    expect(store.nodes).toEqual(summaries)
+    expect(store.status.graphRevision).toBe(1)
+  })
+
+  it('returns created and restored entries without opening an inspector', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    const node = { ...summaries[0], properties: {}, provenance: { sourceRevision: 'created-rev' } }
+    createGraphNode.mockResolvedValueOnce(node)
+    expect(await store.create({ kind: 'issue', title: node.title })).toEqual(node)
+    expect(getGraphNode).not.toHaveBeenCalled()
+    expect(store.selectedNode).toBeNull()
+    store.lastDeletion = { undoToken: 'undo' }
+    restoreGraphNode.mockResolvedValueOnce(node)
+    expect(await store.undoDelete()).toEqual(node)
+    expect(restoreGraphNode).toHaveBeenCalledWith('undo')
+    expect(getGraphNode).not.toHaveBeenCalled()
+    expect(store.selectedNode).toBeNull()
+  })
+
+  it('preserves explicit source identity and revision guards on deletion', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    deleteGraphNode.mockResolvedValueOnce({ id: 'issue-1', undoToken: 'undo' })
+    await store.remove('issue-1', 'editor-rev', '/alpha/issue-1.md')
+    expect(deleteGraphNode).toHaveBeenCalledWith({
+      id: 'issue-1', expectedRevision: 'editor-rev', expectedSourcePath: '/alpha/issue-1.md',
+    })
+    expect(store.lastDeletion).toMatchObject({ id: 'issue-1', title: 'Extract evidence', undoToken: 'undo' })
+  })
+
+  it('reconciles disk before reloading an explicit Refresh', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    queryGraph.mockClear()
+    let finish
+    refreshBusinessGraph.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const pending = store.refresh({ reconcile: true })
+    expect(store.refreshing).toBe(true)
+    expect(refreshBusinessGraph).toHaveBeenCalledOnce()
+    expect(queryGraph).not.toHaveBeenCalled()
+    finish({ graphRevision: 2 })
+    await pending
+    expect(queryGraph).toHaveBeenCalledOnce()
+    expect(store.refreshing).toBe(false)
+    store.stop()
+  })
+
+  it('keeps watcher, scope, and quiet reloads free of full disk scans', async () => {
+    vi.useFakeTimers()
+    const store = useBusinessGraphStore()
+    try {
+      await store.start('/alpha')
+      const onChanged = listenForGraphChanges.mock.calls[0][0]
+      onChanged({ graphRevision: 2 })
+      await vi.advanceTimersByTimeAsync(80)
+      await store.setScopes(['team:main'])
+      await store.refresh({ quiet: true })
+      expect(queryGraph).toHaveBeenCalledTimes(4)
+      expect(refreshBusinessGraph).not.toHaveBeenCalled()
+    } finally {
+      store.stop()
+      vi.useRealTimers()
+    }
   })
 
   it('includes Team when it mounts after an initially complete Project view', async () => {
@@ -126,7 +249,7 @@ describe('business graph store', () => {
 
     await store.start('/alpha')
     expect(store.activeScopeIds).toEqual(withoutTeam.map(scope => scope.id))
-    await store.start('/alpha', '/team')
+    await store.start('/alpha')
 
     expect(store.activeScopeIds).toEqual(scopes.map(scope => scope.id))
     expect(queryGraph).toHaveBeenLastCalledWith({
@@ -154,7 +277,7 @@ describe('business graph store', () => {
 
     await store.start('/alpha')
     await store.setScopes(['project:alpha'])
-    await store.start('/alpha', '/team')
+    await store.start('/alpha')
 
     expect(store.activeScopeIds).toEqual(['project:alpha'])
   })
@@ -212,33 +335,6 @@ describe('business graph store', () => {
     })
     expect(page.items).toHaveLength(620)
     expect(store.eventOffset).toBe(50)
-  })
-
-  it('navigates object history in both directions and restores projection origin', async () => {
-    const store = useBusinessGraphStore()
-    await store.start('/alpha')
-    store.section = 'all'
-    store.view = 'list'
-
-    await store.openNode('project-alpha')
-    store.section = 'work'
-    await store.openNode('issue-1')
-
-    expect(store.inspectionHistory.map(item => item.id)).toEqual(['project-alpha', 'issue-1'])
-    expect(store.historyBack.id).toBe('project-alpha')
-    expect(store.historyForward).toBeNull()
-
-    await store.navigateHistory(-1)
-    expect(store.selectedNode.id).toBe('project-alpha')
-    expect(store.section).toBe('all')
-    expect(store.view).toBe('list')
-    expect(store.historyBack).toBeNull()
-    expect(store.historyForward.id).toBe('issue-1')
-
-    await store.navigateHistory(1)
-    expect(store.selectedNode.id).toBe('issue-1')
-    expect(store.section).toBe('work')
-    expect(store.historyForward).toBeNull()
   })
 
   it('filters all loaded Work items by linked names and terms without the content-search limit', async () => {

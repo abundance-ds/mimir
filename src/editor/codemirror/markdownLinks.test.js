@@ -3,6 +3,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { describe, expect, it, vi } from 'vitest'
 import {
   linkDestinationForClick,
+  linkDestinationAt,
   markdownLinkDestination,
   resolveMarkdownFileTarget,
 } from './markdownLinks.js'
@@ -26,6 +27,17 @@ describe('Markdown link destinations', () => {
     })
     expect(markdownLinkDestination('javascript:alert(1)')).toBeNull()
     expect(markdownLinkDestination('#components')).toBeNull()
+  })
+
+  it('routes graph URLs separately and never treats unsupported custom URLs as files', () => {
+    expect(markdownLinkDestination('mimir://graph/jon')).toEqual({ kind: 'graph', target: 'jon' })
+    for (const target of ['mimir://other/jon', 'mimir://graph/jon#heading', 'mimir://graph/jon?x=1', 'MIMIR://graph/jon']) {
+      expect(markdownLinkDestination(target)).toBeNull()
+    }
+    const reference = '[Jon][person]\n\n[person]: mimir://graph/jon'
+    expect(linkDestinationAt(stateFor(reference), 2)).toEqual({ kind: 'graph', target: 'jon' })
+    const image = '![Jon](mimir://graph/jon)'
+    expect(linkDestinationAt(stateFor(image), image.indexOf('mimir') + 2)).toBeNull()
   })
 
   it('recognizes a click only on the requested rendered-link class', () => {

@@ -5,7 +5,11 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const graph = vi.hoisted(() => ({
-  openBusinessGraph: vi.fn(async () => {}),
+  openBusinessGraph: vi.fn(async () => ({ scopes: [], graphRevision: 0 })),
+  queryGraph: vi.fn(async () => ({ items: [], total: 0 })),
+  graphDiagnostics: vi.fn(async () => []),
+  graphEvents: vi.fn(async () => ({ items: [], total: 0 })),
+  listenForGraphChanges: vi.fn(async () => vi.fn()),
 }))
 
 vi.mock('../../services/businessGraph.js', () => graph)

@@ -331,4 +331,35 @@ describe('Editor lifecycle controllers', () => {
 
     lifecycle.dispose()
   })
+
+  it('keeps Graph proposals attached to Details until Source is selected in the same tab', async () => {
+    const files = ref([{ path: '/graph/item.md', content: 'hello world', kind: 'graph', dirty: true }])
+    const file = files.value[0]
+    const fileManager = {
+      get openFiles() { return files.value },
+      activeFileIndex: 0,
+      get currentFile() { return file },
+      setFileReviews: vi.fn((target, reviews) => { target.reviews = reviews }),
+      clearFileReviews: vi.fn(),
+    }
+    const diffStore = { active: false, activate: vi.fn(), deactivate: vi.fn() }
+    const lifecycle = useEditorProposalLifecycle({
+      fileManager,
+      diffStore,
+      openFiles: files,
+      activeFileIndex: ref(0),
+      currentEditorContent: () => file.content,
+      flushEditorContent: vi.fn(),
+      editorSurfaceRef: ref(null),
+      activateDiff: vi.fn(),
+      activateBatchDiff: vi.fn(),
+    })
+    lifecycle.onProposalsChanged({ payload: [{ id: 'p1', path: file.path, targetText: 'world', replacement: 'Mimir' }] })
+    expect(file.reviews).toHaveLength(1)
+    expect(diffStore.activate).not.toHaveBeenCalled()
+    file.kind = 'text'
+    await Promise.resolve()
+    expect(diffStore.activate).toHaveBeenCalledWith(expect.objectContaining({ original: 'hello world', modified: 'hello Mimir' }))
+    lifecycle.dispose()
+  })
 })

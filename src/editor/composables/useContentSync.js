@@ -10,6 +10,7 @@ export function useContentSync({
   let confirmedFileId = null
 
   function currentEditorContent() {
+    if (currentFile.value?.kind === 'graph') return currentFile.value.content || ''
     return editorSurfaceRef.value?.getContent?.() ?? currentFile.value?.content ?? ''
   }
 
@@ -23,6 +24,7 @@ export function useContentSync({
     clearTimeout(contentSyncTimer)
     const file = currentFile.value
     if (!file) return ''
+    if (file.kind === 'graph') return file.content || ''
     if (confirmedFileId !== null && file.id !== confirmedFileId) {
       syncDerivedContent(file.content || '', options)
       return file.content || ''

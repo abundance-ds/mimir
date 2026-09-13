@@ -4,6 +4,9 @@ import { useScratchpadStore } from './scratchpad.js'
 import { resolveScratchpad } from '../services/scratchpad.js'
 import { openFileDialog, saveFileDialog, saveFile } from '../services/fileSystem.js'
 import { SAVE_STATE } from '../shared/saveState.js'
+import { getGraphNode, graphSource, saveGraphSource } from '../services/businessGraph.js'
+import { useBusinessGraphStore } from './businessGraph.js'
+import { cloneGraphDocument, graphDocumentState, graphExportContent, isGraphSourceCandidate, restoredGraphState, writeGraphDocument, GRAPH_UNAVAILABLE } from './graphDocuments.js'
 
 const RECENT_LIMIT = 12
 let nextFileId = 1
@@ -23,6 +26,9 @@ export const useFileStore = defineStore('files', () => {
   const sessionHydrated = ref(false)
   let sessionHydrationPromise = null
   const writesByFileId = new Map()
+  const graphSaveTimers = new Map()
+  const pausedGraphSaves = new Set()
+  const graphRefreshVersions = new Map()
 
   const visibleOpenFiles = computed(() => openFiles.value.filter(isFileVisible))
   const visibleRecentFiles = computed(() => {
@@ -159,17 +165,66 @@ export const useFileStore = defineStore('files', () => {
     return error instanceof Error ? error.message : String(error || 'Save failed')
   }
 
-  async function writeFile(file) {
+  async function writeFile(file, { graphOperation = null } = {}) {
     if (!file?.path) return false
     const targetPath = file.path
     const targetContent = file.content
+    const graphSnapshot = file.graph ? {
+      graph: cloneGraphDocument(file.graph), content: targetContent, kind: graphOperation || file.kind, path: targetPath,
+    } : null
     const previous = writesByFileId.get(file.id) || Promise.resolve()
     file.saveState = SAVE_STATE.saving
     file.saveError = null
     let operation
     const execute = async () => {
         try {
-          if (targetPath === scratchpad.path) {
+          if (graphSnapshot) {
+            // A title/body save queued during close Undo must retain Undo's
+            // reopened status unless this draft changed status itself.
+            if (graphSnapshot.kind === 'graph' && graphSnapshot.graph.node?.kind === 'issue'
+              && graphSnapshot.graph.draft.status === graphSnapshot.graph.node.properties?.status) {
+              graphSnapshot.graph.draft.status = file.graph.node?.properties?.status || 'backlog'
+            }
+            graphSnapshot.graph.node = cloneGraphDocument(file.graph.node)
+            graphSnapshot.graph.sourceRevision = file.graph.sourceRevision
+            graphSnapshot.path = file.path
+            const result = await writeGraphDocument(file, graphSnapshot, useBusinessGraphStore().nodes)
+            file.path = result.path
+            const latest = graphDocumentState(result.document)
+            const unchanged = file.graph.version === graphSnapshot.graph.version
+              && (graphSnapshot.kind !== 'text' || file.content === targetContent)
+            let currentDraft = file.graph.draft
+            if (graphSnapshot.kind === 'undo-close' && !unchanged) {
+              currentDraft = Object.fromEntries(Object.entries(currentDraft).map(([key, value]) => [
+                key,
+                JSON.stringify(value) === JSON.stringify(graphSnapshot.graph.draft[key])
+                  ? cloneGraphDocument(latest.draft[key]) : value,
+              ]))
+            }
+            const version = file.graph.version
+            const isLatestWrite = writesByFileId.get(file.id) === operation
+            const previousStatus = graphSnapshot.graph.node?.properties?.status
+            const closed = status => ['done', 'cancelled'].includes(status)
+            const closedUndo = graphSnapshot.kind === 'graph' && latest.node?.kind === 'issue'
+              && !closed(previousStatus) && closed(latest.node.properties?.status)
+              ? {
+                  nodeId: latest.node.id, status: previousStatus || 'backlog',
+                  rank: graphSnapshot.graph.node.properties?.rank ?? null,
+                  sourcePath: result.path, sourceRevision: latest.sourceRevision,
+                }
+              : file.graph.closedUndo?.sourceRevision === latest.sourceRevision ? file.graph.closedUndo : null
+            Object.assign(file.graph, latest, {
+              draft: unchanged ? latest.draft : currentDraft,
+              nodeId: latest.nodeId || file.graph.nodeId || graphSnapshot.graph.node?.id,
+              version, closedUndo,
+            })
+            if (unchanged || file.kind === 'graph') file.content = result.document.content
+            file.dirty = !unchanged || !isLatestWrite
+            file.saveState = isLatestWrite ? (unchanged ? SAVE_STATE.saved : SAVE_STATE.dirty) : SAVE_STATE.saving
+            file.saveError = null
+            if (!unchanged && isLatestWrite && file.kind === 'graph') scheduleGraphSave(file)
+            return unchanged
+          } else if (targetPath === scratchpad.path) {
             await scratchpad.save(targetContent, file.scratchpadBase ?? file.content)
             file.scratchpadBase = targetContent
           } else {
@@ -186,7 +241,8 @@ export const useFileStore = defineStore('files', () => {
           return isCurrentSnapshot
         } catch (error) {
           if (writesByFileId.get(file.id) === operation) {
-            file.dirty = true
+            file.dirty = graphSnapshot?.kind !== 'undo-close'
+              || file.graph.version !== graphSnapshot.graph.version
             file.saveState = SAVE_STATE.failed
             file.saveError = normalizeSaveError(error)
           }
@@ -264,6 +320,8 @@ export const useFileStore = defineStore('files', () => {
     preview = false,
     meta = null,
     workspacePath,
+    graphDocument = null,
+    isCurrent = () => true,
   } = {}) {
     if (path?.endsWith('/scratchpad.md') && typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
       const canonical = await resolveScratchpad(path)
@@ -273,6 +331,12 @@ export const useFileStore = defineStore('files', () => {
         meta = { ...meta, scratchpad: true }
       }
     }
+    const open = openFiles.value.find(file => file.path === path)
+    if (!open?.graph && !graphDocument && kind === 'text' && isGraphSourceCandidate(path)) {
+      graphDocument = await graphSource(path)
+    }
+    if (!isCurrent()) return null
+    // Recheck after native classification: concurrent opens share one tab.
     const active = currentFile.value
     const existingIdx = openFiles.value.findIndex(f => f.path === path)
     if (existingIdx !== -1) {
@@ -285,8 +349,22 @@ export const useFileStore = defineStore('files', () => {
         activeFileIndex.value = existingIdx
       }
       const existing = openFiles.value[activeFileIndex.value]
-      existing.kind = kind
-      existing.meta = meta
+      // Selecting an already-open path must not replace its rich draft or mode.
+      if (!existing.graph) {
+        if (graphDocument) {
+          existing.graph = graphDocumentState(graphDocument)
+          if (existing.dirty) {
+            // This buffer predates Graph classification. Do not invent a
+            // current-disk baseline for older unsaved source text.
+            existing.graph.sourceRevision = ''
+            existing.kind = 'text'
+          } else {
+            existing.content = graphDocument.content
+            existing.kind = kind === 'graph' && graphDocument.node ? 'graph' : 'text'
+          }
+        } else existing.kind = kind
+        existing.meta = meta
+      }
       if (!preview) existing.preview = false
       const owner = owningWorkspacePath(path, [workspacePath, ...knownWorkspacePaths.value])
       if (owner) existing.workspacePath = owner
@@ -294,8 +372,12 @@ export const useFileStore = defineStore('files', () => {
       return existing
     }
 
+    if (graphDocument) {
+      content = graphDocument.content
+      if (!graphDocument.node) kind = 'text'
+    }
     const reusablePreviewIndex = preview
-      ? openFiles.value.findIndex(file => file.preview && !file.dirty && isFileVisible(file))
+      ? openFiles.value.findIndex(file => file.preview && !file.dirty && !file.reviewPending && !file.reviews?.length && !writesByFileId.has(file.id) && isFileVisible(file))
       : -1
     const replacementIndex = active?.newTab
       ? activeFileIndex.value
@@ -312,6 +394,11 @@ export const useFileStore = defineStore('files', () => {
       replacement.previewView = null
       replacement.previewRevision = 0
       replacement.meta = meta
+      clearTimeout(graphSaveTimers.get(replacement.id))
+      graphSaveTimers.delete(replacement.id)
+      pausedGraphSaves.delete(replacement.id)
+      graphRefreshVersions.delete(replacement.id)
+      replacement.graph = graphDocument ? graphDocumentState(graphDocument) : null
       replacement.workspacePath = owningWorkspacePath(path, [
         workspacePath,
         ...knownWorkspacePaths.value,
@@ -326,6 +413,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     const file = makeFile({ path, content, kind, preview, meta, workspacePath })
+    if (graphDocument) file.graph = graphDocumentState(graphDocument)
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     addRecentFile(path)
@@ -356,7 +444,7 @@ export const useFileStore = defineStore('files', () => {
     return file
   }
 
-  function restorePath({ path, content = '', dirty = false, workspacePath } = {}) {
+  function restorePath({ path, content = '', dirty = false, workspacePath, graph = null, kind = 'text' } = {}) {
     if (!path) return null
     const existing = openFiles.value.find((file) => file.path === path)
     if (existing) {
@@ -368,7 +456,13 @@ export const useFileStore = defineStore('files', () => {
       content: String(content),
       dirty: Boolean(dirty),
       workspacePath,
+      kind,
     })
+    file.graph = graph ? restoredGraphState(graph) : null
+    if (file.graph?.unavailable) {
+      file.saveState = SAVE_STATE.failed
+      file.saveError = GRAPH_UNAVAILABLE
+    }
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     return file
@@ -469,13 +563,14 @@ export const useFileStore = defineStore('files', () => {
     const file = currentFile.value
     if (!file || file.kind !== 'text') return
     file.content = content
+    if (file.graph) file.graph.version += 1
     file.newTab = false
     file.preview = false
     markFileDirty(file)
   }
 
   function markDirty(file = currentFile.value) {
-    if (!file || !openFiles.value.includes(file) || file.kind !== 'text') return
+    if (!file || !openFiles.value.includes(file) || !['text', 'graph'].includes(file.kind)) return
     file.preview = false
     markFileDirty(file)
   }
@@ -489,6 +584,7 @@ export const useFileStore = defineStore('files', () => {
       || !openFiles.value.includes(file)
       || !file.path
       || file.kind !== 'text'
+      || file.graph
       || file.dirty
     ) {
       return false
@@ -521,6 +617,10 @@ export const useFileStore = defineStore('files', () => {
   function closeFile(idx, { ensureOne = true } = {}) {
     const file = openFiles.value[idx]
     if (!file) return
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+    pausedGraphSaves.delete(file.id)
+    graphRefreshVersions.delete(file.id)
 
     openFiles.value.splice(idx, 1)
     if (openFiles.value.length === 0) {
@@ -549,8 +649,11 @@ export const useFileStore = defineStore('files', () => {
 
   // Save current file
   async function save(file = currentFile.value) {
-    if (!file || file.kind !== 'text') return false
+    if (!file || !['text', 'graph'].includes(file.kind)) return false
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
     if (file.path) {
+      if (!file.graph && isGraphSourceCandidate(file.path)) await classifyGraphDocument(file)
       return await writeFile(file)
     } else {
       return await saveAs(file)
@@ -559,6 +662,26 @@ export const useFileStore = defineStore('files', () => {
 
   // Save As
   async function saveAs(file = currentFile.value) {
+    if (file?.graph) {
+      try { await waitForFile(file) } catch { /* A failed draft can still be exported. */ }
+      const destination = await saveFileDialog(file.path || 'graph-entry.md')
+      if (!destination) return false
+      if (!openFiles.value.includes(file)) return false
+      try { await waitForFile(file) } catch { /* Keep recovery independent of the original writer. */ }
+      if (destination === file.path) return save(file)
+      const { document: target } = await graphSaveDestination(destination, file)
+      const content = file.dirty && file.kind === 'graph'
+        ? await graphExportContent(file, useBusinessGraphStore().nodes) : file.content
+      assertDestinationDraftAvailable(destination, file)
+      if (target) {
+        await saveGraphSource({ path: destination, content, expectedRevision: target.sourceRevision })
+      } else {
+        if (openFiles.value.some(open => open.path === destination && open.graph)) throw new Error(GRAPH_UNAVAILABLE)
+        await saveFile(destination, content)
+      }
+      addRecentFile(destination)
+      return true
+    }
     if (!file || file.kind !== 'text') return false
     const defaultPath = file.path
       || (workspaceScope.value ? `${workspaceScope.value}/untitled.md` : 'untitled.md')
@@ -574,14 +697,39 @@ export const useFileStore = defineStore('files', () => {
     }
     if (file.path === scratchpad.path && path !== scratchpad.path) {
       // Export a copy; the shared tab keeps its identity and destination.
-      await saveFile(path, file.content)
+      const { document } = await graphSaveDestination(path, file)
+      if (document) await saveGraphSource({ path, content: file.content, expectedRevision: document.sourceRevision })
+      else await saveFile(path, file.content)
       addRecentFile(path)
       return true
     }
+    await waitForFile(file)
+    const { document, other } = await graphSaveDestination(path, file)
+    if (!openFiles.value.includes(file)) return false
+    if (other) closeFile(openFiles.value.indexOf(other), { ensureOne: false })
     file.path = path
     file.draftId = null
     file.workspacePath = workspaceForPath(path)
-    return await writeFile(file)
+    if (document) file.graph = graphDocumentState(document)
+    const saved = await writeFile(file)
+    // A newly created source can be classified without waiting for its index.
+    if (!file.graph && isGraphSourceCandidate(file.path)) await classifyGraphDocument(file)
+    return saved
+  }
+
+  async function graphSaveDestination(path, file) {
+    let other = assertDestinationDraftAvailable(path, file)
+    const document = isGraphSourceCandidate(path) ? await graphSource(path) : null
+    other = assertDestinationDraftAvailable(path, file)
+    if (other?.graph && !document) throw new Error(GRAPH_UNAVAILABLE)
+    return { document, other }
+  }
+
+  function assertDestinationDraftAvailable(path, file) {
+    const other = openFiles.value.find(open => open !== file && open.path === path)
+    if (other?.reviewPending) throw new Error('Finish the review in the destination tab before replacing this file.')
+    if (other?.dirty || (other && writesByFileId.has(other.id))) throw new Error('This destination has an unsaved draft in another tab.')
+    return other
   }
 
   // Open file dialog and open the selected file
@@ -606,7 +754,11 @@ export const useFileStore = defineStore('files', () => {
   function removeTabForTransfer(idx) {
     if (openFiles.value.length <= 1) return null
     const file = openFiles.value[idx]
-    if (!file) return null
+    if (!file || writesByFileId.has(file.id)) return null
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+    pausedGraphSaves.delete(file.id)
+    graphRefreshVersions.delete(file.id)
     const removed = {
       path: file.path,
       content: file.content,
@@ -616,6 +768,7 @@ export const useFileStore = defineStore('files', () => {
       preview: file.preview,
       meta: file.meta,
       workspacePath: file.workspacePath,
+      ...(file.graph ? { graph: cloneGraphDocument(file.graph) } : {}),
     }
     openFiles.value.splice(idx, 1)
     if (activeFileIndex.value >= openFiles.value.length) {
@@ -629,27 +782,24 @@ export const useFileStore = defineStore('files', () => {
     return removed
   }
 
-  function addFileFromTransfer({
-    path,
-    content,
-    dirty,
-    draftId,
-    kind = 'text',
-    preview = false,
-    meta = null,
-    workspacePath,
-  }) {
-    openFiles.value.push(makeFile({
-      path: path || null,
-      content: content || '',
-      dirty: !!dirty,
-      draftId,
-      kind,
-      preview,
-      meta,
-      workspacePath,
-    }))
+  function addFileFromTransfer({ path, content, dirty, draftId, kind = 'text', preview = false, meta = null, workspacePath, graph = null }) {
+    const existing = path && openFiles.value.find(file => file.path === path)
+    if (existing) {
+      if (existing.dirty && dirty) throw new Error('This file already has an unsaved draft in this window.')
+      if (dirty) {
+        existing.content = content || ''
+        existing.kind = kind
+        existing.graph = graph ? restoredGraphState(graph) : existing.graph
+        markFileDirty(existing)
+      }
+      activeFileIndex.value = openFiles.value.indexOf(existing)
+      return existing
+    }
+    const file = makeFile({ path: path || null, content: content || '', dirty: !!dirty, draftId, kind, preview, meta, workspacePath })
+    if (graph) file.graph = restoredGraphState(graph)
+    openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
+    return file
   }
 
   function pathSuffixInside(path, parent) {
@@ -701,6 +851,12 @@ export const useFileStore = defineStore('files', () => {
       const file = openFiles.value[index]
       if (!file.path || !targets.some((target) => pathIsInside(file.path, target))) continue
       if (file.dirty) {
+        if (file.graph) {
+          file.graph.unavailable = true
+          file.saveState = SAVE_STATE.failed
+          file.saveError = 'This Graph source is unavailable. The draft is kept in this tab.'
+          continue
+        }
         file.path = null
         file.draftId ||= createDraftId()
         file.newTab = false
@@ -719,11 +875,207 @@ export const useFileStore = defineStore('files', () => {
   }
 
   function setFileReviews(file, reviews) {
-    if (file) file.reviews = Array.isArray(reviews) ? reviews : reviews ? [reviews] : null
+    if (file) {
+      file.reviews = Array.isArray(reviews) ? reviews : reviews ? [reviews] : null
+      if (file.reviews?.length) file.preview = false
+    }
   }
 
   function clearFileReviews(file) {
     if (file) file.reviews = null
+  }
+
+  async function waitForFile(file) {
+    while (writesByFileId.has(file?.id)) await writesByFileId.get(file.id)
+  }
+
+  async function openGraphDocument(document, { preview = true, isCurrent = () => true } = {}) {
+    if (!document?.node) throw new Error('This Graph entry is unavailable.')
+    const path = document.node.provenance.sourcePath
+    const file = await openFile(path, document.content, { preview, kind: 'graph', graphDocument: document, isCurrent })
+    if (!file) return null
+    if (!file.graph) {
+      // A dirty source tab retains its source view and buffer.
+      file.graph = graphDocumentState(document)
+      if (file.dirty) file.kind = 'text'
+    }
+    return file
+  }
+
+  function graphDraftChanged(file) {
+    if (!file?.graph || !openFiles.value.includes(file)) return
+    file.graph.version += 1
+    markDirty(file)
+    scheduleGraphSave(file)
+  }
+
+  function scheduleGraphSave(file) {
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+    if (pausedGraphSaves.has(file.id) || file.kind !== 'graph' || file.graph?.unavailable || !file.graph?.draft?.title?.trim()) return
+    graphSaveTimers.set(file.id, setTimeout(() => {
+      graphSaveTimers.delete(file.id)
+      if (openFiles.value.includes(file) && file.dirty) void save(file).catch(() => {})
+    }, 900))
+  }
+
+  function pauseGraphSave(file) {
+    if (!file?.graph) return
+    pausedGraphSaves.add(file.id)
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+  }
+
+  function resumeGraphSave(file) {
+    if (!file?.graph) return
+    pausedGraphSaves.delete(file.id)
+    if (openFiles.value.includes(file) && file.dirty) scheduleGraphSave(file)
+  }
+
+  async function setGraphView(file, view) {
+    if (!file?.graph || !['details', 'source'].includes(view)) return false
+    if (file.reviewPending) throw new Error('Finish the review before changing the entry view.')
+    await waitForFile(file)
+    if (!openFiles.value.includes(file)) return false
+    if (file.reviewPending) throw new Error('Finish the review before changing the entry view.')
+    if (file.dirty && !await save(file)) return false
+    const path = file.path
+    const version = file.graph.version
+    const sourceRevision = file.graph.sourceRevision
+    const document = await graphSource(path)
+    if (!openFiles.value.includes(file) || file.reviewPending || file.path !== path || file.dirty || file.graph.version !== version || file.graph.sourceRevision !== sourceRevision) return false
+    if (!document) {
+      markGraphUnavailable(file)
+      throw new Error(GRAPH_UNAVAILABLE)
+    }
+    if (view === 'details' && !document.node) throw new Error('Correct the Markdown properties before opening Details.')
+    applyGraphDocument(file, document)
+    file.kind = view === 'source' ? 'text' : 'graph'
+    return true
+  }
+
+  function markGraphUnavailable(file, error = GRAPH_UNAVAILABLE) {
+    file.graph.unavailable = true
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+    file.saveState = SAVE_STATE.failed
+    file.saveError = normalizeSaveError(error)
+  }
+
+  function applyGraphDocument(file, document) {
+    const version = file.graph?.version || 0
+    const nodeId = file.graph?.nodeId || file.graph?.node?.id
+    const closedUndo = file.graph?.closedUndo?.sourceRevision === document.sourceRevision ? file.graph.closedUndo : null
+    file.graph = { ...graphDocumentState(document), version, nodeId: document.node?.id || nodeId, closedUndo }
+    file.content = document.content
+    if (!document.node) file.kind = 'text'
+    file.dirty = false
+    file.saveState = SAVE_STATE.idle
+    file.saveError = null
+  }
+
+  async function classifyGraphDocument(file) {
+    if (!file || file.graph || !isGraphSourceCandidate(file.path) || !openFiles.value.includes(file)) return false
+    await waitForFile(file)
+    const path = file.path
+    const content = file.content
+    const document = await graphSource(path)
+    if (!document || !openFiles.value.includes(file) || file.path !== path || file.graph || writesByFileId.has(file.id)) return false
+    file.graph = graphDocumentState(document)
+    if (file.dirty || file.content !== content) {
+      file.graph.sourceRevision = ''
+      return false
+    }
+    file.content = document.content
+    return true
+  }
+
+  async function refreshGraphDocument(file, { paths = [] } = {}) {
+    if (file?.reviewPending) return false
+    if (!file?.graph) return classifyGraphDocument(file)
+    if (!openFiles.value.includes(file)) return false
+    const request = (graphRefreshVersions.get(file.id) || 0) + 1
+    graphRefreshVersions.set(file.id, request)
+    try { await waitForFile(file) } catch { /* Keep the failed draft and its revision. */ }
+    const path = file.path
+    const graph = file.graph
+    const version = graph.version
+    const sourceRevision = graph.sourceRevision
+    const current = () => openFiles.value.includes(file) && !file.reviewPending && file.path === path
+      && file.graph === graph && graph.version === version && graph.sourceRevision === sourceRevision
+      && graphRefreshVersions.get(file.id) === request && !writesByFileId.has(file.id)
+    if (!current()) return false
+    let document
+    let movedPath = null
+    try {
+      document = await graphSource(path)
+      if (!document && paths.includes(path)) {
+        const id = file.graph.nodeId || file.graph.node?.id
+        const candidate = id ? await getGraphNode(id) : null
+        const candidatePath = candidate?.provenance?.sourcePath
+        if (candidatePath && candidatePath !== path && paths.includes(candidatePath)) {
+          const moved = await graphSource(candidatePath)
+          if (moved?.node?.id === id) {
+            document = moved
+            movedPath = candidatePath
+          }
+        }
+      }
+    } catch (error) {
+      if (current()) markGraphUnavailable(file, error)
+      return false
+    }
+    if (!current()) return false
+    if (!document) {
+      markGraphUnavailable(file)
+      return false
+    }
+    if (movedPath) {
+      const other = openFiles.value.find(candidate => candidate !== file && candidate.path === movedPath)
+      if (other?.dirty || (other && writesByFileId.has(other.id))) {
+        markGraphUnavailable(file, 'The moved source already has a draft in another tab. This draft is kept here.')
+        return false
+      }
+      if (other) closeFile(openFiles.value.indexOf(other), { ensureOne: false })
+      file.path = movedPath
+      file.workspacePath = workspaceForPath(movedPath)
+      removeRecentFile(path)
+      addRecentFile(movedPath)
+    }
+    if (file.dirty) {
+      // External text does not become the baseline of an existing draft.
+      // The next save must compare against the revision that draft started on.
+      const wasUnavailable = file.graph.unavailable
+      file.graph.unavailable = false
+      if (wasUnavailable) {
+        file.saveState = SAVE_STATE.dirty
+        file.saveError = null
+      }
+      return false
+    }
+    if (!movedPath && !file.graph.unavailable && file.graph.sourceRevision === document.sourceRevision
+      && file.graph.node?.provenance?.scopeId === document.node?.provenance?.scopeId) return false
+    applyGraphDocument(file, document)
+    return true
+  }
+
+  async function refreshGraphDocuments(change = {}) {
+    const paths = Array.isArray(change?.paths) && change.paths.length ? new Set(change.paths) : null
+    return Promise.all(openFiles.value.filter(file => (file.graph || isGraphSourceCandidate(file.path)) && (!paths || paths.has(file.path)))
+      .map(file => refreshGraphDocument(file, change || {})))
+  }
+
+  async function undoGraphClose(file) {
+    if (!file?.graph || !openFiles.value.includes(file)) return false
+    await waitForFile(file)
+    if (file.dirty) throw new Error('Save this draft before you undo the close action.')
+    const undo = file.graph.closedUndo
+    if (!undo || file.graph.unavailable || undo.sourceRevision !== file.graph.sourceRevision || undo.sourcePath !== file.path) {
+      throw new Error('This close action can no longer be undone.')
+    }
+    clearTimeout(graphSaveTimers.get(file.id))
+    graphSaveTimers.delete(file.id)
+    return writeFile(file, { graphOperation: 'undo-close' })
   }
 
   return {
@@ -766,6 +1118,15 @@ export const useFileStore = defineStore('files', () => {
     clearVisibleRecentFiles,
     save,
     saveAs,
+    openGraphDocument,
+    graphDraftChanged,
+    pauseGraphSave,
+    resumeGraphSave,
+    undoGraphClose,
+    setGraphView,
+    waitForFile,
+    refreshGraphDocument,
+    refreshGraphDocuments,
     openDialog,
     moveTab,
     removeTabForTransfer,

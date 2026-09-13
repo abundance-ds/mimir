@@ -8,7 +8,7 @@
       :showAppMenus="showAppMenus"
       :recentFiles="fileManager.visibleRecentFiles"
       :canSave="Boolean(currentFile) && currentFile?.kind !== 'pdf' && currentFile?.kind !== 'external'"
-      :hasSelection="Boolean(selectionText)"
+      :hasSelection="!isGraphDetails && Boolean(selectionText)"
       :tabs="displayTabs"
       :activeTab="displayActiveTab"
       :arrivedTabIndex="arrivedTabIndex"
@@ -37,6 +37,10 @@
       Scratchpad updated
       <button class="text-accent focus-visible:outline" @mousedown.prevent @click="scratchpadEditor.show()">Open</button>
     </div>
+    <div v-if="graph.lastDeletion" class="graph-delete-notice" role="status">
+      <span>{{ graph.lastDeletion.title }} moved to Trash.</span>
+      <button type="button" @click="undoGraphDelete">Undo</button>
+    </div>
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
       <div class="editor-workspace flex-1 flex flex-col min-w-0">
         <ScratchpadBar v-if="scratchpadActive"
@@ -49,7 +53,7 @@
           @error="showDiagnosticError"
         />
         <InlineAI
-          v-if="inlineAIState && !isResourcePreview"
+          v-if="inlineAIState && !isResourcePreview && !isGraphDetails"
           :key="inlineAIKey"
           :selection="inlineAIState"
           :documentId="documentIdFromPath(currentFile?.path)"
@@ -85,6 +89,15 @@
           @recheck="onRecheckPendingReviews"
           @discard="onDiscardPendingReviews"
         />
+        <div v-if="currentFile?.graph && !isGraphDetails && !gitReviewVisible" class="graph-source-header focus-header">
+          <div class="graph-document-views" aria-label="Entry view">
+            <button type="button" :disabled="graphViewBusy || visibleDiffActive || !currentFile.graph.node || currentFile.graph.unavailable" @click="setGraphView('details')">Details</button>
+            <button type="button" class="is-active" aria-pressed="true">Source</button>
+          </div>
+          <span class="graph-source-kind">{{ currentFile.graph.node?.kind || 'Graph entry' }}</span>
+        </div>
+        <div v-if="currentFile?.graph && (graphViewError || (!isGraphDetails && currentFile.saveError))" class="object-conflict" role="alert">{{ graphViewError || currentFile.saveError }}</div>
+        <div v-if="currentFile?.graph && !isGraphDetails && !currentFile.graph.node" class="graph-source-help" role="status">Fix the entry’s metadata in Source to use Details.</div>
         <EditorToolbar
           v-if="editorToolbarVisible && !gitReviewVisible && !scratchpadActive"
           :active-formats="activeFormats"
@@ -97,6 +110,19 @@
           @discard-file="requestDiscardFile(currentFile)"
         />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden" :class="{ 'flex-col': isSvgFile }">
+          <GraphEditorTab
+            v-if="isGraphDetails && !gitReviewVisible"
+            :key="`${currentFile.id}:${currentFile.path}`"
+            ref="graphEditorTabRef"
+            :file="currentFile"
+            @source="setGraphView('source')"
+            @open-graph="mimirOpenGraph"
+            @open-file="$emit('openGraphFile', $event)"
+            @open-url="openMarkdownUrlLink"
+            @open-activity="$emit('openGraphActivity', $event)"
+            @open-meeting="$emit('openGraphMeeting', $event)"
+            @diagnostic="showDiagnosticError"
+          />
           <ScratchpadHistory v-if="scratchpadHistoryVisible"
             :content="scratchpadSelected?.content ?? currentFile?.content ?? ''"
             :before="scratchpadBefore" :changes="scratchpadChanges"
@@ -127,8 +153,8 @@
             @activated="restoreEditorFocus"
           />
           <EditorSurface
-            ref="editorSurfaceRef"
-            v-show="!scratchpadHistoryVisible && !gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
+            ref="textSurfaceRef"
+            v-show="!isGraphDetails && !scratchpadHistoryVisible && !gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :file-id="currentFile?.id ?? ''"
@@ -150,7 +176,7 @@
         </div>
 
         <AppFooter
-          v-if="!scratchpadHistoryVisible && !isResourcePreview && !gitReviewVisible"
+          v-if="!isGraphDetails && !scratchpadHistoryVisible && !isResourcePreview && !gitReviewVisible"
           :zoomLevel="state.zoomLevel"
           :selectionText="selectionText"
           :stats="documentStats"
@@ -324,6 +350,12 @@ import { storeToRefs } from 'pinia'
 import { useEditorUIStore } from '../stores/editorUI.js'
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts.js'
 import { pathIsInsideWorkspace, useFileStore } from '../stores/files.js'
+import GraphEditorTab from './components/workspace/GraphEditorTab.vue'
+import { useBusinessGraphStore } from '../stores/businessGraph.js'
+import { graphSourceBodyStart } from '../stores/graphDocuments.js'
+import { getGraphNode, graphSource, lookupGraph, graphLinkTargets } from '../services/businessGraph.js'
+import { graphLinks } from './codemirror/graphLinks.js'
+import { referenceSelection } from './codemirror/graphLinkSyntax.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useDocumentBridge } from './composables/useDocumentBridge.js'
 import { isTauriRuntime, platformKind } from '../shared/platform.js'
@@ -399,6 +431,10 @@ const emit = defineEmits([
   'reviewGitWithAgent',
   'diagnostic',
   'scratchpadReveal',
+  'openGraphNode',
+  'openGraphFile',
+  'openGraphActivity',
+  'openGraphMeeting',
 ])
 const editorShellRef = ref(null)
 
@@ -414,6 +450,7 @@ const releaseEditorSettingsSync = props.embedded
   : editorSettings.startSync()
 
 const fileManager = useFileStore()
+const graph = useBusinessGraphStore()
 const {
   activeFileIndex,
   activeVisibleFileIndex,
@@ -440,7 +477,14 @@ const selectionText = ref('')
 const cursorLine = ref(0)
 const inlineAIState = ref(null)
 const inlineAIKey = ref(0)
-const editorSurfaceRef = ref(null)
+const textSurfaceRef = ref(null)
+const graphEditorTabRef = ref(null)
+const isGraphDetails = computed(() => currentFile.value?.kind === 'graph')
+const isGraphSource = computed(() => currentFile.value?.kind === 'text' && Boolean(currentFile.value?.graph) && !currentFile.value.graph.unavailable)
+const editorSurfaceRef = computed(() => isGraphDetails.value ? null : textSurfaceRef.value)
+const graphViewError = ref('')
+const graphViewBusy = ref(false)
+let graphOpenGeneration = 0
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
@@ -448,6 +492,7 @@ const browserOpening = ref(false)
 const browserOpenError = ref('')
 watch(() => props.workspacePath, (path, previous) => {
   if (path === previous) return
+  graphOpenGeneration += 1
   inlineAIState.value = null
   selectionText.value = ''
 })
@@ -475,6 +520,7 @@ async function preparePreviewOpen(file) {
 const editorToolbarVisible = computed(() => (
   editorSettings.editorToolbarMode !== 'none'
   && !isNewTabPage.value
+  && !isGraphDetails.value
   && !isResourcePreview.value
   && !visibleDiffActive.value
   && isMarkdownPath(currentFile.value?.path)
@@ -519,6 +565,7 @@ const canOpenInBrowser = computed(() => (
 ))
 
 watch(() => currentFile.value?.path, () => {
+  graphViewError.value = ''
   browserOpenError.value = ''
 })
 
@@ -769,7 +816,22 @@ function openMarkdownUrlLink(target) {
   })
 }
 
+const sourceGraphLinks = computed(() => {
+  const file = currentFile.value
+  if (!isGraphSource.value || !file) return null
+  return graphLinks({
+    lookup: lookupGraph,
+    resolve: graphLinkTargets,
+    scopeIds: () => graph.activeScopeIds,
+    bodyStart: graphSourceBodyStart,
+    open: id => { void mimirOpenGraph(id).catch(showDiagnosticError) },
+    onError: message => { graphViewError.value = message },
+  })
+})
+watch(() => [graph.status?.graphRevision, graph.activeScopeIds.join('\0')], () => sourceGraphLinks.value?.refresh())
+
 const editorExtensions = computed(() => [
+  ...(sourceGraphLinks.value ? [sourceGraphLinks.value.extension] : []),
   commentsExtension({
     onCommentClick: (id) => {
       commentManager.setActiveComment(id)
@@ -800,13 +862,22 @@ const editorExtensions = computed(() => [
   ...livePreviewExtension(
     () => editorSettings.editorLivePreview,
     () => currentFile.value?.path,
+    state => sourceGraphLinks.value?.references(state) || [],
   ),
   markdownLinkOpen({
-    enabled: () => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path),
+    enabled: (view, event) => {
+      if (!editorSettings.editorLivePreview || !isMarkdownPath(currentFile.value?.path)) return false
+      if (!isGraphSource.value) return true
+      const position = view.posAtCoords({ x: event.clientX, y: event.clientY }, true)
+      return position != null && position >= graphSourceBodyStart(view.state)
+    },
     selector: '.cm-lp-link',
     preserveRenderedLink: true,
     onOpenFile: openMarkdownFileLink,
     onOpenUrl: openMarkdownUrlLink,
+    onOpenGraph: id => {
+      if (isGraphSource.value) sourceGraphLinks.value?.openTarget(id)
+    },
   }),
   ...taskCheckboxExtension(() => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path)),
 ])
@@ -881,11 +952,12 @@ const autoSave = createAutoSaveController({
   flush: flushEditorContent,
   save: saveCurrentFile,
   getFile: () => currentFile.value,
-  isAutoSaveEnabled: file => editorSettings.editorAutoSave || file?.meta?.scratchpad === true,
+  isAutoSaveEnabled: file => file?.kind !== 'graph' && !(file?.graph && closeConfirmFile.value === file) && (editorSettings.editorAutoSave || file?.meta?.scratchpad === true),
   onError: () => {},
 })
 
 function onContentChange() {
+  if (isGraphDetails.value) return
   fileManager.markDirty()
   scheduleContentSync()
   autoSave.schedule()
@@ -965,6 +1037,7 @@ async function requestEditorWindowClose(options) {
 }
 
 async function closeEditorTab(index) {
+  graphOpenGeneration += 1
   const tab = displayTabs.value[index]
   const file = tab?.type === 'file' ? openFiles.value[tab.fileIndex] : null
   if (file?.meta?.scratchpad) {
@@ -988,6 +1061,7 @@ function closeActiveEditorTab() {
 }
 
 function prepareWorkspaceSwitch() {
+  graphOpenGeneration += 1
   flushEditorContent({ bridge: 'flush' })
   if (gitReview.workspacePath && gitReview.workspacePath !== props.workspacePath) {
     gitReview.clearWorkspace()
@@ -997,7 +1071,9 @@ function prepareWorkspaceSwitch() {
 
 function restoreEditorFocus() {
   void nextTick(() => {
-    if (scratchpadHistoryVisible.value) {
+    if (isGraphDetails.value && !gitReviewVisible.value) {
+      graphEditorTabRef.value?.focus()
+    } else if (scratchpadHistoryVisible.value) {
       editorShellRef.value?.querySelector('[data-scratchpad-history]')?.focus({ preventScroll: true })
     } else if (isResourcePreview.value && !visibleDiffActive.value && !gitReviewVisible.value) {
       editorShellRef.value?.querySelector('.image-viewport, [data-pdf-preview-viewport]')?.focus({ preventScroll: true })
@@ -1006,17 +1082,20 @@ function restoreEditorFocus() {
 }
 
 function selectEditorTab(index) {
+  graphOpenGeneration += 1
   const tab = displayTabs.value[index]
   onSelectTab(index)
   if (tab?.type === 'file') restoreEditorFocus()
 }
 
 function createBlankFile() {
+  graphOpenGeneration += 1
   onNewFile()
   restoreEditorFocus()
 }
 
 function openNewTabPage() {
+  graphOpenGeneration += 1
   gitReviewTabActive.value = false
   flushEditorContent({ bridge: 'flush' })
   fileManager.newTab()
@@ -1543,6 +1622,7 @@ const editorCommands = useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
+  onNavigateIntent: () => { graphOpenGeneration += 1 },
 })
 const {
   mimirActive,
@@ -1562,6 +1642,67 @@ const {
   mimirState,
   mimirTabs,
 } = editorCommands
+
+async function setGraphView(view) {
+  const file = currentFile.value
+  if (!file?.graph || graphViewBusy.value) return
+  if (visibleDiffActive.value || file.reviewPending) { graphViewError.value = 'Finish the review before changing the entry view.'; return }
+  graphViewBusy.value = true
+  autoSave.clear(file)
+  graphViewError.value = ''
+  try {
+    flushEditorContent({ bridge: 'flush' })
+    await fileManager.setGraphView(file, view)
+    inlineAIState.value = null
+    selectionText.value = ''
+    await nextTick()
+    restoreEditorFocus()
+  } catch (cause) { graphViewError.value = String(cause?.message || cause) }
+  finally { graphViewBusy.value = false }
+}
+
+async function mimirOpenGraph(request) {
+  const generation = ++graphOpenGeneration
+  const isCurrent = () => generation === graphOpenGeneration && !editorDisposed
+  const target = typeof request === 'string' ? { id: request } : request
+  if (!target?.id) throw new Error('An entry id is required.')
+  flushEditorContent({ bridge: 'flush' })
+  const node = await getGraphNode(target.id)
+  if (!isCurrent()) return null
+  if (!node?.provenance?.sourcePath) throw new Error('This entry is unavailable.')
+  const document = await graphSource(node.provenance.sourcePath)
+  if (!isCurrent()) return null
+  if (!document?.node || document.node.id !== target.id) throw new Error('This entry is unavailable.')
+  const file = await fileManager.openGraphDocument(document, { preview: target.preview !== false, isCurrent })
+  if (!file || !isCurrent()) return null
+  gitReviewTabActive.value = false
+  reviewTabActive.value = false
+  inlineAIState.value = null
+  selectionText.value = ''
+  graphViewError.value = ''
+  emit('navigateEditor', { path: file.path })
+  await nextTick()
+  if (!isCurrent() || currentFile.value !== file) return file
+  if (target.targetId) {
+    if (file.kind === 'graph') graphEditorTabRef.value?.revealReference(target)
+    else {
+      const view = editorSurfaceRef.value?.getView?.()
+      if (view) {
+        const bodyFrom = graphSourceBodyStart(view.state)
+        const selection = referenceSelection(view.state, target, file.dirty ? '' : file.graph.sourceRevision, { bodyFrom, sourceBody: file.content.slice(file.graph.bodyFrom) })
+        view.dispatch({ selection, scrollIntoView: true })
+      }
+    }
+  } else restoreEditorFocus()
+  return file
+}
+
+async function undoGraphDelete() {
+  try {
+    const restored = await graph.undoDelete()
+    if (restored) await mimirOpenGraph({ id: restored.id, preview: false })
+  } catch (cause) { showDiagnosticError(cause) }
+}
 
 async function mimirOpen(...args) {
   gitReviewTabActive.value = false
@@ -1600,7 +1741,7 @@ async function mimirReviewHistory(request = {}) {
   const path = String(request.path || '').trim()
   const hash = String(request.hash || '').trim()
   if (!path || !hash) throw new Error('A file and history version are required.')
-  await mimirOpen(path, { preview: false })
+  await mimirOpen(path, { preview: false, source: true })
   flushEditorContent({ bridge: 'flush' })
   if (currentFile.value?.dirty) {
     throw new Error('Save or discard the current edits before opening History.')
@@ -1683,6 +1824,7 @@ defineExpose({
   navigationTabs, activeNavigationTab, selectNavigationTab,
   mimirScratchpad: scratchpadEditor.show,
   mimirOpen,
+  mimirOpenGraph,
   mimirReviewGit,
   mimirReviewHistory,
   mimirState,
@@ -1850,6 +1992,13 @@ function normalizeComparablePath(path) {
 </script>
 
 <style scoped>
+.graph-source-header { display: flex; justify-content: space-between; flex-shrink: 0; }
+.graph-source-kind { margin-inline: 10px; color: var(--color-ink-4); font-size: 10px; text-transform: capitalize; }
+.graph-source-help { border-bottom: 1px solid var(--color-rule-light); padding: 9px 14px; color: var(--color-ink-3); font-size: 11px; }
+.graph-delete-notice { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--color-rule-light); padding: 8px 14px; color: var(--color-ink-3); font-size: 11px; }
+.graph-delete-notice span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-delete-notice button { flex-shrink: 0; color: var(--color-accent); font-weight: 600; }
+
 .editor-body {
   position: relative;
   overflow: hidden;

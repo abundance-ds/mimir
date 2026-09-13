@@ -1,20 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
+import { loadIpcFixture } from '../test/ipcFixtures.js'
 import {
   createGraphNode,
   graphContext,
   graphEvents,
   graphMigrationReport,
   graphNeighbors,
+  graphLinkTargets,
+  graphReferences,
+  lookupGraph,
+  moveGraphNodeScope,
   openBusinessGraph,
   queryGraph,
   restoreGraphNode,
+  serializeGraphSource,
   updateGraphNode,
 } from './businessGraph.js'
 
 describe('business graph service', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockClear()
+  })
+
+  it('formats a recovery draft through the native serializer without a source write', async () => {
+    const node = loadIpcFixture('graph_source').node
+    const content = loadIpcFixture('graph_source_serialize')
+    vi.mocked(invoke).mockResolvedValueOnce(content)
+    expect(await serializeGraphSource(node)).toBe(content)
+    expect(invoke).toHaveBeenCalledWith('graph_source_serialize', { node })
+  })
+
+  it('retains the source identity and revision when moving a Details document', async () => {
+    const request = { id: 'meeting', targetScopeId: 'team:main', expectedRevision: 'r1', expectedSourcePath: '/project/graph/meeting.md' }
+    await moveGraphNodeScope(request)
+    expect(invoke).toHaveBeenCalledWith('graph_move_scope', { request, actor: expect.objectContaining({ kind: 'human' }) })
   })
 
   it('mounts the project while native code owns the fixed Team root', async () => {
@@ -79,6 +99,23 @@ describe('business graph service', () => {
       id: 'alpha',
       scopeIds: ['project:test'],
     })
+  })
+
+  it('preserves native lookup and resolution payloads', async () => {
+    const lookup = loadIpcFixture('graph_lookup')
+    const targets = loadIpcFixture('graph_link_targets')
+    vi.mocked(invoke).mockResolvedValueOnce(lookup).mockResolvedValueOnce(targets)
+    expect(await lookupGraph('jo')).toEqual(lookup)
+    expect(await graphLinkTargets(['person-jon', 'missing'])).toEqual(targets)
+  })
+
+  it('uses native title lookup and scoped reference queries with bounded results', async () => {
+    await lookupGraph(' jo ', { scopeIds: ['team:main', 'team:main'], limit: 5000 })
+    await graphLinkTargets(['jon', 'jon', 'jolo'], { scopeIds: ['team:main'] })
+    await graphReferences('note', { scopeIds: ['team:main'] })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'graph_lookup', { query: 'jo', scopeIds: ['team:main'], limit: 50 })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'graph_link_targets', { ids: ['jon', 'jolo'], scopeIds: ['team:main'] })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'graph_references', { id: 'note', scopeIds: ['team:main'] })
   })
 
   it('uses one opaque undo token to restore a recently Trashed source', async () => {

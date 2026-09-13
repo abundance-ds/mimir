@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorOpen = vi.hoisted(() => vi.fn())
+const editorOpenGraph = vi.hoisted(() => vi.fn())
 const editorScratchpad = vi.hoisted(() => vi.fn())
 const editorReveal = vi.hoisted(() => vi.fn())
 const editorOpenSettings = vi.hoisted(() => vi.fn())
@@ -59,6 +60,7 @@ vi.mock('../editor/App.vue', async () => {
           },
           mimirScratchpad: editorScratchpad,
           mimirOpen: editorOpen,
+          mimirOpenGraph: editorOpenGraph,
           mimirReveal: editorReveal,
           mimirOpenSettings: editorOpenSettings,
           mimirCloseActiveTab: editorClose,
@@ -203,6 +205,7 @@ import * as launcherApi from '../services/launchers.js'
 import * as appsApi from '../services/appsCatalog.js'
 import * as routinesApi from '../services/routines.js'
 import { useActivitiesStore } from '../stores/activities.js'
+import { useBusinessGraphStore } from '../stores/businessGraph.js'
 import { useChatStore } from '../stores/chat.js'
 import { useEditorUIStore } from '../stores/editorUI.js'
 import { useFileStore } from '../stores/files.js'
@@ -234,6 +237,7 @@ describe('WorkbenchApp', () => {
     vi.resetAllMocks()
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
     editorOpen.mockReset()
+    editorOpenGraph.mockReset()
     editorReveal.mockReset()
     editorOpenSettings.mockReset()
     editorClose.mockReset()
@@ -787,6 +791,39 @@ describe('WorkbenchApp', () => {
     await flushPromises()
     await wrapper.get('[data-sidebar-row="tool:core:chats"]').trigger('click')
     expect(useWorkbenchStore().openTabIds.filter(id => id === 'chats')).toHaveLength(1)
+  })
+
+  it.each(['open', 'record'])('routes a %s notification to Scribe with the correct recording behavior', async (action) => {
+    appsApi.loadAppsCatalog.mockResolvedValue({ directory: '/apps', diagnostics: [], apps: [{ id: 'scribe', title: 'Scribe', mode: 'embedded', builtin: true, tools: [] }] })
+    appsApi.resolveAppLaunch.mockResolvedValue({ mode: 'embedded', appId: 'scribe', title: 'Scribe', url: '', builtin: true })
+    const wrapper = await render()
+    const meetings = useMeetingsStore()
+    const start = vi.spyOn(meetings, 'start').mockResolvedValue(null)
+    vi.spyOn(meetings, 'refresh').mockResolvedValue()
+    vi.mocked(invoke).mockImplementation(async (command) => command === 'meetings_take_record_requests'
+      ? [{ candidateId: 'call-a', appName: 'Chrome', action }]
+      : undefined)
+    const handler = vi.mocked(listen).mock.calls.find(([event]) => event === 'mimir://meeting-record-requested')?.[1]
+    expect(handler).toBeTypeOf('function')
+    handler({ payload: null })
+    await flushPromises()
+    expect(wrapper.find('[data-main-tab="app:scribe"]').exists()).toBe(true)
+    expect(start).toHaveBeenCalledTimes(action === 'record' ? 1 : 0)
+    if (action === 'record') expect(start).toHaveBeenCalledWith(expect.objectContaining({ candidateId: 'call-a' }))
+  })
+
+  it('opens Scribe for a banner action queued before Workbench startup finishes', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({ directory: '/apps', diagnostics: [], apps: [{ id: 'scribe', title: 'Scribe', mode: 'embedded', builtin: true, tools: [] }] })
+    appsApi.resolveAppLaunch.mockResolvedValue({ mode: 'embedded', appId: 'scribe', title: 'Scribe', url: '', builtin: true })
+    const previous = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, ...args) => command === 'meetings_take_record_requests'
+      ? Promise.resolve([{ candidateId: 'call-a', appName: 'Chrome', action: 'open' }])
+      : previous?.(command, ...args))
+    const start = vi.spyOn(useMeetingsStore(), 'start').mockResolvedValue(null)
+    await render()
+    await flushPromises()
+    expect(useWorkbenchStore().activeActivityId).toBe('app:scribe')
+    expect(start).not.toHaveBeenCalled()
   })
 
   it('routes the persistent sidebar microphone control through the human meeting store', async () => {
@@ -1521,6 +1558,38 @@ describe('WorkbenchApp', () => {
     expect(surface.contains(document.activeElement)).toBe(true)
   })
 
+  it.each(['board', 'list', 'timeline'])('opens a clicked Graph entry from %s through its Activity wrapper', async view => {
+    appsApi.loadAppsCatalog.mockResolvedValue({
+      directory: '/home/me/.mimir/apps', diagnostics: [],
+      apps: [{ id: 'business-graph', title: 'Graph', mode: 'rust-helper', helper: 'business-graph', builtin: true, tools: [] }],
+    })
+    appsApi.resolveAppLaunch.mockResolvedValue({ mode: 'rust-helper', appId: 'business-graph', helper: 'business-graph' })
+    const wrapper = await render({ workspace: '/w' })
+    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    const graph = useBusinessGraphStore()
+    graph.nodes = [{ id: 'issue-1', title: 'Open this entry', kind: 'issue', status: 'plan', tags: [], scopeId: 'project:alpha', updatedAt: '2026-09-13T10:00:00Z' }]
+    graph.error = ''
+    await nextTick()
+    if (view !== 'board') {
+      await wrapper.get('[data-graph-section="all"]').trigger('click')
+      if (view === 'timeline') await wrapper.get('[data-graph-view="timeline"]').trigger('click')
+    }
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState('editor', 'rail')
+    await nextTick()
+
+    const selector = view === 'board' ? '[data-board-card="issue-1"]' : view === 'timeline' ? '[data-timeline-node="issue-1"]' : '[data-graph-node="issue-1"]'
+    await wrapper.get(selector).trigger('click')
+    await flushPromises()
+
+    expect(editorOpenGraph).toHaveBeenCalledExactlyOnceWith({ id: 'issue-1' })
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+    expect(workbench.activeActivityId).toBe('app:business-graph')
+    expect(wrapper.find(selector).exists()).toBe(true)
+  })
+
   it('opens the Graph record requested from Scribe detail', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps', diagnostics: [],
@@ -1538,8 +1607,9 @@ describe('WorkbenchApp', () => {
     wrapper.findComponent({ name: 'ScribeApp' }).vm.$emit('openGraphNode', 'meeting-filed')
     await vi.dynamicImportSettled()
     await flushPromises()
-    expect(useWorkbenchStore().activeActivityId).toBe('app:business-graph')
-    expect(invoke).toHaveBeenCalledWith('graph_get', { id: 'meeting-filed' })
+    expect(useWorkbenchStore().activeActivityId).toBe('app:scribe')
+    expect(useWorkbenchStore().paneLayout.editor.state).toBe('expanded')
+    expect(editorOpenGraph).toHaveBeenCalledWith('meeting-filed')
   })
 
   it('launches external Apps as one real PTY Activity from the plus menu and MCP', async () => {
