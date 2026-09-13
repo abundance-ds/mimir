@@ -43,6 +43,10 @@ impl NativeMeetingPlatform {
         // runtime projection and diagnostics are stable.
         platform.reconcile_content_search()?;
         let config = platform.load_config()?;
+        platform
+            .inner
+            .environment
+            .set_ignored_apps(&config.ignored_apps);
         if let Err(error) = platform
             .inner
             .environment

@@ -923,6 +923,7 @@ function withTranscriptWindow(meeting, window) {
 
 function defaultConfig() {
   return {
+    ignoredApps: [],
     detectionEnabled: false,
     autoRecord: false,
     microphoneDeviceId: null,

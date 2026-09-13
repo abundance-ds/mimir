@@ -147,6 +147,7 @@ pub struct DetectionCandidate {
 pub enum CandidateEndReason {
     Inactive,
     Dismissed,
+    Ignored,
     DetectionDisabled,
     PermissionLost,
 }

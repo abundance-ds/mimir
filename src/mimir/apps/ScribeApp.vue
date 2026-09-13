@@ -565,6 +565,14 @@
               </p>
               <button type="button" class="scribe-quiet-button shrink-0" @click="start(candidate)">Record</button>
               <button
+                v-if="candidate.appId && !candidate.appId.startsWith('pid:')"
+                type="button"
+                class="scribe-quiet-button shrink-0"
+                :aria-label="`Ignore ${candidate.appName}`"
+                :disabled="Boolean(meetings.pending.config)"
+                @click="ignoreApp(candidate)"
+              >Ignore app</button>
+              <button
                 type="button"
                 class="scribe-icon-button"
                 :aria-label="`Dismiss ${candidate.appName} suggestion`"
@@ -1579,6 +1587,20 @@ function clearMeetingSearch() {
   meetingSearchDraft.value = ''
   meetings.clearSearch()
   nextTick(() => meetingSearchInput.value?.focus())
+}
+
+async function ignoreApp(candidate) {
+  if (meetings.pending.config) return
+  actionError.value = ''
+  try {
+    const ignoredApps = meetings.config.ignoredApps || []
+    if (ignoredApps.some(app => app.appId.toLowerCase() === candidate.appId.toLowerCase())) return
+    await meetings.saveConfig({
+      ignoredApps: [...ignoredApps, { appId: candidate.appId, appName: candidate.appName }],
+    })
+  } catch (error) {
+    actionError.value = message(error)
+  }
 }
 
 async function dismissCandidate(id) {

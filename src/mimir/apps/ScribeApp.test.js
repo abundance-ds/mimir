@@ -31,6 +31,7 @@ import {
   startMeeting,
   stopMeeting,
   updateMeeting,
+  updateMeetingsConfig,
 } from '../../services/meetings.js'
 import ScribeApp from './ScribeApp.vue'
 import ScribeFollowUpDialog from './scribe/ScribeFollowUpDialog.vue'
@@ -339,6 +340,24 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-error]').text())
       .toContain('Capture device unavailable'))
     expect(wrapper.get('[data-scribe-new]').exists()).toBe(true)
+  })
+
+  it('ignores an app through saved config while retaining existing exclusions', async () => {
+    const existing = { appId: 'com.example.dictation', appName: 'Other dictation' }
+    const dictate = { appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      config: { ...snapshot().config, ignoredApps: [existing] },
+      candidates: [{ id: 'candidate-dictate', ...dictate }],
+    }))
+    vi.mocked(updateMeetingsConfig).mockResolvedValue(snapshot({
+      revision: 2, config: { ...snapshot().config, ignoredApps: [existing, dictate] },
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.find('[aria-label="Ignore Mim Dictate"]').exists()).toBe(true))
+    await wrapper.get('[aria-label="Ignore Mim Dictate"]').trigger('click')
+    await vi.waitFor(() => expect(updateMeetingsConfig).toHaveBeenCalledWith({ ignoredApps: [existing, dictate] }))
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-candidates]').exists()).toBe(false))
+    expect(startMeeting).not.toHaveBeenCalled()
   })
 
   it('shows a detected app as a dismissible inline suggestion', async () => {

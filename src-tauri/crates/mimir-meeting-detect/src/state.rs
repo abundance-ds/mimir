@@ -205,6 +205,33 @@ impl DetectionPolicy {
         }))
     }
 
+    /// End only excluded occurrences; retain all other detection state.
+    pub fn set_ignored_bundle_ids(&mut self, ids: BTreeSet<String>) -> Vec<DetectionEvent> {
+        if self.config.ignored_bundle_ids == ids {
+            return Vec::new();
+        }
+        self.config.ignored_bundle_ids = ids;
+        let mut events = Vec::new();
+        self.tracked.retain(|_, tracked| {
+            if tracked
+                .evidence
+                .values()
+                .any(|app| self.config.excludes(app))
+            {
+                if tracked.suggestion_open {
+                    events.push(DetectionEvent::CandidateEnded {
+                        candidate_id: tracked.candidate_id.clone(),
+                        reason: CandidateEndReason::Ignored,
+                    });
+                }
+                false
+            } else {
+                true
+            }
+        });
+        events
+    }
+
     pub fn candidates(&self) -> Vec<DetectionCandidate> {
         self.tracked
             .iter()
@@ -233,7 +260,7 @@ impl DetectionPolicy {
     }
 
     pub(crate) fn config_excludes(&self, app: &AppEvidence) -> bool {
-        self.config.excludes(app)
+        self.config.excludes(&app.clone().canonicalized())
     }
 
     fn validate_now(&mut self, now_millis: u64) -> Result<(), DetectError> {
@@ -275,6 +302,54 @@ fn duration_millis(duration: std::time::Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exclusions_end_only_matching_apps_and_can_be_removed() {
+        let mut policy = DetectionPolicy::new(DetectionConfig {
+            sustained_use: std::time::Duration::ZERO,
+            ..DetectionConfig::default()
+        })
+        .unwrap();
+        let dictate = AppEvidence {
+            process_id: 8,
+            bundle_id: Some("ai.shoulders.mimtts".into()),
+            app_name: "Mim Dictate".into(),
+        };
+        let zoom = AppEvidence {
+            process_id: 9,
+            bundle_id: Some("us.zoom.xos".into()),
+            app_name: "Zoom".into(),
+        };
+        policy
+            .observe(0, vec![dictate.clone(), zoom.clone()])
+            .unwrap();
+        let before = policy.candidates();
+        let ignored = before
+            .iter()
+            .find(|app| app.app_id == "ai.shoulders.mimtts")
+            .unwrap();
+        let retained = before
+            .iter()
+            .find(|app| app.app_id == "us.zoom.xos")
+            .unwrap();
+        assert_eq!(
+            policy.set_ignored_bundle_ids(BTreeSet::from(["AI.SHOULDERS.MIMTTS".into()])),
+            vec![DetectionEvent::CandidateEnded {
+                candidate_id: ignored.id.clone(),
+                reason: CandidateEndReason::Ignored,
+            }]
+        );
+        assert!(policy
+            .observe(100_000, vec![dictate.clone(), zoom.clone()])
+            .unwrap()
+            .is_empty());
+        assert_eq!(policy.candidates(), vec![retained.clone()]);
+        assert!(policy.set_ignored_bundle_ids(BTreeSet::new()).is_empty());
+        let events = policy.observe(100_001, vec![dictate, zoom]).unwrap();
+        assert!(
+            matches!(&events[..], [DetectionEvent::CandidateSuggested(app)] if app.app_id == ignored.app_id && app.id != ignored.id)
+        );
+    }
 
     #[test]
     fn occurrence_ids_survive_updates_but_never_recur_after_end_or_reset() {

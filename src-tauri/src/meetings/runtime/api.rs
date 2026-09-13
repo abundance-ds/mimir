@@ -128,6 +128,8 @@ pub struct MeetingSummaryRunRequest {
 #[serde(rename_all = "camelCase")]
 pub struct MeetingConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored_apps: Option<Vec<MeetingIgnoredApp>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detection_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_record: Option<bool>,
@@ -168,6 +170,8 @@ pub struct MeetingConfigPatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingConfig {
+    #[serde(default)]
+    pub ignored_apps: Vec<MeetingIgnoredApp>,
     pub detection_enabled: bool,
     pub auto_record: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,9 +190,17 @@ pub struct MeetingConfig {
     pub retention_days: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeetingIgnoredApp {
+    pub app_id: String,
+    pub app_name: String,
+}
+
 impl Default for MeetingConfig {
     fn default() -> Self {
         Self {
+            ignored_apps: Vec::new(),
             detection_enabled: false,
             auto_record: false,
             microphone_device_id: None,

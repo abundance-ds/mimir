@@ -8,7 +8,15 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
             .transpose()?
             .flatten()
             .is_some();
-        let environment = self.inner.environment.projection()?;
+        let mut environment = self.inner.environment.projection()?;
+        // Native consent checks use this projection, including while the worker
+        // is processing an exclusion update.
+        environment.candidates.retain(|candidate| {
+            !config
+                .ignored_apps
+                .iter()
+                .any(|app| app.app_id.eq_ignore_ascii_case(&candidate.app_id))
+        });
         let mut diagnostics = lock(&self.inner.diagnostics)?.clone();
         if let Some(diagnostic) = environment.diagnostic {
             diagnostics.push(diagnostic);
@@ -56,6 +64,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         let previous_config = self.load_config()?;
         let mut config = previous_config.clone();
         let previous_endpoint = stored_custom_stt_endpoint(&previous_config)?;
+        if let Some(value) = &patch.ignored_apps {
+            config.ignored_apps = value.clone();
+        }
         if let Some(value) = patch.detection_enabled {
             config.detection_enabled = value;
         }
@@ -107,6 +118,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
                 .set_detection_enabled(config.detection_enabled)
                 .map_err(|error| bounded_diagnostic(&error))?;
         }
+        let ignored_apps = config.ignored_apps.clone();
         let persist = (|| {
             if previous_endpoint != next_endpoint {
                 // Clear before publishing the route. If Keychain access
@@ -132,6 +144,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
                 }
             }
             return Err(error);
+        }
+        if ignored_apps != previous_config.ignored_apps {
+            self.inner.environment.set_ignored_apps(&ignored_apps);
         }
         Ok(())
     }

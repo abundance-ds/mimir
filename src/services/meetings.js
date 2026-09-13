@@ -628,7 +628,12 @@ function normalizeMeetingRecordRequest(value) {
 
 function normalizeMeetingsConfig(value) {
   const config = object(value)
+  const ignoredApps = config.ignoredApps ?? config.ignored_apps
   return {
+    ignoredApps: (Array.isArray(ignoredApps) ? ignoredApps : []).filter(isPlainObject).map(app => ({
+      appId: String(app.appId ?? app.app_id ?? ''),
+      appName: String(app.appName ?? app.app_name ?? ''),
+    })),
     detectionEnabled: Boolean(config.detectionEnabled ?? config.detection_enabled),
     autoRecord: Boolean(config.autoRecord ?? config.auto_record),
     microphoneDeviceId: optionalString(
@@ -678,6 +683,13 @@ function serializeConfigPatch(patch) {
   const source = object(patch)
   const serialized = {}
   if ('detectionEnabled' in source) serialized.detectionEnabled = Boolean(source.detectionEnabled)
+  if ('ignoredApps' in source) {
+    if (!Array.isArray(source.ignoredApps)) throw new Error('Ignored apps must be a list.')
+    serialized.ignoredApps = source.ignoredApps.map(app => ({
+      appId: requiredId(app?.appId, 'app'),
+      appName: requiredId(app?.appName, 'app name'),
+    }))
+  }
   if ('autoRecord' in source) serialized.autoRecord = Boolean(source.autoRecord)
   if ('microphoneDeviceId' in source) {
     serialized.microphoneDeviceId = source.microphoneDeviceId == null

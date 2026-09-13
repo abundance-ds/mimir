@@ -473,6 +473,16 @@ describe('meetings service', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 
+  it('sends app exclusions to native config and reads them back', async () => {
+    const ignoredApps = [{ appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }]
+    vi.mocked(invoke).mockResolvedValueOnce({ config: { ignoredApps } }).mockResolvedValueOnce({})
+    const saved = await updateMeetingsConfig({ ignoredApps })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_update_config', { patch: { ignoredApps } })
+    expect(saved.config.ignoredApps).toEqual(ignoredApps)
+    expect((await loadMeetingSnapshot()).config.ignoredApps).toEqual([])
+    await expect(updateMeetingsConfig({ ignoredApps: 'invalid' })).rejects.toThrow('list')
+  })
+
   it('serializes user-owned summary instructions and bounded meeting-file export', async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce({ revision: 2, meetings: [] })

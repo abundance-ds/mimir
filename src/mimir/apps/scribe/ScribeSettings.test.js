@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ScribeSettings from './ScribeSettings.vue'
 
 const config = {
+  ignoredApps: [{ appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }],
   detectionEnabled: false,
   transcriptionMode: 'local',
   customUrl: '',
@@ -27,6 +28,7 @@ describe('ScribeSettings', () => {
       },
     })
 
+    expect(wrapper.get('[aria-label="Allow detection for Mim Dictate"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-scribe-config-pending]').text()).toBe('Saving…')
     expect(wrapper.get('[data-scribe-detection]').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('[role="radio"]').every(
@@ -39,6 +41,18 @@ describe('ScribeSettings', () => {
     expect(wrapper.get('input[placeholder="gpt-live-transcribe"]').attributes('disabled'))
       .toBeDefined()
     expect(wrapper.get('[data-scribe-summary-enabled]').attributes('disabled')).toBeDefined()
+  })
+
+  it('allows detection again for only the selected app', async () => {
+    const other = { appId: 'com.example.dictation', appName: 'Other dictation' }
+    const wrapper = mount(ScribeSettings, { props: {
+      config: { ...config, ignoredApps: [...config.ignoredApps, other] },
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
+    } })
+    expect(wrapper.get('[data-scribe-ignored-apps]').text()).toContain('Mim Dictate')
+    expect(wrapper.get('[data-scribe-ignored-apps]').text()).not.toContain('ai.shoulders.mimtts')
+    await wrapper.get('[aria-label="Allow detection for Mim Dictate"]').trigger('click')
+    expect(wrapper.emitted('save')).toEqual([[{ ignoredApps: [other] }]])
   })
 
   it('selects OpenAI with a valid endpoint and model in one mutation', async () => {

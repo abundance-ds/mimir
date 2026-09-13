@@ -10,6 +10,12 @@ explicit action opens Scribe and uses the normal permission, consent, and
 candidate-validation path. Clicking the banner body opens Scribe without
 starting capture. macOS responses use a retained callback delegate; ignored
 notifications create no waiting worker or repeated notification-list scan.
+Use **Ignore app** beside a suggestion to exclude that app from detection.
+Scribe saves exclusions by app ID in its native configuration and applies them
+after restart. **Scribe settings → Capture → Ignored apps → Allow detection**
+removes an exclusion. Ignoring an app also removes its current suggestion and
+notification; other apps and manual recording remain available.
+
 Detection end, dismissal, disabling detection, and shutdown remove the owned
 notification. A late delivery is removed again when its submission completes.
 Each detection occurrence has a distinct opaque candidate id, carried through

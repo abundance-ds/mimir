@@ -744,6 +744,7 @@ fn meetings_snapshot() -> MeetingSnapshot {
             confidence: 0.98,
         }],
         config: MeetingConfig {
+            ignored_apps: Vec::new(),
             detection_enabled: true,
             auto_record: false,
             microphone_device_id: Some("CoreAudio:fixture-microphone".into()),

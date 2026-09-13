@@ -3,6 +3,7 @@ use crate::{
     DetectionPolicy, DetectorSnapshot, DetectorStatus, PermissionSnapshot, PermissionState,
 };
 use std::{
+    collections::BTreeSet,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -67,6 +68,7 @@ type DetectionCallback = dyn Fn(DetectionEvent) + Send + Sync + 'static;
 
 struct Shared {
     enabled: AtomicBool,
+    ignored_bundle_ids: RwLock<BTreeSet<String>>,
     running: AtomicBool,
     wake: Arc<WakeSignal>,
     policy: Mutex<DetectionPolicy>,
@@ -145,6 +147,12 @@ impl DetectionMonitor {
         self.shared.wake.wake();
     }
 
+    /// Apply exclusions on the worker so suggestion/end callbacks stay ordered.
+    pub fn set_ignored_bundle_ids(&self, ids: BTreeSet<String>) {
+        *rw_write(&self.shared.ignored_bundle_ids) = ids;
+        self.shared.wake.wake();
+    }
+
     pub fn dismiss_candidate(&self, candidate_id: &str) -> Result<bool, DetectError> {
         let now_millis = elapsed_millis(self.shared.started_at);
         let event = {
@@ -199,6 +207,7 @@ impl DetectionMonitor {
         let wake = Arc::new(WakeSignal::new());
         let shared = Arc::new(Shared {
             enabled: AtomicBool::new(enabled),
+            ignored_bundle_ids: RwLock::new(config.ignored_bundle_ids.clone()),
             running: AtomicBool::new(true),
             wake: wake.clone(),
             policy: Mutex::new(DetectionPolicy::new(config)?),
@@ -300,6 +309,8 @@ fn update_once(source: &mut impl ObservationSource, shared: &Shared) {
         return;
     }
 
+    let mut events = mutex_lock(&shared.policy)
+        .set_ignored_bundle_ids(rw_read(&shared.ignored_bundle_ids).clone());
     observation
         .active_apps
         .retain(|app| !mutex_lock(&shared.policy).config_excludes(app));
@@ -313,7 +324,7 @@ fn update_once(source: &mut impl ObservationSource, shared: &Shared) {
     });
 
     let now_millis = elapsed_millis(shared.started_at);
-    let (events, candidates) = {
+    let (observation_events, candidates) = {
         let mut policy = mutex_lock(&shared.policy);
         let events = match observation.permission.state {
             PermissionState::Granted => {
@@ -330,6 +341,7 @@ fn update_once(source: &mut impl ObservationSource, shared: &Shared) {
         (events, policy.candidates())
     };
 
+    events.extend(observation_events);
     let status = status_for(&observation.permission, observation.diagnostic.as_deref());
     replace_snapshot(
         shared,
@@ -474,6 +486,49 @@ mod tests {
         fn drop(&mut self) {
             self.drops.fetch_add(1, Ordering::SeqCst);
         }
+    }
+
+    #[test]
+    fn exclusion_updates_wake_worker_and_end_then_restore_suggestions() {
+        let (send, receive) = mpsc::channel();
+        let monitor = DetectionMonitor::start_with_factory(
+            DetectionConfig {
+                sustained_use: Duration::ZERO,
+                poll_interval: Duration::from_secs(30),
+                ..DetectionConfig::default()
+            },
+            move |event| {
+                send.send(event).unwrap();
+            },
+            |_| FakeSource {
+                shutdowns: Arc::new(AtomicUsize::new(0)),
+                drops: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .unwrap();
+        let DetectionEvent::CandidateSuggested(first) =
+            receive.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!("expected suggestion")
+        };
+        monitor.set_ignored_bundle_ids(BTreeSet::from(["us.zoom.xos".into()]));
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(2)).unwrap(),
+            DetectionEvent::CandidateEnded {
+                candidate_id: first.id.clone(),
+                reason: CandidateEndReason::Ignored,
+            }
+        );
+        assert!(monitor.snapshot().candidates.is_empty());
+        assert!(monitor.snapshot().active_apps.is_empty());
+        monitor.set_ignored_bundle_ids(BTreeSet::new());
+        let DetectionEvent::CandidateSuggested(next) =
+            receive.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!("expected restored suggestion")
+        };
+        assert_ne!(first.id, next.id);
+        monitor.stop().unwrap();
     }
 
     #[test]

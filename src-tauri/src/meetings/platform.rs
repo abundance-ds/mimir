@@ -15,7 +15,7 @@ use super::{
     runtime::{
         validate_graph_draft, MeetingCandidate, MeetingConfig, MeetingConfigPatch,
         MeetingContentProjection, MeetingDeleteMode, MeetingExport, MeetingExportFormat,
-        MeetingGraphDraft, MeetingHookConfig, MeetingModel, MeetingPermissions,
+        MeetingGraphDraft, MeetingHookConfig, MeetingIgnoredApp, MeetingModel, MeetingPermissions,
         MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
     },
     MeetingDeletionMode as StoreDeletionMode, MeetingDeletionStage, MeetingStore,
@@ -118,6 +118,9 @@ pub trait MeetingEnvironmentProbe: Send + Sync {
     fn set_detection_enabled(&self, _enabled: bool) -> Result<(), String> {
         Ok(())
     }
+
+    /// Replace app exclusions and wake the detector after a durable save.
+    fn set_ignored_apps(&self, _apps: &[MeetingIgnoredApp]) {}
 
     /// Prevent a candidate accepted by the user from being suggested again.
     fn dismiss_candidate(&self, _candidate_id: &str) -> Result<(), String> {
@@ -353,6 +356,8 @@ struct PersistedMeetingConfig {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StoredMeetingConfig {
+    #[serde(default)]
+    ignored_apps: Vec<MeetingIgnoredApp>,
     detection_enabled: bool,
     auto_record: bool,
     #[serde(default)]
@@ -375,6 +380,7 @@ struct StoredMeetingConfig {
 impl From<MeetingConfig> for StoredMeetingConfig {
     fn from(config: MeetingConfig) -> Self {
         Self {
+            ignored_apps: config.ignored_apps,
             detection_enabled: config.detection_enabled,
             auto_record: config.auto_record,
             microphone_device_id: config.microphone_device_id,
@@ -408,6 +414,7 @@ impl From<StoredMeetingConfig> for MeetingConfig {
             config.summary_prompt
         };
         Self {
+            ignored_apps: config.ignored_apps,
             detection_enabled: config.detection_enabled,
             auto_record: config.auto_record,
             microphone_device_id: config.microphone_device_id,

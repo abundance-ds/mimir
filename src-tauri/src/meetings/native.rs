@@ -364,6 +364,11 @@ impl MeetingEnvironmentProbe for DetectionEnvironment {
         Ok(())
     }
 
+    fn set_ignored_apps(&self, apps: &[super::runtime::MeetingIgnoredApp]) {
+        self.monitor
+            .set_ignored_bundle_ids(apps.iter().map(|app| app.app_id.clone()).collect());
+    }
+
     fn dismiss_candidate(&self, candidate_id: &str) -> Result<(), String> {
         self.monitor
             .dismiss_candidate(candidate_id)

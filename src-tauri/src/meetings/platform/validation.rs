@@ -1,6 +1,28 @@
 use super::*;
 
 pub(super) fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
+    if config.ignored_apps.len() > 128 {
+        return Err("Cannot ignore more than 128 meeting apps".into());
+    }
+    let mut app_ids = std::collections::BTreeSet::new();
+    for app in &config.ignored_apps {
+        if app.app_id.is_empty()
+            || app.app_id.len() > 255
+            || !app
+                .app_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+            || app.app_name.trim().is_empty()
+            || app.app_name.trim() != app.app_name
+            || app.app_name.len() > 255
+            || app.app_name.chars().any(char::is_control)
+        {
+            return Err("Ignored meeting app must have a valid app ID and name".into());
+        }
+        if !app_ids.insert(app.app_id.to_ascii_lowercase()) {
+            return Err("Ignored meeting apps cannot contain duplicate app IDs".into());
+        }
+    }
     if config.auto_record {
         return Err(
             "Automatic meeting recording is disabled; every recording requires explicit human consent"

@@ -574,3 +574,59 @@ fn model_download_diagnostics_redact_signed_redirect_queries() {
     assert!(!diagnostic.contains("https://"));
 }
 
+
+
+#[test]
+fn ignored_apps_persist_reload_and_filter_candidates_before_worker_update() {
+    struct Environment { updates: Arc<Mutex<Vec<Vec<MeetingIgnoredApp>>>> }
+    impl MeetingEnvironmentProbe for Environment {
+        fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
+            let mut projection = FakeEnvironment.projection()?;
+            projection.candidates = [("ai.shoulders.mimtts", "Mim Dictate"), ("us.zoom.xos", "Zoom")].into_iter().map(|(id, name)| MeetingCandidate {
+                id: format!("candidate:{id}"), app_id: id.into(), app_name: name.into(), detected_at: None, confidence: 0.95,
+            }).collect();
+            Ok(projection)
+        }
+        fn set_ignored_apps(&self, apps: &[MeetingIgnoredApp]) { self.updates.lock().unwrap().push(apps.to_vec()); }
+    }
+    let updates = Arc::new(Mutex::new(Vec::new()));
+    let environment = Arc::new(Environment { updates: updates.clone() });
+    let fixture = fixture_with_environment(environment.clone());
+    let ignored = vec![MeetingIgnoredApp { app_id: "ai.shoulders.mimtts".into(), app_name: "Mim Dictate".into() }];
+    fixture.platform.update_config(&MeetingConfigPatch { ignored_apps: Some(ignored.clone()), ..MeetingConfigPatch::default() }).unwrap();
+    assert_eq!(*updates.lock().unwrap(), vec![vec![], ignored.clone()]);
+    let projection = fixture.platform.projection().unwrap();
+    assert_eq!(projection.candidates.len(), 1);
+    assert_eq!(projection.candidates[0].app_id, "us.zoom.xos");
+    assert_eq!(projection.config.ignored_apps, ignored);
+    // The environment deliberately still returns both apps: native consent sees
+    // only the allowed candidate even before the worker processes its wake.
+    let reopened = NativeMeetingPlatform::new(
+        fixture.paths.clone(), fixture.store.clone(), Vec::new(), fixture.secrets.clone(), environment,
+        Arc::new(FakeDisk), Arc::new(FakeDownloader { bytes: Vec::new(), completion: fixture.completion.clone() }),
+        Arc::new(NoopMeetingPlatformChangeSink),
+    ).unwrap();
+    assert_eq!(updates.lock().unwrap().last(), Some(&ignored));
+    assert_eq!(reopened.projection().unwrap().config.ignored_apps, ignored);
+    reopened.update_config(&MeetingConfigPatch { ignored_apps: Some(vec![]), ..MeetingConfigPatch::default() }).unwrap();
+    assert_eq!(reopened.projection().unwrap().candidates.len(), 2);
+}
+
+#[test]
+fn legacy_config_has_no_exclusions_and_invalid_exclusions_do_not_replace_config() {
+    let fixture = fixture();
+    let mut stored = serde_json::to_value(PersistedMeetingConfig::new(MeetingConfig::default()).unwrap()).unwrap();
+    stored["config"].as_object_mut().unwrap().remove("ignoredApps");
+    fs::write(&fixture.paths.config_file, serde_json::to_vec(&stored).unwrap()).unwrap();
+    assert!(fixture.platform.projection().unwrap().config.ignored_apps.is_empty());
+    let app = MeetingIgnoredApp { app_id: "ai.shoulders.mimtts".into(), app_name: "Mim Dictate".into() };
+    for invalid in [
+        vec![app.clone(), MeetingIgnoredApp { app_id: app.app_id.to_ascii_uppercase(), ..app.clone() }],
+        vec![MeetingIgnoredApp { app_id: "pid:671".into(), ..app.clone() }],
+        vec![MeetingIgnoredApp { app_name: "".into(), ..app.clone() }],
+        vec![app.clone(); 129],
+    ] {
+        assert!(fixture.platform.update_config(&MeetingConfigPatch { ignored_apps: Some(invalid), ..MeetingConfigPatch::default() }).is_err());
+        assert!(fixture.platform.projection().unwrap().config.ignored_apps.is_empty());
+    }
+}

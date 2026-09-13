@@ -45,6 +45,19 @@
             @change="save({ detectionEnabled: $event.target.checked })"
           />
         </label>
+        <div v-if="config.ignoredApps?.length" data-scribe-ignored-apps class="mt-3 border-t border-rule-light pt-3">
+          <span class="scribe-settings-label">Ignored apps</span>
+          <div v-for="app in config.ignoredApps" :key="app.appId" class="flex items-center gap-3 py-2 text-[10px]">
+            <span class="min-w-0 flex-1 truncate">{{ app.appName }}</span>
+            <button
+              type="button"
+              class="scribe-settings-button shrink-0"
+              :aria-label="`Allow detection for ${app.appName}`"
+              :disabled="configPending"
+              @click="save({ ignoredApps: config.ignoredApps.filter(item => item.appId !== app.appId) })"
+            >Allow detection</button>
+          </div>
+        </div>
         <div class="mt-3 block">
           <span class="scribe-settings-label">Microphone input</span>
           <ScribeSelect
