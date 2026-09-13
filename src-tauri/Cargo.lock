@@ -2885,15 +2885,16 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log",
- "mac-notification-sys",
  "mimir-meeting-audio",
  "mimir-meeting-detect",
  "notify",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "objc2-user-notifications",
  "portable-pty",
  "proptest",
+ "pulldown-cmark",
  "rcgen",
  "regex",
  "reqwest 0.12.28",
@@ -2920,6 +2921,7 @@ dependencies = [
  "tokio-tungstenite",
  "toml 1.1.2+spec-1.1.0",
  "trash",
+ "unicode-normalization",
  "url",
  "uuid",
  "whisper-rs",
@@ -2947,6 +2949,7 @@ dependencies = [
  "objc2-foundation",
  "serde",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -3434,6 +3437,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.11.1",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]
@@ -3962,6 +3967,17 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.11.1",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]
@@ -6128,10 +6144,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"

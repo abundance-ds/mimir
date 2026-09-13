@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 700 Cargo packages, 320 npm packages, and 4 reviewed embedded/downloadable assets.
+Inventory: 703 Cargo packages, 320 npm packages, and 4 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -391,6 +391,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:proc-macro-error@1.0.4 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/proc-macro-error/1.0.4/download | da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c |
 | cargo:proc-macro2@1.0.106 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/proc-macro2/1.0.106/download | 8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934 |
 | cargo:proptest@1.11.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/proptest/1.11.0/download | 4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744 |
+| cargo:pulldown-cmark@0.13.4 | MIT | https://crates.io/api/v1/crates/pulldown-cmark/0.13.4/download | e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e |
 | cargo:quick-error@1.2.3 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/quick-error/1.2.3/download | a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0 |
 | cargo:quick-xml@0.41.0 | MIT | https://crates.io/api/v1/crates/quick-xml/0.41.0/download | e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1 |
 | cargo:quinn-proto@0.11.15 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/quinn-proto/0.11.15/download | 4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e |
@@ -567,7 +568,9 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:unic-common@0.9.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unic-common/0.9.0/download | 80d7ff825a6a654ee85a63e80f92f054f904f21e7d12da4e22f9834a4aaa35bc |
 | cargo:unic-ucd-ident@0.9.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unic-ucd-ident/0.9.0/download | e230a37c0381caa9219d67cf063aa3a375ffed5bf541a452db16e744bdab6987 |
 | cargo:unic-ucd-version@0.9.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unic-ucd-version/0.9.0/download | 96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4 |
+| cargo:unicase@2.9.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unicase/2.9.0/download | dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142 |
 | cargo:unicode-ident@1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://crates.io/api/v1/crates/unicode-ident/1.0.24/download | e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75 |
+| cargo:unicode-normalization@0.1.25 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unicode-normalization/0.1.25/download | 5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8 |
 | cargo:unicode-segmentation@1.13.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unicode-segmentation/1.13.2/download | 9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c |
 | cargo:unicode-xid@0.2.6 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/unicode-xid/0.2.6/download | ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853 |
 | cargo:unsafe-libyaml@0.2.11 | MIT | https://crates.io/api/v1/crates/unsafe-libyaml/0.2.11/download | 673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861 |

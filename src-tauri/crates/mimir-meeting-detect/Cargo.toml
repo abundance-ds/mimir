@@ -10,6 +10,7 @@ description = "Mimir-owned macOS meeting detection and consent primitives"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { version = "0.15", features = ["av", "blocks", "dispatch"] }
