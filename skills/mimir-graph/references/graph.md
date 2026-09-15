@@ -23,7 +23,7 @@ is not a status.
 Primary kinds:
 
 ```text
-project company person issue meeting note resource journal decision record
+project company person issue meeting note resource journal decision record timesheet
 ```
 
 HEOR kinds:

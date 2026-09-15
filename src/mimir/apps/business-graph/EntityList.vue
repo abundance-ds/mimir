@@ -313,6 +313,7 @@ function stateClass(status) {
 }
 
 function human(value) {
+  if (value === 'timesheet') return 'time sheet'
   return String(value || '').replaceAll('-', ' ')
 }
 

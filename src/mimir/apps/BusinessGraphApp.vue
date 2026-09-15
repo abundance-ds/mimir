@@ -119,6 +119,8 @@
     />
 
     <GraphCreateDialog
+      :nodes="graph.nodes"
+      :self-person-id="settings.businessGraphSelfPersonId || ''"
       :scope-ids="graph.activeScopeIds"
       :graph-revision="graph.status?.graphRevision || 0"
       :open="createOpen"

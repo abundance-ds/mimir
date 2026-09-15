@@ -50,6 +50,12 @@ derived references into a relation patch. `graph_find` relation filters and
 and sensitive-content restrictions. [Business graph](business-graph.md#inline-links-and-backlinks)
 owns the Markdown syntax and editing behavior.
 
+Time sheets use `graph_create` and `graph_update`. Read the current entry,
+preserve row IDs and unknown properties, and replace `properties.entries`
+through `setProperties.entries` with the returned revision. The update replaces
+the complete list. Re-read after a conflict before applying the intended edit.
+[Time sheets](business-graph.md#time-sheets) owns the row format and invoice rules.
+
 When Graph Details is active, `mimir_state` reports `kind: "graph"` and no
 text cursor. With content included, `contentSource: "saved"` identifies the
 tab's saved Markdown snapshot; `graphDraft` contains the current Details fields.

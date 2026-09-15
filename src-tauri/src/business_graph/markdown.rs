@@ -421,6 +421,14 @@ fn parse_issue(
 fn validate_node(parsed: &mut ParsedGraphNode) {
     let node = &parsed.node;
     let source_path = Some(node.provenance.source_path.clone());
+    for problem in super::timesheet::problems(node) {
+        parsed.diagnostics.push(GraphDiagnostic::warning(
+            "invalid-timesheet",
+            problem,
+            Some(node.id.clone()),
+            source_path.clone(),
+        ));
+    }
     if node.title.trim().is_empty() {
         parsed.diagnostics.push(GraphDiagnostic::warning(
             "missing-title",

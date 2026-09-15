@@ -14,6 +14,7 @@ pub const ENTITY_KINDS: &[&str] = &[
     "record",
     "meeting",
     "resource",
+    "timesheet",
     "study",
     "evidence",
     "dataset",

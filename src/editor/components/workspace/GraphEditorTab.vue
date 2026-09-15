@@ -33,6 +33,9 @@
       <button type="button" @click="$emit('source')">Open Source</button>
     </div>
     <GraphCreateDialog
+      :nodes="graph.nodes"
+      :initial-project-id="file.graph?.node?.kind === 'project' ? file.graph.node.id : ''"
+      :self-person-id="settings.businessGraphSelfPersonId || ''"
       :open="createOpen"
       :scopes="graph.scopes"
       :scope-ids="graph.activeScopeIds"
@@ -63,6 +66,7 @@ import { graphDocumentViewState } from '../../graphDocumentViewState.js'
 import { useFileStore } from '../../../stores/files.js'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import { useActivitiesStore } from '../../../stores/activities.js'
+import { useSettingsStore } from '../../../stores/settings.js'
 import { resolveProjectFile } from '../../../services/workspaceConfig.js'
 import { graphNeighbors, graphSource } from '../../../services/businessGraph.js'
 import GraphInspector from '../../../mimir/apps/business-graph/GraphInspector.vue'
@@ -76,6 +80,7 @@ const viewState = graphDocumentViewState(props.file)
 const files = useFileStore()
 const graph = useBusinessGraphStore()
 const activities = useActivitiesStore()
+const settings = useSettingsStore()
 const inspector = ref(null)
 const neighbors = ref([])
 const error = ref('')

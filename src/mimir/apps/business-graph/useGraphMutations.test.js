@@ -202,6 +202,17 @@ describe('document navigation after graph mutations', () => {
     expect(openNode).toHaveBeenCalledWith('created')
   })
 
+  it('uses the selected time sheet project instead of adding a second parent relation', async () => {
+    actions.openRelatedCreate({ kind: 'timesheet', parent: { kind: 'project', id: 'project-alpha' } })
+    expect(actions.createKind.value).toBe('timesheet')
+    await actions.createNode({ kind: 'timesheet', title: 'September', properties: { period: '2026-09', entries: [] },
+      relations: [{ relation: 'part_of', target: 'project-beta' }, { relation: 'assigned_to', target: 'alex' }],
+    }, { another: false })
+    expect(graph.create.mock.calls[0][0].relations).toEqual([
+      { relation: 'part_of', target: 'project-beta' }, { relation: 'assigned_to', target: 'alex' },
+    ])
+  })
+
   it('keeps Create another in its form until the user finishes creation', async () => {
     actions.openCreate('issue')
     const reset = vi.fn()

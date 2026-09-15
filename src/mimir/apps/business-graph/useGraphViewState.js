@@ -33,6 +33,7 @@ export const ALL_KIND_OPTIONS = Object.freeze([
   { value: 'person', label: 'People' },
   { value: 'company', label: 'Companies' },
   { value: 'meeting', label: 'Meetings' },
+  { value: 'timesheet', label: 'Time sheets' },
   { value: 'journal', label: 'Journal' },
   { value: 'knowledge', label: 'Knowledge' },
 ])

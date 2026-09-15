@@ -142,6 +142,7 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphDateTimeField.vue',
   'GraphInspector.vue',
   'GraphEntryDetails.vue',
+  'TimesheetDetails.vue',
   'GraphMarkdownEditor.vue',
   'GraphRelationshipLine.vue',
   'GraphReferences.vue',

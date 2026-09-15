@@ -110,6 +110,20 @@ describe('GraphInspector', () => {
     vi.mocked(invoke).mockReset()
   })
 
+  it('finds project time sheets through neighbors beyond the loaded Graph page', async () => {
+    const sheet = { id: 'older-sheet', kind: 'timesheet', title: 'August time',
+      relations: [{ relation: 'part_of', target: project.id }], properties: { period: '2026-08', entries: [] } }
+    const wrapper = mountInspector({ props: { node: project, nodes: [project],
+      neighbors: [{ direction: 'incoming', relation: 'part_of', node: sheet }],
+    } })
+    expect(wrapper.findAll('[data-graph-control="time-open-sheet-older-sheet"]')).toHaveLength(1)
+    expect(wrapper.find('[data-related-node="older-sheet"]').exists()).toBe(false)
+    await wrapper.get('[data-graph-control="time-open-sheet-older-sheet"]').trigger('click')
+    expect(wrapper.emitted('openNode')[0]).toEqual(['older-sheet'])
+    await wrapper.get('[data-graph-control="time-create-related"]').trigger('click')
+    expect(wrapper.emitted('quickCreate')[0][0]).toMatchObject({ kind: 'timesheet', parent: { id: project.id } })
+  })
+
   it('opens the primary project and owner without duplicate relation rows, including targets outside the loaded page', async () => {
     const wrapper = mountInspector({ props: {
       ...baseProps, nodes: [issue], neighbors: [

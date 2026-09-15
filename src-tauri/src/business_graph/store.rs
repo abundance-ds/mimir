@@ -1192,6 +1192,9 @@ fn create_new_source(path: &Path, contents: &[u8]) -> Result<(), GraphMutationEr
 }
 
 fn validate_mutation(node: &GraphNode) -> Result<(), GraphMutationError> {
+    if let Some(problem) = super::timesheet::problems(node).first() {
+        return Err(GraphMutationError::Invalid(problem.clone()));
+    }
     if node.title.trim().is_empty() {
         return Err(GraphMutationError::Invalid("title is required".into()));
     }

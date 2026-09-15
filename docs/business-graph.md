@@ -67,7 +67,7 @@ resolve to several local workspaces; absolute local paths never enter Team.
 ## Data model
 
 Primary kinds are `project`, `company`, `person`, `issue`, `meeting`, `note`,
-`resource`, `journal`, `decision`, and `record`. Legacy kinds remain readable,
+`resource`, `journal`, `decision`, `record`, and `timesheet`. Legacy kinds remain readable,
 but new public writes accept only the bounded ontology. Unknown metadata is
 preserved.
 
@@ -78,6 +78,81 @@ preserved.
   but remains directly readable.
 - A filed Scribe meeting stores its summary and stable Scribe id. The transcript
   remains in Scribe.
+
+## Time sheets
+
+A `timesheet` entry stores one person's work for one project and month.
+Use `part_of` for the Project and `assigned_to` for the Person. These links
+remain optional. Graph creation offers Time sheet, and Project details offers
+**Add time sheet**. Graph's kind filter includes **Time sheets**.
+
+The Markdown header stores `period` as `YYYY-MM` and `entries` as a list:
+
+```yaml
+kind: timesheet
+title: Atlas — September 2026
+period: "2026-09"
+entries:
+  - id: time-001
+    date: "2026-09-15"
+    minutes: 90
+    description: Test the export
+  - id: time-002
+    date: "2026-09-15"
+    minutes: 45
+    description: Project meeting
+    invoice: "INV-014"
+```
+
+The body holds free-form notes. Each row has a permanent ID, a valid date
+within the sheet's month, a whole number of minutes from 1 to 1,440, and a
+non-empty description. IDs contain letters, digits, underscores, or hyphens;
+the first character is a letter or digit. IDs must be unique within the
+sheet and contain at most 128 characters. A sheet can contain 10,000 rows.
+Unknown sheet and row properties remain intact after Details edits.
+
+An absent `invoice` means **Open**. A non-empty invoice reference means
+**Invoiced**. This records inclusion on an invoice, not payment or invoice
+creation. Boolean and empty invoice values are invalid. Invoiced rows remain
+editable; the reference does not freeze their amounts or descriptions.
+
+Details shows an editable table and Open, Invoiced, and Total durations.
+The totals cover the complete month and do not change with row filters.
+**Show** filters All, Open, Invoiced, or one invoice reference. Checkboxes,
+Shift-click, and **Select all shown rows** provide a separate selection total.
+A filter change clears selection. Hidden rows never receive selection actions.
+**Mark invoiced** applies a reference to the selected open rows and preserves
+references on already invoiced rows. **Mark open** removes selected invoice
+references. Duplicate creates an open row with a new ID.
+
+Duration inputs accept minutes, `90m`, `1h 30m`, or `1:30`. Storage always
+uses whole minutes. New rows leave duration and work blank. Invalid inputs
+stay in the draft. Totals show **Incomplete** and exclude invalid rows.
+Structured saves reject invalid data; Source remains available for repairs.
+Malformed source data stays intact and produces Graph diagnostics.
+**Save As** can export an invalid draft as a separate Markdown recovery copy.
+That copy retains unfinished duration text for repair in Source.
+
+Details uses the existing draft and save queue. Row undo and redo remain
+available in the open tab after a save. A Source or external row replacement
+clears that history. Selection and undo history are transient; session restore
+retains unsaved row values through the normal Graph draft.
+
+**Export selected CSV** exports the selection. With no selection,
+**Export shown CSV** exports the filtered rows. Both use the current draft
+and include project, person, month, exact minutes, duration, invoice, and a
+calculated total. Invalid sheets cannot export. The export freezes its data
+before the file dialog opens. Authored text cannot become a spreadsheet formula.
+
+Use separate files for each person and month to reduce Team sync conflicts.
+Sync still resolves conflicts at complete-file level; row selection does not
+change this rule. Totals are calculated and never written into the header.
+Tracker imports and automatic invoice generation are outside this feature.
+
+Native validation and agent writes share tests with renderer validation.
+Component tests cover edits, range selection, filtered export, invoice groups,
+undo after save, and invalid-source recovery. The browser preview is
+`harness/timesheet.html`; it uses fixture data and does not write Graph files.
 
 ## Inline links and backlinks
 

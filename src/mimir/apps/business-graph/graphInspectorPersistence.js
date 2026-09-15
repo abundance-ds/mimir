@@ -8,6 +8,7 @@ import {
   splitValues,
   utcDateTime,
 } from './graphInspectorModel.js'
+import { buildTimeProperties, hydrateTimeRows } from './timesheet.js'
 
 export function hydrateInspectorDraft(draft, node) {
   draft.title = node.title || ''
@@ -52,11 +53,15 @@ export function hydrateInspectorDraft(draft, node) {
   draft.entityStatus = node.properties?.status || 'active'
   draft.teamMember = Boolean(node.properties?.teamMember)
   draft.relations = (node.relations || []).map(edge => ({ ...edge }))
+  if (node.kind === 'timesheet') {
+    draft.timePeriod = node.properties?.period ?? ''
+    draft.timeRows = hydrateTimeRows(node.properties?.entries)
+  }
 
   return defaultRelationFor(node.kind)
 }
 
-export function buildInspectorSave({ node, nodes, draft, tags }) {
+export function buildInspectorSave({ node, nodes, draft, tags, validate = true }) {
   const setProperties = {}
   const removeProperties = []
   const files = structuredFiles(draft.files)
@@ -95,6 +100,8 @@ export function buildInspectorSave({ node, nodes, draft, tags }) {
         const [path, ...label] = line.split('|').map(value => value.trim())
         return { path, ...(label.join(' | ') ? { label: label.join(' | ') } : {}) }
       })
+  } else if (node.kind === 'timesheet') {
+    Object.assign(setProperties, buildTimeProperties(draft, { validate }))
   } else if (node.kind === 'project') {
     if (draft.projectType) setProperties.projectType = draft.projectType
     else removeProperties.push('projectType')
@@ -137,7 +144,7 @@ function structuredFiles(value) {
 }
 
 function buildRelations(node, nodes, draft) {
-  if (node.kind === 'issue') {
+  if (['issue', 'timesheet'].includes(node.kind)) {
     return [
       ...draft.relations.filter(edge => !['part_of', 'assigned_to'].includes(edge.relation)),
       ...entityRelation(node, nodes, 'part_of', draft.projectId, 'project'),

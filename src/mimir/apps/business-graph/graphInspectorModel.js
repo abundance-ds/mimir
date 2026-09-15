@@ -208,6 +208,7 @@ export function fileExtension(path) {
 }
 
 export function human(value) {
+  if (value === 'timesheet') return 'time sheet'
   return String(value || '').replaceAll('_', ' ').replaceAll('-', ' ')
 }
 
@@ -215,4 +216,3 @@ export function titleCase(value) {
   const label = human(value)
   return label ? `${label[0].toUpperCase()}${label.slice(1)}` : ''
 }
-

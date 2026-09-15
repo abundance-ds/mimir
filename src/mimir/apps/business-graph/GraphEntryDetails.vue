@@ -218,7 +218,7 @@
       </div>
 
       <textarea
-        v-else
+        v-else-if="node.kind !== 'timesheet'"
         ref="summaryInput"
         v-model="draft.summary"
         data-inspector-summary
@@ -326,6 +326,8 @@
         </button>
       </div>
     </header>
+
+    <TimesheetDetails v-if="node.kind === 'timesheet'" :key="node.id" />
 
     <section class="focus-note">
       <GraphMarkdownEditor
@@ -649,6 +651,17 @@
       </div>
     </section>
 
+    <section v-if="node.kind === 'project'" class="entry-related" aria-label="Project time sheets">
+      <div class="entry-section-heading">
+        <h3>Time sheets</h3>
+        <button type="button" data-graph-control="time-create-related" class="entry-quiet-action" @click="quickCreate('timesheet')">Add time sheet</button>
+      </div>
+      <button v-for="sheet in projectTimeSheets" :key="sheet.id" type="button" class="object-link-row entry-relation-link"
+        :data-graph-control="`time-open-sheet-${sheet.id}`" @click="openRelated(sheet.id)">
+        <span><strong>{{ displayTitle(sheet) }}</strong></span><IconChevronRight :size="14" />
+      </button>
+    </section>
+
     <details v-if="node.kind === 'project'" class="entry-project-overview" :open="overviewOpen" @toggle="overviewOpen = $event.target.open">
       <summary data-graph-control="entry-project-overview">Project overview</summary>
       <ProjectStanding v-if="overviewOpen" :project="node" :nodes="nodes" @open-node="openRelated" @open-file="openSource" />
@@ -659,7 +672,7 @@
 </template>
 
 <script setup>
-import { inject, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconArrowForwardUp,
@@ -680,11 +693,13 @@ import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphReferences from './GraphReferences.vue'
 import GraphSelect from './GraphSelect.vue'
 import ProjectStanding from './ProjectStanding.vue'
+import TimesheetDetails from './TimesheetDetails.vue'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 
 const {
   node,
   nodes,
+  neighbors,
   viewState,
   noteEditor,
   scopeIds,
@@ -767,6 +782,16 @@ const {
   fileExtension,
   human
 } = inject(GRAPH_INSPECTOR_CONTEXT)
+
+const projectTimeSheets = computed(() => {
+  const sheets = new Map(nodes.value.filter(sheet => sheet.kind === 'timesheet'
+    && (sheet.projectId === node.value.id || sheet.relations?.some(edge => edge.relation === 'part_of' && edge.target === node.value.id)))
+    .map(sheet => [sheet.id, sheet]))
+  for (const neighbor of neighbors.value) {
+    if (neighbor.direction === 'incoming' && neighbor.relation === 'part_of' && neighbor.node.kind === 'timesheet') sheets.set(neighbor.node.id, neighbor.node)
+  }
+  return [...sheets.values()].sort((left, right) => displayTitle(left).localeCompare(displayTitle(right)))
+})
 const overviewOpen = ref(false)
 const waitingFocused = ref(false)
 watch(() => node.value?.id, () => {

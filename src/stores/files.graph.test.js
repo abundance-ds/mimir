@@ -64,6 +64,46 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Graph document lifecycle', () => {
+  it('saves time rows through the shared queue and retains invalid or conflicting drafts', async () => {
+    const initial = document({ kind: 'timesheet', properties: { period: '2026-09', entries: [
+      { id: 't1', date: '2026-09-15', minutes: 90, description: 'Review', invoice: 'INV-014' },
+    ] } })
+    disk.set(path, initial)
+    const files = useFileStore()
+    await files.openGraphDocument(initial)
+    const file = files.currentFile
+    file.graph.draft.timeRows[0].duration = '2h'
+    file.graph.draft.timeRows[0].editedDuration = true
+    files.graphDraftChanged(file)
+    await files.setGraphView(file, 'source')
+    expect(updateGraphNode).toHaveBeenLastCalledWith(expect.objectContaining({ expectedSourcePath: path,
+      expectedRevision: 'r0', setProperties: { period: '2026-09', entries: [
+        { id: 't1', date: '2026-09-15', minutes: 120, description: 'Review', invoice: 'INV-014' },
+      ] },
+    }))
+    expect(file.kind).toBe('text')
+    await files.setGraphView(file, 'details')
+    expect(file.graph.draft.timeRows[0].duration).toBe('2h')
+    file.graph.draft.timeRows[0].duration = 'unfinished'
+    file.graph.draft.timeRows[0].editedDuration = true
+    files.graphDraftChanged(file)
+    await expect(files.setGraphView(file, 'source')).rejects.toThrow('duration')
+    expect(file.kind).toBe('graph')
+    expect(file.graph.draft.timeRows[0].duration).toBe('unfinished')
+    saveFileDialog.mockResolvedValueOnce('/exports/time-recovery.md')
+    await files.saveAs(file)
+    expect(serializeGraphSource).toHaveBeenCalledWith(expect.objectContaining({
+      properties: expect.objectContaining({ entries: [expect.objectContaining({ id: 't1', minutes: 'unfinished' })] }),
+    }))
+    saveFile.mockClear()
+    file.graph.draft.timeRows[0].duration = '3h'
+    files.graphDraftChanged(file)
+    disk.set(path, document({ kind: 'timesheet', revision: 'external', properties: initial.node.properties }))
+    await expect(files.save(file)).rejects.toThrow('Graph source changed')
+    expect(file.graph.draft.timeRows[0].duration).toBe('3h')
+    expect(file.dirty).toBe(true)
+    expect(saveFile).not.toHaveBeenCalled()
+  })
   it('asks Rust only for candidate paths and leaves ordinary Markdown on its existing writer', async () => {
     const files = useFileStore()
     await files.openFile('/workspace/README.md', '[Note](mimir://graph/note)')

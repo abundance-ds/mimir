@@ -535,7 +535,8 @@ fn graph_create_properties() -> Value {
         "body": string_schema("Graph links: [Title](mimir://graph/<id>), using an ID from graph_find."),
         "tags": string_array("Topic labels."),
         "relations": relation_array(),
-        "properties": { "type": "object", "additionalProperties": true },
+        "properties": { "type": "object", "additionalProperties": true,
+            "description": "For timesheet: period is YYYY-MM; entries is a list of {id, date, minutes, description, invoice?}. Use unique stable row IDs, dates within the month, integer minutes from 1 to 1440, and optional non-empty invoice references. Omit invoice for Open rows. Totals are calculated." },
     })
 }
 
@@ -551,7 +552,8 @@ fn graph_update_properties() -> Value {
         "body": string_schema("Graph links: [Title](mimir://graph/<id>), using an ID from graph_find."),
         "tags": string_array("Replacement tags."),
         "relations": relation_array(),
-        "setProperties": { "type": "object", "additionalProperties": true },
+        "setProperties": { "type": "object", "additionalProperties": true,
+            "description": "For timesheet edits, entries replaces the complete row list. Read the current node first, preserve row IDs and unknown fields, and send expectedRevision. Omit a row's invoice to mark it Open; use a non-empty reference to mark it Invoiced." },
         "removeProperties": string_array("Property names to remove."),
     })
 }

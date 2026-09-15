@@ -75,7 +75,7 @@ export function useGraphInspector(props, emit) {
 
   const projects = computed(() => props.nodes.filter(node => node.kind === 'project'))
   const people = computed(() => props.nodes.filter(node => node.kind === 'person'))
-  const activeTeamPeople = computed(() => people.value.filter(person => (
+  const activeTeamPeople = computed(() => node.value?.kind === 'timesheet' ? people.value : people.value.filter(person => (
     (person.teamMember || person.properties?.teamMember)
     && (person.status || person.properties?.status) === 'active'
   )))
@@ -166,7 +166,7 @@ export function useGraphInspector(props, emit) {
         target: relatedTarget(edge.target),
       }))
       .filter(connection => !(
-        node.value?.kind === 'issue'
+        ['issue', 'timesheet'].includes(node.value?.kind)
         && ['part_of', 'assigned_to'].includes(connection.edge.relation)
       ))
       .filter(connection => !(
@@ -176,6 +176,7 @@ export function useGraphInspector(props, emit) {
   ))
   const incomingConnections = computed(() => props.neighbors.filter(neighbor => (
     neighbor.direction === 'incoming'
+    && !(node.value.kind === 'project' && neighbor.node.kind === 'timesheet' && neighbor.relation === 'part_of')
     && neighbor.node.relations?.some(edge => edge.relation === neighbor.relation && edge.target === node.value.id)
   )))
   const canAddConnection = computed(() => (

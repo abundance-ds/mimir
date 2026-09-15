@@ -42,6 +42,59 @@ fn fixture() -> (TempDir, GraphRuntime) {
 }
 
 #[test]
+fn timesheet_tools_round_trip_rows_reject_bad_data_and_check_revisions() {
+    let (root, runtime) = fixture();
+    let row = json!({ "id": "t1", "date": "2026-09-15", "minutes": 90, "description": "Test export", "custom": { "keep": true } });
+    let created = execute_native_tool(&runtime, "graph.create", json!({
+        "id": "september-time", "kind": "timesheet", "title": "September time", "body": "Client notes.",
+        "scopeId": "project:test", "relations": [{"relation":"part_of","target":"project-alpha"}],
+        "properties": { "period": "2026-09", "entries": [row.clone()] }
+    })).unwrap().value;
+    let revision = created["provenance"]["sourceRevision"].as_str().unwrap();
+    let mut invoiced = row.clone();
+    invoiced["invoice"] = json!("INV-014");
+    let updated = execute_native_tool(&runtime, "graph.update", json!({
+        "id": "september-time", "expectedRevision": revision, "setProperties": {"entries": [invoiced.clone()]}
+    })).unwrap().value;
+    assert_eq!(updated["properties"]["entries"][0], invoiced);
+    assert_eq!(updated["body"], "Client notes.");
+    let path = root.path().join("graph/september-time.md");
+    let source = fs::read_to_string(&path).unwrap();
+    let read = execute_native_tool(&runtime, "graph.get", json!({"id":"september-time"}))
+        .unwrap()
+        .value;
+    assert_eq!(read["properties"]["entries"][0]["custom"]["keep"], true);
+    let found = execute_native_tool(&runtime, "graph.find", json!({"kinds":["timesheet"]}))
+        .unwrap()
+        .value;
+    assert_eq!(found["items"][0]["id"], "september-time");
+    assert!(execute_native_tool(
+        &runtime,
+        "graph.update",
+        json!({
+            "id":"september-time", "expectedRevision":revision, "setProperties":{"entries":[row]}
+        })
+    )
+    .is_err());
+    for bad in [json!(-1), json!(1.5), json!("90"), json!(1441), Value::Null] {
+        let mut invalid = invoiced.clone();
+        invalid["minutes"] = bad;
+        assert!(execute_native_tool(
+            &runtime,
+            "graph.update",
+            json!({
+                "id":"september-time", "expectedRevision":updated["provenance"]["sourceRevision"],
+                "setProperties":{"entries":[invalid]}
+            })
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+    assert!(!source.contains("total:"));
+    assert!(!source.contains("editedDuration"));
+}
+
+#[test]
 fn body_references_are_consistent_across_read_tools_without_becoming_authored_relations() {
     let (root, runtime) = fixture();
     let path = root.path().join("graph/project-alpha.md");

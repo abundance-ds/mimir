@@ -172,6 +172,12 @@
             </div>
           </div>
 
+          <div v-if="draft.kind === 'timesheet'" class="create-kind-properties">
+            <label><span>Month</span><input v-model="draft.period" data-graph-control="create-time-period" aria-label="Time sheet month" placeholder="YYYY-MM" maxlength="7" pattern="[0-9]{4}-(0[1-9]|1[0-2])" required /></label>
+            <label><span>Person</span><GraphSelect v-model="draft.personId" :options="timePeople" variant="property" aria-label="Time sheet person" searchable search-placeholder="Find a person" /></label>
+            <label><span>Project</span><GraphSelect v-model="draft.projectId" :options="timeProjects" variant="property" aria-label="Time sheet project" searchable search-placeholder="Find a project" /></label>
+          </div>
+
           <button
             type="button"
             data-graph-control="create-toggle-context"
@@ -271,10 +277,14 @@ import GraphCheckbox from './GraphCheckbox.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphSelect from './GraphSelect.vue'
 import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
+import { localTimeDate, validPeriod } from './timesheet.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   scopes: { type: Array, default: () => [] },
+  nodes: { type: Array, default: () => [] },
+  initialProjectId: { type: String, default: '' },
+  selfPersonId: { type: String, default: '' },
   scopeIds: { type: Array, default: () => [] },
   initialKind: { type: String, default: 'issue' },
   initialStatus: { type: String, default: 'backlog' },
@@ -295,6 +305,7 @@ const kinds = Object.freeze([
   { id: 'company', label: 'Company', hint: 'Client, partner, or organization' },
   { id: 'person', label: 'Person', hint: 'Team member, client, or collaborator' },
   { id: 'meeting', label: 'Meeting', hint: 'Durable meeting context and outcomes' },
+  { id: 'timesheet', label: 'Time sheet', hint: 'Record work and prepare invoice totals' },
   { id: 'note', label: 'Knowledge note', hint: 'Reusable context and understanding' },
   { id: 'resource', label: 'Resource', hint: 'A useful source, asset, or reference' },
   { id: 'journal', label: 'Journal', hint: 'Chronological notes and daily logs' },
@@ -344,6 +355,8 @@ const entityStatuses = Object.freeze([
   { id: 'former', label: 'Former' },
 ])
 const draft = reactive(emptyDraft())
+const timePeople = computed(() => [{ value: '', label: 'Unassigned' }, ...props.nodes.filter(node => node.kind === 'person').map(node => ({ value: node.id, label: node.title }))])
+const timeProjects = computed(() => [{ value: '', label: 'No project' }, ...props.nodes.filter(node => node.kind === 'project').map(node => ({ value: node.id, label: node.title }))])
 const scopeOptions = computed(() => props.scopes.map(scope => ({
   value: scope.id,
   label: scopeName(scope.kind),
@@ -391,6 +404,9 @@ function emptyDraft() {
     companyRole: '',
     entityStatus: 'active',
     teamMember: false,
+    period: localTimeDate().slice(0, 7),
+    personId: props.selfPersonId,
+    projectId: props.initialProjectId,
   }
 }
 
@@ -406,6 +422,7 @@ function defaultScope(kind = draft.kind) {
 
 function submit() {
   if (!draft.title.trim() || !draft.scopeId || props.saving) return
+  if (draft.kind === 'timesheet' && !validPeriod(draft.period)) return
   const properties = createProperties()
   emit('create', {
     kind: draft.kind,
@@ -415,6 +432,10 @@ function submit() {
     body: draft.body,
     tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
     properties,
+    ...(draft.kind === 'timesheet' ? { relations: [
+      ...(draft.projectId ? [{ relation: 'part_of', target: draft.projectId }] : []),
+      ...(draft.personId ? [{ relation: 'assigned_to', target: draft.personId }] : []),
+    ] } : {}),
   }, {
     another: createAnother.value,
     reset() {
@@ -427,6 +448,7 @@ function submit() {
 }
 
 function createProperties() {
+  if (draft.kind === 'timesheet') return { period: draft.period, entries: [] }
   if (draft.kind === 'issue') {
     return { status: draft.status, priority: draft.priority }
   }
@@ -499,6 +521,7 @@ function scopeHint(scope) {
 }
 
 function human(value) {
+  if (value === 'timesheet') return 'time sheet'
   return String(value || '').replaceAll('-', ' ')
 }
 

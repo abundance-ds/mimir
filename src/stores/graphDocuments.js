@@ -31,7 +31,7 @@ export function graphExportContent(file, nodes = []) {
   if (!file.graph?.node) throw new Error('This Graph draft has no entry to export.')
   const node = cloneGraphDocument(file.graph.node)
   const { draft } = file.graph
-  const { payload } = buildInspectorSave({ node, draft, nodes,
+  const { payload } = buildInspectorSave({ node, draft, nodes, validate: false,
     tags: splitValues(node.kind === 'issue' ? draft.labels : draft.tags) })
   for (const key of ['title', 'summary', 'body', 'tags', 'relations']) {
     if (payload[key] !== undefined) node[key] = payload[key]

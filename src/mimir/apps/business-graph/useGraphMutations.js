@@ -95,7 +95,8 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
     try {
       const projectId = create.kind === 'issue' ? createProject.value : ''
       const relations = uniqueRelations([
-        ...createRelations.value,
+        ...(create.kind === 'timesheet' ? [] : createRelations.value),
+        ...(create.relations || []),
         ...(projectId ? [{ relation: 'part_of', target: projectId, legacy: false }] : []),
       ])
       const created = await graph.create({
@@ -125,6 +126,12 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
   }
 
   function openRelatedCreate({ kind, parent }) {
+    if (kind === 'timesheet' && parent.kind === 'project') {
+      openCreate('timesheet', 'backlog', '', [
+        { relation: 'part_of', target: parent.id, legacy: false },
+      ])
+      return
+    }
     if (kind === 'decision' && parent.kind === 'project') {
       openCreate('decision', 'backlog', '', [
         { relation: 'part_of', target: parent.id, legacy: false },

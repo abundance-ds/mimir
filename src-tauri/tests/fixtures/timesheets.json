@@ -1,0 +1,477 @@
+[
+  {
+    "name": "open and invoiced",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "empty sheet",
+    "properties": {
+      "period": "2026-09",
+      "entries": []
+    },
+    "valid": true
+  },
+  {
+    "name": "missing period",
+    "properties": {
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "bad month",
+    "properties": {
+      "period": "2026-13",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "year zero",
+    "properties": {
+      "period": "0000-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "missing entries",
+    "properties": {
+      "period": "2026-09"
+    },
+    "valid": false
+  },
+  {
+    "name": "wrong entries shape",
+    "properties": {
+      "period": "2026-09",
+      "entries": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "non object row",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        },
+        "bad"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "duplicate row id",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "missing row id",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "invalid calendar date",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-31",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "date outside month",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-10-01",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "zero minutes",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 0,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "negative minutes",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": -1,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "fraction minutes",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 1.5,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "string minutes",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": "90",
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "over 24 hours",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 1441,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "empty description",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": " ",
+          "custom": {
+            "kept": true
+          }
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "boolean invoice",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          },
+          "invoice": true
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "empty invoice",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          },
+          "invoice": " "
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "null invoice",
+    "properties": {
+      "period": "2026-09",
+      "entries": [
+        {
+          "id": "t1",
+          "date": "2026-09-15",
+          "minutes": 90,
+          "description": "Test export",
+          "custom": {
+            "kept": true
+          },
+          "invoice": null
+        },
+        {
+          "id": "t2",
+          "date": "2026-09-15",
+          "minutes": 45,
+          "description": "Meeting",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": false
+  }
+]
