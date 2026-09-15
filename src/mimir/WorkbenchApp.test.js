@@ -576,11 +576,23 @@ describe('WorkbenchApp', () => {
     expect(activityApi.spawnActivity).not.toHaveBeenCalled()
   })
 
-  it.each(['activity', 'editor', 'sidebar'])('uses the same creation and Settings shortcuts from an input in %s', async pane => {
+  it.each(['activity', 'editor', 'sidebar'])('uses the same app-wide shortcuts from an input in %s', async pane => {
     const wrapper = await render({ workspace: '/w' })
     const field = document.createElement('input')
     wrapper.get(`[data-pane="${pane}"]`).element.append(field)
     field.focus()
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', metaKey: true, shiftKey: true, isComposing: true, bubbles: true }))
+    await nextTick()
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+    await flushPromises()
+    const projectInput = wrapper.get('[data-quick-open-input]')
+    expect(projectInput.element.value).toBe('p: ')
+    expect(document.activeElement).toBe(projectInput.element)
+    await projectInput.trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    expect(document.activeElement).toBe(field)
     const press = key => field.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true }))
     press('t')
     await nextTick()
@@ -1072,6 +1084,28 @@ describe('WorkbenchApp', () => {
     expect(useSettingsStore().recentWorkspaceFolders[0]).toBe('/other/project')
     expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePath')).toBe('/other/project')
     expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toContain('/w')
+  })
+
+  it('switches to the previous project with Cmd+Shift+P and Enter, then back again', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w',
+      recentWorkspaceFolders: ['/w', '/other/project', '/older/project'],
+    }))
+    const wrapper = await render()
+    useWorkbenchStore().setPaneState('sidebar', 'rail')
+    fileApi.openWorkspaceIndex.mockClear()
+    for (const path of ['/other/project', '/w']) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+      await flushPromises()
+      expect(wrapper.get('[data-quick-open-row][aria-selected="true"]').attributes('data-quick-open-key')).toBe(`project:${path}`)
+      await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+      expect(useSettingsStore().mimirWorkspaceFolder).toBe(path)
+      expect(useSettingsStore().recentWorkspaceFolders[0]).toBe(path)
+      expect(fileApi.openWorkspaceIndex).toHaveBeenLastCalledWith(path)
+      expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    }
+    expect(activityApi.stopActivity).not.toHaveBeenCalled()
   })
 
   it('shows a missing project once without letting its Activity retain the project row', async () => {
@@ -2271,6 +2305,12 @@ describe('WorkbenchApp', () => {
     modal.setAttribute('aria-modal', 'true')
     document.body.append(modal)
     try {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'P',
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }))
       document.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'p',
         metaKey: true,

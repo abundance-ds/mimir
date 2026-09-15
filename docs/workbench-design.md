@@ -146,6 +146,7 @@ Inline AI binding use this registry. Settings groups commands by scope.
 | App-wide shortcut | Action |
 |---|---|
 | Cmd/Ctrl+P | Go to |
+| Cmd/Ctrl+Shift+P | Switch project |
 | Cmd/Ctrl+T | Main New Tab picker |
 | Cmd/Ctrl+N | New Editor document |
 | Cmd/Ctrl+B | Expand/collapse Sidebar |
@@ -186,12 +187,22 @@ Cmd/Ctrl+P opens one grouped launcher near the window top.
 - Typing searches New Activity, open tabs, unavailable Activities, Tools,
   Projects, Files, Chats, and History.
 - Scope prefixes are `a:`, `n:`, `t:`, `p:`, `f:`, `c:`, and `h:`.
+- Cmd/Ctrl+Shift+P opens Go to with `p: ` inserted and the cursor after the
+  space. It shows all available recent projects, with the current project
+  excluded. The previous project is selected first; Enter switches to it.
+  Project order follows navigation recency, not agent output or file changes.
+  Names and parent paths identify projects. Open project and Create project
+  follow the list. Typing filters projects; clearing the prefix returns to
+  all results. Escape closes the panel and restores focus. The shortcut appears
+  in Settings and the project control tooltip in expanded and rail states.
 - Arrow keys cross group boundaries and skip headings. Result bounds and
   ranking belong to `quickOpenResults.js`.
 - History browses the current project when empty and searches all projects when
   given text. Opening a result from another project switches there first.
 - The panel traps focus, ignores stale asynchronous results, and restores focus
   on cancellation. Selecting a result transfers focus to its destination.
+  During text composition, Enter, Escape, and navigation keys remain with the
+  input method; they do not select a result or close the panel.
 - Results are built only while the panel is open. Reopening uses current tabs,
   files, and workspace context without scanning them during closed-panel updates.
 

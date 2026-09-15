@@ -9,6 +9,7 @@
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-open-title"
+        @keydown.capture="preserveComposition"
         @keydown="onDialogKeydown"
       >
         <h2 id="quick-open-title" class="sr-only">{{ dialogTitle }}</h2>
@@ -272,7 +273,9 @@ const scope = computed(() => (
   inNewActivityView.value ? 'new-activity' : parsedQuery.value.scope
 ))
 const dialogTitle = computed(() => (
-  inNewActivityView.value ? 'Go to: New activity' : props.initialView === 'tabs' ? 'New tab' : 'Go to'
+  inNewActivityView.value ? 'Go to: New activity'
+    : scope.value === 'projects' ? 'Switch project'
+      : props.initialView === 'tabs' ? 'New tab' : 'Go to'
 ))
 const inputPlaceholder = computed(() => (
   inNewActivityView.value
@@ -282,10 +285,12 @@ const inputPlaceholder = computed(() => (
 const resultsLabel = computed(() => (
   inNewActivityView.value
     ? 'New activity sources'
-    : 'New activities, tools, projects, files, chats, and history'
+    : scope.value === 'projects' ? 'Projects and project actions'
+      : 'New activities, tools, projects, files, chats, and history'
 ))
 const emptyMessage = computed(() => {
   if (inNewActivityView.value) return 'No matching activity sources.'
+  if (scope.value === 'projects') return 'No matching projects.'
   if (scope.value === 'history' && !parsedQuery.value.term) {
     return 'No closed sessions in this project. Type to search all projects.'
   }
@@ -341,15 +346,17 @@ watch(
     }
     previousFocus = document.activeElement
     cancelPendingSearch()
-    query.value = ''
+    query.value = props.initialView === 'projects' ? 'p: ' : ''
     searchError.value = ''
     historySnippets.value = new Map()
     view.value = props.initialView === 'new-activity' ? 'new-activity' : 'root'
     selectedIndex.value = preferredResultIndex()
-    await files.setQuery('')
+    // Project navigation uses the retained list and does not wait for file search.
+    if (props.initialView !== 'projects') await files.setQuery('')
     if (!props.open) return
     await nextTick()
     input.value?.focus()
+    input.value?.setSelectionRange(query.value.length, query.value.length)
   },
   { immediate: true },
 )
@@ -515,6 +522,12 @@ function prefixForGroup(group) {
     Chats: 'c:',
     History: 'h:',
   }[group] || ''
+}
+
+function preserveComposition(event) {
+  // Candidate selection belongs to the input method. Keep native defaults and
+  // stop the input/row handlers before their prevent modifiers consume the key.
+  if (event.isComposing || event.keyCode === 229) event.stopPropagation()
 }
 
 function onDialogKeydown(event) {

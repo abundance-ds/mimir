@@ -4,6 +4,7 @@ import { primaryModifierPressed, platformKind } from './platform.js'
 // their target in the Workbench; 'editor' actions require Editor focus.
 export const SHORTCUTS = [
   { id: 'quick-open', scope: 'global', label: 'Go to', key: 'p' },
+  { id: 'switch-project', scope: 'global', label: 'Switch project', key: 'p', shift: true },
   { id: 'new-tab', scope: 'global', label: 'New Main tab', key: 't' },
   { id: 'new-document', scope: 'global', label: 'New Editor document', key: 'n' },
   { id: 'toggle-sidebar', scope: 'global', label: 'Expand/collapse Sidebar', key: 'b' },

@@ -11,7 +11,7 @@
       :aria-expanded="popoverOpen"
       aria-haspopup="dialog"
       aria-controls="project-switcher-popover"
-      :title="workspaceMissing ? `${workspacePath} is unavailable` : workspacePath || 'Open workspace folder'"
+      :title="`Switch project (${switchProjectShortcut})${workspacePath ? `\n${workspacePath}${workspaceMissing ? ' is unavailable' : ''}` : ''}`"
       @click.stop="togglePopover"
       @keydown.down.prevent="openPopover"
     >
@@ -150,6 +150,7 @@
 
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { SHORTCUTS, shortcutKeys } from '../../shared/shortcuts.js'
 import {
   IconChevronDown,
   IconFolderOpen,
@@ -158,6 +159,7 @@ import {
 } from '@tabler/icons-vue'
 
 const DEFAULT_PROJECT_LIMIT = 8
+const switchProjectShortcut = shortcutKeys(SHORTCUTS.find(binding => binding.id === 'switch-project')).join(' ')
 
 const props = defineProps({
   collapsed: { type: Boolean, default: false },

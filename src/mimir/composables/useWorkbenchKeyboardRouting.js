@@ -87,6 +87,8 @@ export function useWorkbenchKeyboardRouting({
       void focusPanel(result.action === 'focus-main' ? 'activity' : 'editor')
     } else if (result.action === 'quick-open') {
       openQuickOpen()
+    } else if (result.action === 'switch-project') {
+      openQuickOpen('projects')
     } else if (result.action === 'toggle-sidebar') {
       void toggleSidebar()
     } else if (result.action === 'cycle-editor') {

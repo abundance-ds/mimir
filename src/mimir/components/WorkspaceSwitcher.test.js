@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
+import { SHORTCUTS, shortcutKeys } from '../../shared/shortcuts.js'
 
 function render(props = {}) {
   return mount(WorkspaceSwitcher, {
@@ -22,6 +23,13 @@ afterEach(() => {
 })
 
 describe('WorkspaceSwitcher', () => {
+  it.each([false, true])('shows the project shortcut with collapsed=%s', collapsed => {
+    const wrapper = render({ collapsed })
+    const keys = shortcutKeys(SHORTCUTS.find(binding => binding.id === 'switch-project')).join(' ')
+    expect(wrapper.get('[data-sidebar-workspace]').attributes('title')).toBe(`Switch project (${keys})\n/work/mimir`)
+    wrapper.unmount()
+  })
+
   it('opens as a focused project filter without repeating current-project detail', async () => {
     const wrapper = render()
     await wrapper.get('[data-sidebar-workspace]').trigger('click')

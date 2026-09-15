@@ -365,6 +365,75 @@ describe('QuickOpen', () => {
     })
   })
 
+  it('opens all recent projects with the cursor after the prefix without waiting for file search', async () => {
+    const files = useWorkspaceFilesStore()
+    const search = vi.spyOn(files, 'setQuery').mockImplementation(() => new Promise(() => {}))
+    const recent = Array.from({ length: 8 }, (_, index) => ({ name: `Project ${index}`, path: `/work/project-${index}` }))
+    const wrapper = render(true, {
+      attachTo: document.body,
+      props: { initialView: 'projects', projects: [projects[0], ...recent] },
+    })
+    await flushPromises()
+    const input = wrapper.get('[data-quick-open-input]')
+    expect(document.activeElement).toBe(input.element)
+    expect(input.element.value).toBe('p: ')
+    expect(input.element.selectionStart).toBe(3)
+    expect(input.element.selectionEnd).toBe(3)
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Projects')
+    expect(wrapper.findAll('[data-quick-open-row]').map(row => row.attributes('data-quick-open-key'))).toEqual([
+      ...recent.map(project => `project:${project.path}`), 'project:open', 'project:create',
+    ])
+    expect(wrapper.get('[aria-selected="true"]').attributes('data-quick-open-key')).toBe('project:/work/project-0')
+    expect(search).not.toHaveBeenCalled()
+    expect(activityApi.searchHistory).not.toHaveBeenCalled()
+
+    // Text entered at the initial cursor must retain the project filter.
+    input.element.setRangeText('Project 7', input.element.selectionStart, input.element.selectionEnd, 'end')
+    await input.trigger('input')
+    expect(input.element.value).toBe('p: Project 7')
+    expect(wrapper.findAll('[data-quick-open-row]')).toHaveLength(1)
+    await input.trigger('keydown', { key: 'Enter', isComposing: true })
+    expect(wrapper.emitted('activate')).toBeUndefined()
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({ type: 'project', path: '/work/project-7' })
+    search.mockRestore()
+  })
+
+  it('clears the project scope and resets the query for each entry point', async () => {
+    const wrapper = render(true, { props: { initialView: 'projects' } })
+    await flushPromises()
+    await wrapper.get('[data-quick-open-input]').setValue('p: missing')
+    expect(wrapper.text()).toContain('No matching projects.')
+    await wrapper.get('[data-quick-open-input]').setValue('')
+    expect(wrapper.find('[data-quick-open-scope]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    expect(wrapper.get('[data-quick-open-input]').element.value).toBe('p: ')
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true, initialView: 'root' })
+    expect(wrapper.get('[data-quick-open-input]').element.value).toBe('')
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
+  })
+
+  it.each(['Enter', 'Escape', 'ArrowDown'])('leaves %s to text composition in project search', async key => {
+    const wrapper = render(true, { attachTo: document.body, props: { initialView: 'projects' } })
+    await flushPromises()
+    const input = wrapper.get('[data-quick-open-input]').element
+    const selected = input.getAttribute('aria-activedescendant')
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      const event = new KeyboardEvent('keydown', { key, ...composition, bubbles: true, cancelable: true })
+      input.dispatchEvent(event)
+      await flushPromises()
+      expect(event.defaultPrevented).toBe(false)
+      expect(wrapper.emitted('activate')).toBeUndefined()
+      expect(wrapper.emitted('close')).toBeUndefined()
+      expect(input.getAttribute('aria-activedescendant')).toBe(selected)
+    }
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({ type: 'project', path: '/work/other-project' })
+  })
+
   it('uses h: for closed history rather than current activities', async () => {
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
