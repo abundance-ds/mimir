@@ -44,6 +44,12 @@ full-width wash from `markdownCodeBlocks.js`. The file store is the durable rend
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
 
+CodeMirror retains undo history, selection, and scroll position by file id.
+The EditorSurface document snapshot contains the loaded document's id and text.
+`useContentSync` copies that text only when the id matches the current FileStore entry.
+Tab selection can change before CodeMirror loads the document; during that
+interval, content reads use the selected file's stored buffer.
+
 Bun applies `patches/style-mod@4.1.3.patch` to both package exports. CodeMirror
 mounts reuse unchanged stylesheet text instead of replacing its text node and
 invalidating styles across the document. New rules and changed rule order still

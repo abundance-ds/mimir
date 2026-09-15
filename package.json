@@ -23,7 +23,7 @@
     "scribe:smoke-app": "node scripts/build-scribe-smoke-app.mjs",
     "tauri": "node scripts/tauri.mjs",
     "test": "node scripts/test.mjs",
-    "test:scratchpad": "bun run test src/stores/scratchpad.test.js src/stores/files.scratchpad.test.js src/editor/composables/useScratchpadEditor.test.js && node --test bin/mimir-file-suggestion.test.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib scratchpad",
+    "test:scratchpad": "bun run test src/stores/scratchpad.test.js src/stores/files.scratchpad.test.js src/editor/composables/useScratchpadEditor.test.js src/editor/App.scratchpad.test.js src/editor/components/workspace/EditorSurface.test.js && node --test bin/mimir-file-suggestion.test.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib scratchpad",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

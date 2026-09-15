@@ -83,6 +83,11 @@ defineExpose({
   getContent() {
     return view.value?.state.doc.toString() ?? ''
   },
+  getDocumentSnapshot() {
+    if (!view.value) return null
+    // Props can name the next file before the post-render switch loads it.
+    return { fileId: activeFileId, content: view.value.state.doc.toString() }
+  },
   hasFocus() {
     return Boolean(view.value?.hasFocus)
   },

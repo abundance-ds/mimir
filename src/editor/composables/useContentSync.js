@@ -7,11 +7,15 @@ export function useContentSync({
   documentBridge,
 }) {
   let contentSyncTimer = null
-  let confirmedFileId = null
 
   function currentEditorContent() {
-    if (currentFile.value?.kind === 'graph') return currentFile.value.content || ''
-    return editorSurfaceRef.value?.getContent?.() ?? currentFile.value?.content ?? ''
+    const file = currentFile.value
+    if (!file) return ''
+    if (file.kind !== 'text') return file.content || ''
+    // Store selection can change before CodeMirror switches documents.
+    // Only text from the actual target document can enter its buffer.
+    const snapshot = editorSurfaceRef.value?.getDocumentSnapshot?.()
+    return snapshot?.fileId === file.id ? snapshot.content : file.content || ''
   }
 
   function syncDerivedContent(content, { bridge = 'schedule' } = {}) {
@@ -25,15 +29,10 @@ export function useContentSync({
     const file = currentFile.value
     if (!file) return ''
     if (file.kind === 'graph') return file.content || ''
-    if (confirmedFileId !== null && file.id !== confirmedFileId) {
-      syncDerivedContent(file.content || '', options)
-      return file.content || ''
-    }
     const content = currentEditorContent()
     if (content !== file.content) {
       fileManager.updateContent(content)
     }
-    confirmedFileId = file.id
     syncDerivedContent(content, options)
     return content
   }
@@ -48,7 +47,6 @@ export function useContentSync({
   function syncOpenFileSnapshot({ bridge = 'flush' } = {}) {
     const file = currentFile.value
     if (!file) return
-    confirmedFileId = file.id
     syncDerivedContent(file.content || '', { bridge })
   }
 

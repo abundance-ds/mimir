@@ -118,7 +118,7 @@ tests in its standard suites and runs the CLI helper tests in a separate step.
 | Native file and history | Conflict rejection, 100-state retention, restore, comment preservation, missing-file intervals, final text written while closed, corrupt-history preservation, failed journal writes, and retry |
 | Project links | Name collisions, local exclusions, linked worktrees, detached-file recovery, failed ignore setup, and ownership ending when Git tracks a replacement |
 | Renderer state | Listener registration before the first read, snapshot refresh after events, serialized reads and saves, failure cleanup, and retry |
-| Editor | Global tab identity, duplicate link opens, dirty-buffer retention, Save As copies and aliases, focus, history browsing, Clear, and typing during Restore |
+| Editor | Global tab identity, duplicate link opens, dirty-buffer retention, Save As copies and aliases, focus, history browsing, Clear, typing during Restore, and separate document content and undo during tab/project switches with a concurrent refresh |
 | Claude helper | Real Node process entry, canonical target selection, alias deduplication, unrelated files with the same name, existing suggestion commands, Git fallback without `rg`, and invalid input |
 
 The development-app check on 8 September 2026 used Claude Code 2.1.263:
@@ -142,6 +142,9 @@ Before release, run the following checks in the installed signed app:
    confirm that both texts remain in history. Check Copy, Save As, and Clear.
 4. Quit and reopen Mimir. Check the tab and history. Change the file while Mimir
    is closed, reopen it, and confirm that the final text becomes the latest state.
+5. Switch between Scratchpad and project documents while an agent changes
+   Scratchpad. Repeat with project switches. Edit, then use Undo and Redo in
+   each document. Check that each buffer contains only its own text.
 
 These remaining native checks cannot be proved by renderer mocks. No additional
 draft schema, agent tool, or storage service is required for this trial.
