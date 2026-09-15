@@ -118,6 +118,7 @@ const expectedSnapshot = {
   }],
   config: {
     detectionEnabled: true,
+    ignoredApps: [],
     autoRecord: false,
     microphoneDeviceId: 'CoreAudio:fixture-microphone',
     transcriptionMode: 'custom',

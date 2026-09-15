@@ -5,10 +5,9 @@ task scope.
 
 ## Open
 
-- Scribe tests: two `meetings.ipc-contract.test.js` expectations omit the
-  normalized `ignoredApps` field. The reviewed-summary case in
-  `ScribeApp.test.js` also failed in a full-suite run but passed when that file
-  ran alone; investigate its asynchronous completion check.
+- Scribe tests: the reviewed-summary case in `ScribeApp.test.js` failed in a
+  full-suite run but passed when that file ran alone; investigate its
+  asynchronous completion check.
 
 - Scribe notification repair: real banner/RECORD behavior and repeated-call CPU
   observations need a record from the repaired app. A long run with call
