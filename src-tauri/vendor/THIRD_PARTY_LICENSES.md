@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 703 Cargo packages, 320 npm packages, and 4 reviewed embedded/downloadable assets.
+Inventory: 703 Cargo packages, 320 npm packages, and 9 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -717,7 +717,12 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:zvariant_derive@5.11.0 | MIT | https://crates.io/api/v1/crates/zvariant_derive/5.11.0/download | c7d5b780599bbde114e39d9a0799577fad1ced5105d38515745f7b3099d8ceda |
 | cargo:zvariant_utils@3.3.1 | MIT | https://crates.io/api/v1/crates/zvariant_utils/3.3.1/download | 6d464f5733ffa07a3164d656f18533caace9d0638596721355d73256a410d691 |
 | cargo:zvariant@5.11.0 | MIT | https://crates.io/api/v1/crates/zvariant/5.11.0/download | 1c1567a6ec68df868cbbfde844cfc6d81649fe5109a62b116b19fabd53e618ee |
+| model:ggml-base.bin@5359861c739e955e79d9a303bcbc70fb988958b1 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin | 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe |
+| model:ggml-large-v3-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin | d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1 |
+| model:ggml-large-v3-turbo-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin | 394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2 |
+| model:ggml-medium.bin@5359861c739e955e79d9a303bcbc70fb988958b1 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin | 6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208 |
 | model:ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-small.bin | 1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b |
+| model:ggml-tiny.bin@5359861c739e955e79d9a303bcbc70fb988958b1 | MIT | https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin | be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21 |
 | npm:@ai-sdk/anthropic@3.0.76 | Apache-2.0 | https://registry.npmjs.org/@ai-sdk/anthropic/-/anthropic-3.0.76.tgz | 90ebaf4fd7ba3f2805be062992be2ff608ef99c30f7c9a7bf636978de465f46a688f639776d7377aba3ba3589cfad892070e4832e6f15c53baf01080fdac4624 |
 | npm:@ai-sdk/gateway@3.0.112 | Apache-2.0 | https://registry.npmjs.org/@ai-sdk/gateway/-/gateway-3.0.112.tgz | 8e205aa3da51e28c16ca3a34067b8d73b59240118e0f4b61cac1380058195da1beccc15b21241752426bede3f0fe9841bde3f2ee31391520362dfee5c2a52289 |
 | npm:@ai-sdk/google@3.0.71 | Apache-2.0 | https://registry.npmjs.org/@ai-sdk/google/-/google-3.0.71.tgz | 1bce94b6a90228cf2641cbec038150d5609137ec35825fecc6ea189790895f90c54944a4acb34a98b72f8b74ed9ccbcab61e658bc5bfd61dde9904a5d8afaa9c |
