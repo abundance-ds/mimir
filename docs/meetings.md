@@ -64,6 +64,9 @@ Scribe events; **Retry** appears if loading fails. Model and
 provider details belong in Settings. If recording needs setup, the Settings
 button also shows **Setup**.
 
+**Transcribe again** shows queued or running progress in the meeting and overview,
+including when a transcript already exists. Repeat requests are disabled while it runs.
+
 The Scribe flow is overview → details → overview. **Back** or **Escape** returns
 to the overview and saves pending edits in the background. An open menu or
 editor control can consume Escape first.
@@ -121,8 +124,8 @@ honest `Interrupted` and `Failed` exits.
 - Repair is keyed by `runId`, uses verified committed audio from sequence zero,
   stages output privately, and replaces transcript data only after a complete
   terminal pass.
-- Recovery and retranscription use the route and model authorized for that
-  recording. Settings changes cannot redirect retained audio.
+- Automatic recovery keeps the recording's original route and model.
+  **Transcribe again** uses the current settings when explicitly requested.
 
 ## Transcription and follow-up
 
@@ -147,7 +150,7 @@ honest `Interrupted` and `Failed` exits.
 Scribe uses OpenAI Whisper through `whisper.cpp` with Metal. In
 **Settings → Scribe → Transcription**, **Download** installs a model, **Use**
 selects it for new recordings, and **Remove** deletes it. Downloads do not change
-the selection. Existing recordings retain their model. Removing the selected
+the selection. Active recordings retain their model. Removing the selected
 model requires a download or another selection before recording.
 
 `src-tauri/resources/meeting-models.json` owns the catalog, pinned revisions,

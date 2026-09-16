@@ -267,20 +267,19 @@
             </div>
 
             <div
-              v-if="meetingNeedsRecovery(detailMeeting)"
+              v-if="meetingNeedsRecovery(detailMeeting) || meetingRecoveryPending(detailMeeting)"
               class="scribe-inline-notice mt-5"
               role="status"
             >
-              <IconAlertTriangle :size="13" class="mt-px shrink-0" />
+              <IconAlertTriangle v-if="!meetingRecoveryPending(detailMeeting)" :size="13" class="mt-px shrink-0" />
               <span data-scribe-recovery-status class="min-w-0 flex-1">
                 {{ recoveryStatus(detailMeeting) }}
               </span>
               <button
-                v-if="meetingCanRetranscribe(detailMeeting)"
+                v-if="meetingCanRetranscribe(detailMeeting) && !meetingRecoveryPending(detailMeeting)"
                 type="button"
                 data-scribe-recover-inline
                 class="scribe-quiet-button shrink-0"
-                :disabled="meetingRecoveryPending(detailMeeting)"
                 @click="requestMeetingRecovery(detailMeeting)"
               >
                 {{ meetingRecoveryActionLabel(detailMeeting) }}
@@ -734,6 +733,8 @@
       :position="meetingMenuPosition"
       :context="detailMeetingId === meetingMenuId ? 'detail' : 'row'"
       :can-retranscribe="meetingCanRetranscribe(menuMeeting)"
+      :retranscribe-pending="meetingRecoveryPending(menuMeeting)"
+      :retranscribe-label="meetingRecoveryActionLabel(menuMeeting)"
       :can-continue="meetingCanContinue(menuMeeting) && (menuMeeting.lifecycle !== 'arming' || detailMeetingId !== menuMeeting.id)"
       :continue-label="menuMeeting.lifecycle === 'arming' ? 'Record' : 'Continue recording'"
       :can-rename="!menuMeeting.graphNodeId"
@@ -1528,10 +1529,11 @@ function closeMeetingMenu({ restoreFocus = true } = {}) {
 }
 
 async function requestMeetingRecovery(meeting) {
+  if (meetingRecoveryPending(meeting)) return
   closeMeetingMenu({ restoreFocus: false })
   try {
     await meetings.retranscribe(meeting.id)
-    liveAnnouncement.value = 'Transcript retry started'
+    liveAnnouncement.value = 'Transcription requested'
   } catch (error) {
     actionError.value = message(error)
   }
@@ -1779,7 +1781,9 @@ function gapDuration(gap) {
 }
 
 function meetingNeedsRecovery(meeting) {
-  return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle) || Boolean(meeting?.error)
+  return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle)
+    || Boolean(meeting?.error)
+    || latestMeetingJob(meeting, 'transcription')?.status === 'failed'
 }
 
 function meetingCanRetranscribe(meeting) {
@@ -1812,6 +1816,10 @@ function meetingRecordActionLabel(meeting) {
 }
 
 function meetingBackgroundStatus(meeting) {
+  if (meetingRecoveryPending(meeting)) {
+    const label = meetingRecoveryActionLabel(meeting)
+    return label === 'Queued' ? 'Transcription queued' : label
+  }
   if (['stopping', 'finalizing'].includes(meeting?.lifecycle)) {
     return 'Finalizing transcript'
   }
@@ -1822,15 +1830,19 @@ function meetingBackgroundStatus(meeting) {
 }
 
 function recoveryStatus(meeting) {
+  if (meetings.pending[`retranscribe:${meeting?.id}`]) return 'Queuing transcription…'
   const job = latestMeetingJob(meeting, 'transcription')
   if (job?.status === 'failed') {
     const detail = safeFailureDetail(job.error || meeting.error)
+    if (meeting.transcriptFinal) {
+      return `Transcription failed. The existing transcript is unchanged.${detail ? ` ${detail}` : ''}`
+    }
     return `Stored audio is safe, but transcript recovery failed.${detail ? ` ${detail}` : ''}`
   }
   if (['pending', 'queued', 'running'].includes(job?.status)) {
     const detail = safeFailureDetail(job.error)
-    const phase = job.status === 'pending' ? 'queued' : job.status
-    return `Stored audio is safe. Transcript recovery is ${phase}.${detail ? ` Last attempt: ${detail}` : ''}`
+    const phase = job.status === 'running' ? 'Transcribing…' : 'Transcription queued.'
+    return `${phase}${detail ? ` Last attempt: ${detail}` : ''}`
   }
   const detail = safeFailureDetail(meeting.error)
   return `Capture ended unexpectedly. Stored audio is safe.${detail ? ` ${detail}` : ''}`

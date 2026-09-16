@@ -5,6 +5,11 @@ task scope.
 
 ## Open
 
+- Scribe audio retention: failed repair attempts can remain `collecting` after
+  a later retranscription succeeds. These old records keep the retention hold
+  active and prevent expired audio from being deleted. Release obsolete holds
+  after successful replacement while preserving holds for active transcription.
+
 - Scribe tests: the reviewed-summary case in `ScribeApp.test.js` failed in a
   full-suite run but passed when that file ran alone; investigate its
   asynchronous completion check.

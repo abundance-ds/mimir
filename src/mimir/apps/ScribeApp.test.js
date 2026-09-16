@@ -1348,10 +1348,89 @@ describe('ScribeApp', () => {
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
 
     expect(wrapper.get('[data-scribe-recovery-status]').text()).toContain('queued')
-    expect(wrapper.get('[data-scribe-recover-inline]').text()).toBe('Queued')
-    expect(wrapper.get('[data-scribe-recover-inline]').attributes('disabled')).toBeDefined()
-    await wrapper.get('[data-scribe-recover-inline]').trigger('click')
+    expect(wrapper.find('[data-scribe-recover-inline]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
+    expect(wrapper.get('[data-scribe-recover-meeting]').text()).toBe('Queued')
+    expect(wrapper.get('[data-scribe-recover-meeting]').element.disabled).toBe(true)
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
     expect(retranscribeMeeting).not.toHaveBeenCalled()
+  })
+
+  it('shows a completed meeting transcribing from request through queued and running until success', async () => {
+    const complete = meeting({ summary: 'Existing summary.', summaryState: 'succeeded' })
+    const withJob = status => meeting({
+      ...complete,
+      jobs: [{ id: 'retranscription-1', kind: 'transcription', status }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
+    let resolveRequest
+    vi.mocked(retranscribeMeeting).mockImplementation(() => new Promise(resolve => {
+      resolveRequest = resolve
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.find('[data-scribe-recovery-status]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
+    expect(wrapper.get('[data-scribe-recover-meeting]').text()).toBe('Transcribe again')
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toBe('Queuing transcription…')
+
+    resolveRequest(snapshot({ revision: 2, meetings: [withJob('queued')] }))
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toBe('Transcription queued.')
+    const store = useMeetingsStore()
+    store.applySnapshot(snapshot({ revision: 3, meetings: [withJob('running')] }))
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toBe('Transcribing…')
+    expect(store.meetings[0].transcriptFinal).toBe(true)
+
+    await wrapper.get('[data-scribe-back]').trigger('click')
+    expect(wrapper.get('[data-scribe-row-progress]').text()).toBe('Transcribing…')
+    await wrapper.get('[data-scribe-meeting-row]').trigger('contextmenu', { clientX: 80, clientY: 90 })
+    expect(wrapper.get('[data-scribe-recover-meeting]').text()).toBe('Transcribing…')
+    expect(wrapper.get('[data-scribe-recover-meeting]').element.disabled).toBe(true)
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
+    expect(retranscribeMeeting).toHaveBeenCalledTimes(1)
+
+    store.applySnapshot(snapshot({ revision: 4, meetings: [withJob('succeeded')] }))
+    await flushPromises()
+    expect(wrapper.find('[data-scribe-row-progress]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-recover-meeting]').text()).toBe('Transcribe again')
+    expect(wrapper.get('[data-scribe-recover-meeting]').element.disabled).toBe(false)
+    await wrapper.get('[data-scribe-meeting-menu]').trigger('keydown', { key: 'Escape' })
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.find('[data-scribe-recovery-status]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['pending', 'Transcription queued', 'Transcription queued.'],
+    ['queued', 'Transcription queued', 'Transcription queued.'],
+    ['running', 'Transcribing…', 'Transcribing…'],
+  ])('restores %s transcription progress for a completed meeting when Scribe opens', async (status, rowLabel, detailLabel) => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting({
+      jobs: [{ id: 'retranscription-1', kind: 'transcription', status }],
+    })] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-row-progress]').text()).toBe(rowLabel))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toBe(detailLabel)
+  })
+
+  it('shows failed retranscription for a completed meeting and permits another attempt', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting({
+      jobs: [{ id: 'retranscription-1', kind: 'transcription', status: 'failed', error: 'Model is unavailable.' }],
+    })] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Needs attention')
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toBe(
+      'Transcription failed. The existing transcript is unchanged. Model is unavailable.',
+    )
+    expect(wrapper.get('[data-scribe-recover-inline]').text()).toBe('Transcribe again')
+    await wrapper.get('[data-scribe-recover-inline]').trigger('click')
+    await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
   })
 
   it('offers manual retranscription for a legacy repair lifecycle', async () => {

@@ -49,9 +49,10 @@
       type="button"
       role="menuitem"
       data-scribe-recover-meeting
+      :disabled="retranscribePending"
       @click="choose('recover')"
     >
-      Retry transcript
+      {{ retranscribeLabel }}
     </button>
     <button
       type="button"
@@ -73,6 +74,8 @@ const props = defineProps({
   position: { type: Object, required: true },
   context: { type: String, default: 'row' },
   canRetranscribe: { type: Boolean, default: false },
+  retranscribePending: { type: Boolean, default: false },
+  retranscribeLabel: { type: String, default: 'Transcribe again' },
   canContinue: { type: Boolean, default: false },
   continueLabel: { type: String, default: 'Continue recording' },
   canRename: { type: Boolean, default: true },
