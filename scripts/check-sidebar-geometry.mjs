@@ -23,11 +23,12 @@ try {
     const get = selector => rect(side.querySelector(selector))
     return {
       workspace: get('[data-sidebar-workspace] > span'),
-      tools: [...side.querySelectorAll('[data-tool-key] svg')].map(rect),
+      tools: [...side.querySelectorAll('[data-sidebar-tool-icon]')].map(rect),
       activities: [...side.querySelectorAll('[data-activity-key] > button svg')].map(rect),
       navigationScroll: side.querySelector('[data-sidebar-navigation-scroll]').scrollTop,
       navigationHeight: side.querySelector('[data-sidebar-navigation-scroll]').clientHeight,
-      record: get('[title="Open recording"] svg'), microphone: get('[data-sidebar-meeting-microphone] svg'),
+      recordingHeight: side.querySelector('[data-sidebar-meeting-capture]')?.getBoundingClientRect().height || 0,
+      record: get('[data-sidebar-meeting-open] svg'), microphone: get('[data-sidebar-meeting-microphone] svg'),
       stop: get('[aria-label="Stop recording"] svg'), files: get('[data-sidebar-files-toggle] svg') || get('[data-files-mode="project"] svg'),
       settings: get('[data-sidebar-settings] svg'),
     }
@@ -42,7 +43,8 @@ try {
       await paint()
       await page.$eval('[data-sidebar-navigation-scroll]', el => { el.scrollTop = 55 })
       const before = await measure()
-      for (const collapsed of [true, false]) {
+      let firstRail
+      for (const collapsed of [true, false, true, false]) {
         await page.click(collapsed ? '[data-sidebar-collapse]' : '[data-sidebar-restore]')
         await paint()
         const after = await measure()
@@ -50,8 +52,12 @@ try {
         else {
           assert.deepEqual(after.workspace, before.workspace)
           assert.deepEqual(after.settings, before.settings)
+          // Files can release enough space to clamp scrollTop. Account for
+          // that scroll change only; row positions must otherwise stay fixed.
           const unscroll = state => [...state.tools, ...state.activities].map(([x, y]) => [x, y + state.navigationScroll])
-          assert.deepEqual(unscroll(after), unscroll(before), `Rail changed navigation row spacing: ${label}`)
+          assert.deepEqual(unscroll(after), unscroll(before), `Rail moved navigation icons: ${label}`)
+          if (firstRail) assert.deepEqual(after, firstRail, `Rail round trip moved icons or scroll: ${label}`)
+          else firstRail = after
           assert(after.navigationHeight >= before.navigationHeight, `Rail must release Files space: ${label}`)
           assert.equal(await page.$eval('[data-sidebar-files]', el => el.clientHeight), 28)
           assert(await page.$eval('[data-sidebar-state]', side => side.querySelector('[data-sidebar-files-toggle]').getBoundingClientRect().bottom === side.querySelector('[data-sidebar-footer]').getBoundingClientRect().top))
@@ -65,6 +71,35 @@ try {
         }))
         assert(geometry.rowHeights.every(value => value === 24), `Row height: ${label}`)
         assert(!geometry.nested && !geometry.outerOverflow && !geometry.horizontalOverflow && geometry.footer, `Overflow: ${label} ${JSON.stringify(geometry)}`)
+        if (recording) {
+          const capture = await page.$eval('[data-sidebar-meeting-capture]', el => {
+            const box = el.getBoundingClientRect()
+            const timer = el.querySelector('[data-sidebar-meeting-elapsed]')
+            const time = timer.getBoundingClientRect()
+            const scribe = el.previousElementSibling
+            return {
+              height: box.height,
+              belowScribe: scribe?.dataset.toolKey === 'app:scribe' && scribe.getBoundingClientRect().bottom === box.top,
+              withinTools: Boolean(el.closest('nav[aria-label="Tools"]')),
+              badgeOnScribe: Boolean(scribe?.querySelector('[data-sidebar-recording-badge]')),
+              separateIndicator: Boolean(el.querySelector('.sidebar-recording-icon')),
+              borders: [getComputedStyle(el).borderTopWidth, getComputedStyle(el).borderBottomWidth],
+              timeVisible: time.width > 0 && time.height > 0 && getComputedStyle(timer).visibility === 'visible',
+              timeFits: timer.scrollWidth <= timer.clientWidth && time.left >= box.left && time.right <= box.right,
+              controlsFit: [...el.querySelectorAll('button')].every(button => {
+                const bounds = button.getBoundingClientRect()
+                return bounds.width >= 24 && bounds.height >= 24 && bounds.left >= box.left && bounds.right <= box.right
+                  && bounds.top >= box.top && bounds.bottom <= box.bottom
+              }),
+            }
+          })
+          assert.equal(capture.height, 48, `Recording height: ${label}`)
+          assert.equal(capture.badgeOnScribe, collapsed, `Recording badge: ${label}`)
+          assert.equal(capture.separateIndicator, !collapsed, `Duplicate recording indicator: ${label}`)
+          if (collapsed) assert.deepEqual(capture.borders, ['0px', '0px'], `Rail recording rules: ${label}`)
+          assert(capture.belowScribe && capture.withinTools, `Recording must stay with Scribe: ${label}`)
+          assert(capture.timeVisible && capture.timeFits && capture.controlsFit, `Recording controls: ${label} ${JSON.stringify(capture)}`)
+        }
       }
       count++
     }

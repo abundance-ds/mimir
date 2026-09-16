@@ -11,7 +11,7 @@ export function useSidebarFilesSize(props, emit, body) {
   const opening = ref(false)
   const closing = ref(false)
   const resizing = ref(false)
-  const maximum = computed(() => Math.max(0, available.value - 112 - (props.meetingCapture ? 86 : 0)))
+  const maximum = computed(() => Math.max(0, available.value - 112))
   const minimum = computed(() => Math.min(MIN_SIDEBAR_FILES_HEIGHT, maximum.value))
   const clamp = value => Math.round(Math.max(minimum.value, Math.min(maximum.value, value)))
   const height = computed(() => draft.value == null ? clamp(props.filesHeight) : Math.min(maximum.value, draft.value))

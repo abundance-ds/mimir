@@ -53,74 +53,67 @@
       </div>
 
       <main class="scribe-live-main min-h-0 flex-1 px-5 py-4">
-        <div class="mx-auto max-w-5xl">
-          <input
-            v-model="titleDraft"
-            data-scribe-live-title
-            class="scribe-title-input scribe-live-title"
-            type="text"
-            aria-label="Meeting title"
-            :disabled="Boolean(meetings.activeMeeting.graphNodeId)"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            @input="changeTitle(meetings.activeMeeting.id)"
-            @blur="commitTitle(meetings.activeMeeting.id)"
-          />
-          <ScribeMeetingContext
-            :model-value="filedContext || graphDraft"
-            :projects="graphCatalog.projects"
-            :people="graphCatalog.people"
-            :scopes="graphCatalog.scopes"
-            :workspace-project-id="workspaceProjectId"
-            :disabled="!graphCatalog.scopes.length"
-            :read-only="Boolean(meetings.activeMeeting.graphNodeId)"
-            :loading="graphCatalogLoading"
-            :creating="graphEntityCreating"
-            :error="graphCatalogError"
-            @change="changeGraphDraft(meetings.activeMeeting.id, $event)"
-            @create-entity="openGraphEntityDialog(meetings.activeMeeting.id, $event)"
-          />
-          <button
-            v-if="meetings.activeMeeting.graphNodeId"
-            type="button" class="scribe-quiet-button"
-            @click="$emit('openGraphNode', meetings.activeMeeting.graphNodeId)"
-          >View in Graph</button>
-        </div>
-        <div class="scribe-live-layout mx-auto mt-4 max-w-5xl">
-          <section class="min-w-0">
-            <p v-if="!liveLedger.length" class="py-16 text-center text-[11px] text-ink-3">
-              {{ emptyLiveTranscript }}
-            </p>
-            <ol
-              v-else
-              data-scribe-transcript-ledger
-              aria-label="Live meeting transcript"
-              class="scribe-transcript-list"
+        <div :key="meetings.activeMeeting.id" class="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col">
+          <div class="shrink-0">
+            <input
+              v-model="titleDraft"
+              data-scribe-live-title
+              class="scribe-title-input scribe-live-title"
+              type="text"
+              aria-label="Meeting title"
+              :disabled="Boolean(meetings.activeMeeting.graphNodeId)"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              @input="changeTitle(meetings.activeMeeting.id)"
+              @blur="commitTitle(meetings.activeMeeting.id)"
+            />
+            <ScribeMeetingContext
+              :model-value="filedContext || graphDraft"
+              :projects="graphCatalog.projects"
+              :people="graphCatalog.people"
+              :scopes="graphCatalog.scopes"
+              :workspace-project-id="workspaceProjectId"
+              :disabled="!graphCatalog.scopes.length"
+              :read-only="Boolean(meetings.activeMeeting.graphNodeId)"
+              :loading="graphCatalogLoading"
+              :creating="graphEntityCreating"
+              :error="graphCatalogError"
+              @change="changeGraphDraft(meetings.activeMeeting.id, $event)"
+              @create-entity="openGraphEntityDialog(meetings.activeMeeting.id, $event)"
+            />
+            <button
+              v-if="meetings.activeMeeting.graphNodeId"
+              type="button" class="scribe-quiet-button"
+              @click="$emit('openGraphNode', meetings.activeMeeting.graphNodeId)"
+            >View in Graph</button>
+          </div>
+          <div class="scribe-tab-rail" role="tablist" aria-label="Recording views">
+            <button
+              v-for="tab in liveTabs"
+              :id="`scribe-live-tab-${tab.id}`"
+              :key="tab.id"
+              type="button"
+              role="tab"
+              class="scribe-tab"
+              :class="liveTab === tab.id ? 'border-accent text-ink' : 'border-transparent text-ink-3'"
+              :aria-selected="liveTab === tab.id"
+              :aria-controls="`scribe-live-panel-${tab.id}`"
+              :tabindex="liveTab === tab.id ? 0 : -1"
+              @click="liveTab = tab.id"
+              @keydown="onMeetingTabKeydown($event, 'live')"
             >
-            <li
-              v-for="entry in liveLedger"
-              :key="entry.key"
-              data-scribe-ledger-kind
-              :data-kind="entry.kind"
-              class="scribe-transcript-entry"
-            >
-              <span class="scribe-transcript-speaker">
-                <strong>{{ entrySpeaker(entry) }}</strong>
-                <time>{{ timestamp(entry.startMs) }}</time>
-              </span>
-              <span v-if="entry.kind === 'gap'" class="text-rem">
-                Capture gap · {{ gapDuration(entry) }}
-              </span>
-              <span v-else :class="entry.final ? 'text-ink-2' : 'text-ink-3'">
-                {{ entry.text }}
-                <em v-if="!entry.final" class="ml-1 text-[9px] not-italic">wording may change</em>
-              </span>
-            </li>
-            </ol>
-          </section>
-          <aside class="scribe-live-notes">
-            <span class="scribe-field-label">Notes</span>
+              {{ tab.label }}
+            </button>
+          </div>
+          <!-- Keep both views mounted to retain selection, undo history, and scroll. -->
+          <section
+            v-show="liveTab === 'notes'"
+            id="scribe-live-panel-notes"
+            role="tabpanel"
+            aria-labelledby="scribe-live-tab-notes"
+            class="scribe-document-panel"
+          >
             <ScribeMarkdownEditor
               v-model="notesDraft"
               data-scribe-live-notes
@@ -130,7 +123,45 @@
               @change="changeNotes(meetings.activeMeeting.id)"
               @save="flushNotes"
             />
-          </aside>
+          </section>
+          <section
+            v-show="liveTab === 'transcript'"
+            id="scribe-live-panel-transcript"
+            role="tabpanel"
+            aria-labelledby="scribe-live-tab-transcript"
+            tabindex="0"
+            class="scribe-transcript-panel"
+          >
+            <p v-if="!liveLedger.length" class="py-16 text-center text-[11px] text-ink-3">
+              {{ emptyLiveTranscript }}
+            </p>
+            <ol
+              v-else
+              data-scribe-transcript-ledger
+              aria-label="Live meeting transcript"
+              class="scribe-transcript-list"
+            >
+              <li
+                v-for="entry in liveLedger"
+                :key="entry.key"
+                data-scribe-ledger-kind
+                :data-kind="entry.kind"
+                class="scribe-transcript-entry"
+              >
+                <span class="scribe-transcript-speaker">
+                  <strong>{{ entrySpeaker(entry) }}</strong>
+                  <time>{{ timestamp(entry.startMs) }}</time>
+                </span>
+                <span v-if="entry.kind === 'gap'" class="text-rem">
+                  Capture gap · {{ gapDuration(entry) }}
+                </span>
+                <span v-else :class="entry.final ? 'text-ink-2' : 'text-ink-3'">
+                  {{ entry.text }}
+                  <em v-if="!entry.final" class="ml-1 text-[9px] not-italic">wording may change</em>
+                </span>
+              </li>
+            </ol>
+          </section>
         </div>
       </main>
     </template>
@@ -300,7 +331,7 @@
                   :aria-controls="`scribe-detail-panel-${tab.id}`"
                   :tabindex="detailTab === tab.id ? 0 : -1"
                   @click="detailTab = tab.id"
-                  @keydown="onDetailTabKeydown"
+                  @keydown="onMeetingTabKeydown"
                 >
                   {{ tab.label }}
                 </button>
@@ -857,6 +888,7 @@ const scribeRoot = ref(null)
 const notesEditor = ref(null)
 const detailMeetingId = ref(null)
 const detailTab = ref('transcript')
+const liveTab = ref('notes')
 const editingMeeting = ref(false)
 const editedTitle = ref('')
 const notesDraft = ref('')
@@ -895,6 +927,7 @@ const detailTabs = [
   { id: 'transcript', label: 'Transcript' },
   { id: 'summary', label: 'Summary' },
 ]
+const liveTabs = detailTabs.slice(0, 2)
 const summaryTaskOptions = Object.freeze([
   { value: 'standard', label: 'Standard' },
   { value: 'brief', label: 'Brief' },
@@ -1045,6 +1078,7 @@ const captureStatus = computed(() => {
 })
 const transcriptionStatus = computed(() => {
   const value = meetings.activeMeeting?.transcription
+  if (value === 'delayed' || value === 'failed') return 'Transcript rebuild after Stop'
   // A durable transcript segment is stronger evidence than a lagging worker
   // readiness projection. Never tell the user transcription is still being
   // prepared while words are already arriving on screen.
@@ -1057,16 +1091,20 @@ const transcriptionStatus = computed(() => {
   }
   if (['initializing', 'connecting', 'listening'].includes(value)) return 'Transcript starting'
   if (value === 'reconnecting') return 'Transcript reconnecting'
-  if (value === 'delayed' || value === 'failed') return 'Transcript rebuild after Stop'
   if (value === 'final') return 'Transcript complete'
   return meetings.recording ? 'Transcript starting' : 'Finishing transcript'
 })
+const transcriptionFailureNotice = 'Live transcription unavailable. Recording continues; transcript will rebuild after Stop.'
+const recordingIssue = computed(() => actionError.value || meetings.activeMeeting?.error || meetings.error || (
+  ['delayed', 'failed'].includes(meetings.activeMeeting?.transcription) ? transcriptionFailureNotice : ''
+))
 const recordingNotice = computed(() => {
-  const notice = actionError.value || meetings.activeMeeting?.error || meetings.error
+  const notice = recordingIssue.value
   if (!notice || notice === dismissedNativeNotice.value) return ''
+  if (notice === transcriptionFailureNotice) return notice
   if (/transcri|worker|provider|model/i.test(notice)) {
     const detail = safeFailureDetail(notice)
-    return `Live transcription unavailable. Recording continues; transcript will rebuild after Stop.${detail ? ` ${detail}` : ''}`
+    return `${transcriptionFailureNotice}${detail ? ` ${detail}` : ''}`
   }
   return safeFailureDetail(notice)
 })
@@ -1081,6 +1119,10 @@ const emptyLiveTranscript = computed(() => {
   if (state === 'reconnecting') return 'Reconnecting…'
   if (state === 'delayed' || state === 'failed') return 'Live transcript unavailable'
   return 'Listening · transcript will appear shortly'
+})
+
+watch(() => meetings.activeMeeting?.id, () => {
+  liveTab.value = 'notes'
 })
 
 watch(
@@ -1222,7 +1264,7 @@ async function toggleMute() {
 }
 
 function dismissNotice() {
-  dismissedNativeNotice.value = actionError.value || meetings.activeMeeting?.error || meetings.error
+  dismissedNativeNotice.value = recordingIssue.value
   actionError.value = ''
   meetings.dismissError?.()
 }
@@ -1768,17 +1810,20 @@ function summaryRunRequest(meeting) {
   }
 }
 
-function onDetailTabKeydown(event) {
+function onMeetingTabKeydown(event, mode = 'detail') {
+  if (event.isComposing) return
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-  const current = detailTabs.findIndex(tab => tab.id === detailTab.value)
+  const tabs = mode === 'live' ? liveTabs : detailTabs
+  const selectedTab = mode === 'live' ? liveTab : detailTab
+  const current = tabs.findIndex(tab => tab.id === selectedTab.value)
   let next = current
   if (event.key === 'Home') next = 0
-  if (event.key === 'End') next = detailTabs.length - 1
-  if (event.key === 'ArrowLeft') next = (current - 1 + detailTabs.length) % detailTabs.length
-  if (event.key === 'ArrowRight') next = (current + 1) % detailTabs.length
-  detailTab.value = detailTabs[next].id
+  if (event.key === 'End') next = tabs.length - 1
+  if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length
+  if (event.key === 'ArrowRight') next = (current + 1) % tabs.length
+  selectedTab.value = tabs[next].id
   event.preventDefault()
-  nextTick(() => scribeRoot.value?.querySelector(`#scribe-detail-tab-${detailTabs[next].id}`)?.focus())
+  nextTick(() => scribeRoot.value?.querySelector(`#scribe-${mode}-tab-${tabs[next].id}`)?.focus())
 }
 
 function transcriptLedgerEntries(meeting) {
@@ -2095,27 +2140,6 @@ function safeFailureDetail(value) {
   overflow: hidden;
 }
 
-.scribe-live-layout {
-  display: grid;
-  min-height: 0;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
-  gap: 24px;
-}
-
-.scribe-live-layout > section {
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.scribe-live-notes {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  border-left: 1px solid var(--color-rule-light);
-  padding-left: 18px;
-}
-
 .scribe-title-input {
   display: block;
   width: 100%;
@@ -2267,24 +2291,6 @@ function safeFailureDetail(value) {
   font-size: 9px;
 }
 
-@media (max-width: 760px) {
-  .scribe-live-main {
-    overflow-y: auto;
-  }
-
-  .scribe-live-layout {
-    display: block;
-    grid-template-columns: 1fr;
-  }
-
-  .scribe-live-notes {
-    border-top: 1px solid var(--color-rule-light);
-    border-left: 0;
-    padding-top: 16px;
-    padding-left: 0;
-  }
-}
-
 .scribe-inline-notice {
   display: flex;
   flex-shrink: 0;
@@ -2431,10 +2437,21 @@ button:disabled {
 
 .scribe-tab {
   min-height: 34px;
+  border-bottom-style: solid;
   border-bottom-width: 1px;
   padding: 0 10px;
   font-size: 10px;
   font-weight: 600;
+}
+
+.scribe-tab:hover {
+  background: var(--color-chrome-mid);
+}
+
+.scribe-tab:focus-visible,
+.scribe-transcript-panel:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .scribe-field-label {

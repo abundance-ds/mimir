@@ -840,6 +840,7 @@ describe('WorkbenchApp', () => {
   })
 
   it('routes the persistent sidebar microphone control through the human meeting store', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({ directory: '/apps', diagnostics: [], apps: [{ id: 'scribe', title: 'Scribe', mode: 'embedded', builtin: true, tools: [] }] })
     const wrapper = await render()
     const meetings = useMeetingsStore()
     const active = {
@@ -848,6 +849,7 @@ describe('WorkbenchApp', () => {
       lifecycle: 'capturing',
       transcription: 'live',
       startedAt: '2026-07-31T00:00:00Z',
+      recordingStartedAt: new Date().toISOString(),
       stoppedAt: null,
       durationMs: 1_000,
       micMuted: false,
@@ -872,6 +874,7 @@ describe('WorkbenchApp', () => {
     }
     meetings.applySnapshot(state)
     await nextTick()
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('0:01')
     vi.mocked(invoke).mockResolvedValueOnce({
       ...state,
       revision: 21,

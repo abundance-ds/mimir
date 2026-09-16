@@ -67,6 +67,7 @@ createApp({
     const params = new URLSearchParams(location.search)
     const width = ref(Number(params.get('width')) || 240), collapsed = ref(false), filesCollapsed = ref(params.has('filesClosed')), filesHeight = ref(Number(params.get('filesHeight')) || 240)
     const tools = Array.from({ length: Number(params.get('tools')) || 5 }, (_, index) => ({ id: `tool-${index}`, title: `Tool ${index + 1}`, icon: index % 2 ? 'today' : 'graph' }))
+    tools[Math.min(2, tools.length - 1)] = { id: 'app:scribe', title: 'Scribe', icon: 'scribe' }
     const activities = ref(Array.from({ length: Number(params.get('activities')) || 0 }, (_, index) => ({
       id: `session-${index}`, title: `Review file navigation ${index + 1}`, kind: index % 2 ? 'terminal' : 'agent',
       status: index === 1 ? 'needs-input' : 'working', host: { type: 'pty' },
@@ -94,7 +95,13 @@ createApp({
     const closeActivity = id => { activities.value = activities.value.filter(tab => tab.id !== id) }
     const reorderActivities = ids => { activities.value = ids.map(id => activities.value.find(tab => tab.id === id)) }
     const renameActivity = ({ id, title }) => { activities.value.find(tab => tab.id === id).title = title }
-    const meetingCapture = params.has('recording') ? { id: 'fixture-meeting', lifecycle: 'capturing', micMuted: false } : null
+    const meetingCapture = ref(params.has('recording') ? {
+      id: 'fixture-meeting', title: 'Architecture review',
+      lifecycle: params.has('finalizing') ? 'finalizing' : 'capturing', micMuted: params.has('muted'),
+      startedAt: new Date(Date.now() - 65_000).toISOString(),
+      recordingStartedAt: new Date(Date.now() - 65_000).toISOString(),
+      durationMs: Number(params.get('duration')) || (params.has('finalizing') ? 65_000 : 0),
+    } : null)
     const opened = ref('Select a file to preview its path.')
     const button = (label, click) => h('button', { class: 'h-7 px-2 border border-rule hover:bg-chrome-mid', onClick: click }, label)
     const open = entry => { opened.value = entry.path }
@@ -111,7 +118,10 @@ createApp({
         h('div', { class: 'shrink-0 border-r border-rule', style: { width: `${collapsed.value ? 52 : width.value}px` } }, [
           h(WorkbenchSidebar, {
             workspaceName: 'Project', workspacePath: root, collapsed: collapsed.value, filesCollapsed: filesCollapsed.value, filesHeight: filesHeight.value,
-            tools, meetingCapture, blockingIds, restoringIds, activities: activities.value, activeActivityId: activeActivityId.value,
+            tools, meetingCapture: meetingCapture.value, blockingIds, restoringIds, activities: activities.value, activeActivityId: activeActivityId.value,
+            onOpenMeeting: () => { opened.value = 'Opened recording in Scribe.' },
+            onSetMeetingMicMuted: muted => { meetingCapture.value.micMuted = muted },
+            onStopMeeting: () => { meetingCapture.value = null },
             onToggleFiles: () => { filesCollapsed.value = !filesCollapsed.value }, onResizeFiles: value => { filesHeight.value = value },
             onSelectActivity: selectActivity, onCloseActivity: closeActivity, onReorderActivities: reorderActivities, onRenameActivity: renameActivity,
             onToggleCollapse: () => { collapsed.value = !collapsed.value },

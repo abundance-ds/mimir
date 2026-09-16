@@ -1,19 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'vue'
 import { mount } from '@vue/test-utils'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
+const scribeTool = { id: 'app:scribe', title: 'Scribe', icon: 'scribe' }
 let wrapper
-afterEach(() => wrapper?.unmount())
+afterEach(() => {
+  wrapper?.unmount()
+  vi.useRealTimers()
+})
 describe('WorkbenchSidebar', () => {
   it('keeps human-only microphone mute and Stop available in expanded and rail modes', async () => {
     wrapper = mount(WorkbenchSidebar, {
       props: {
+        tools: [scribeTool],
         meetingCapture: {
           id: 'meeting-1',
           title: 'Architecture review',
           lifecycle: 'capturing',
           startedAt: new Date(Date.now() - 62_000).toISOString(),
-          durationMs: 62_000,
+          durationMs: 0,
           micMuted: false,
         },
       },
@@ -31,7 +36,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
       .toBe('Mute microphone')
     expect(wrapper.get('[aria-label="Stop recording"]').exists()).toBe(true)
-    await wrapper.get('[title="Open recording"]').trigger('click')
+    await wrapper.get('[data-sidebar-meeting-open]').trigger('click')
     expect(wrapper.emitted('openMeeting')).toHaveLength(1)
 
     await wrapper.setProps({
@@ -42,6 +47,77 @@ describe('WorkbenchSidebar', () => {
     })
     expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
       .toBe('Unmute microphone')
+    expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-pressed')).toBe('true')
+  })
+
+  it('keeps elapsed time running through silence and collapse, including continued recordings', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-16T10:00:02Z'))
+    wrapper = mount(WorkbenchSidebar, {
+      props: { tools: [scribeTool], meetingCapture: {
+        id: 'continued', lifecycle: 'capturing', micMuted: false,
+        startedAt: '2026-09-15T08:00:00Z', recordingStartedAt: '2026-09-16T10:00:00Z',
+        durationMs: 3_600_000,
+      } },
+    })
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('1:00:02')
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('1:00:05')
+    await wrapper.setProps({ collapsed: true })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('1:00:07')
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').attributes('aria-hidden')).toBeUndefined()
+    expect(wrapper.get('[role="status"]').text()).toBe('Recording')
+    expect(wrapper.get('[role="status"]').text()).not.toContain('1:00:07')
+
+    await wrapper.setProps({ meetingCapture: {
+      ...wrapper.props('meetingCapture'), lifecycle: 'finalizing', durationMs: 3_607_000,
+    } })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('1:00:07')
+    expect(wrapper.get('[role="status"]').text()).toBe('Finalizing')
+    await wrapper.setProps({ meetingCapture: null })
+    expect(wrapper.find('[data-sidebar-meeting-capture]').exists()).toBe(false)
+  })
+
+  it.each([
+    { lifecycle: 'stopping' },
+    { lifecycle: 'finalizing' },
+    { lifecycle: 'capturing', stopPending: true },
+  ])('prevents duplicate recording actions while $lifecycle with $stopPending', async state => {
+    wrapper = mount(WorkbenchSidebar, {
+      props: { tools: [scribeTool], meetingCapture: { id: 'm1', micMuted: false, durationMs: 65_000, ...state } },
+    })
+    expect(wrapper.get('[data-sidebar-meeting-elapsed]').text()).toBe('1:05')
+    for (const selector of ['[data-sidebar-meeting-microphone]', '[data-sidebar-meeting-stop]']) {
+      expect(wrapper.get(selector).element.disabled).toBe(true)
+      await wrapper.get(selector).trigger('click')
+    }
+    expect(wrapper.emitted('setMeetingMicMuted')).toBeUndefined()
+    expect(wrapper.emitted('stopMeeting')).toBeUndefined()
+    await wrapper.get('[data-sidebar-meeting-open]').trigger('click')
+    expect(wrapper.emitted('openMeeting')).toHaveLength(1)
+  })
+
+  it.each([false, true])('keeps recording below Scribe when Tools are reordered, collapsed=%s', async collapsed => {
+    const otherTool = { id: 'graph', title: 'Graph', icon: 'graph' }
+    wrapper = mount(WorkbenchSidebar, { props: {
+      collapsed, tools: [scribeTool, otherTool],
+      meetingCapture: { id: 'm1', lifecycle: 'capturing', durationMs: 65_000 },
+    } })
+    const recording = wrapper.get('[data-sidebar-meeting-capture]').element
+    const scribe = wrapper.get('[data-tool-key="app:scribe"]').element
+    expect(scribe.nextElementSibling).toBe(recording)
+    expect(wrapper.get('nav[aria-label="Tools"]').element.contains(recording)).toBe(true)
+
+    await wrapper.setProps({ tools: [otherTool, scribeTool] })
+    expect(wrapper.get('[data-sidebar-meeting-capture]').element).toBe(recording)
+    expect(scribe.nextElementSibling).toBe(recording)
+    expect(wrapper.get('[data-tool-key="graph"]').element.nextElementSibling).toBe(scribe)
+    await wrapper.get('[data-sidebar-meeting-stop]').trigger('click')
+    expect(wrapper.emitted('stopMeeting')).toHaveLength(1)
+    expect(wrapper.emitted('launch')).toBeUndefined()
+    expect(wrapper.emitted('reorderTools')).toBeUndefined()
   })
 
   it('uses the Tools heading slot for Sidebar restore and keeps navigation rows mounted', async () => {

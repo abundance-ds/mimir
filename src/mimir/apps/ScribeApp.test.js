@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { EditorView } from '@codemirror/view'
+import { undo } from '@codemirror/commands'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useMeetingsStore } from '../../stores/meetings.js'
 import { getGraphNode, updateGraphNode, listenForGraphChanges } from '../../services/businessGraph.js'
@@ -430,6 +432,76 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(dismissMeetingCandidate).toHaveBeenCalledWith('candidate-zoom'))
   })
 
+  it('opens recording in Notes and retains edits, selection, and undo when checking Transcript', async () => {
+    const active = meeting({ lifecycle: 'capturing', notes: 'Ask about delivery.' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id, meetings: [active],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true }, attachTo: document.body })
+    await flushPromises()
+    const notes = wrapper.get('#scribe-live-panel-notes')
+    const transcript = wrapper.get('#scribe-live-panel-transcript')
+    expect(notes.isVisible()).toBe(true)
+    expect(transcript.isVisible()).toBe(false)
+
+    const editor = wrapper.get('[data-scribe-live-notes] .cm-editor').element
+    const view = EditorView.findFromDOM(editor)
+    view.dispatch({ changes: { from: view.state.doc.length, insert: ' Check dates.' } })
+    view.dispatch({ selection: { anchor: 4, head: 9 } })
+    await wrapper.get('#scribe-live-tab-transcript').trigger('click')
+    expect(notes.isVisible()).toBe(false)
+    expect(transcript.isVisible()).toBe(true)
+    expect(wrapper.get('[data-scribe-stop]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-scribe-mute]').isVisible()).toBe(true)
+
+    // Incoming snapshots must not switch tabs or replace unsaved notes.
+    useMeetingsStore().applySnapshot(snapshot({
+      revision: 2, activeMeetingId: active.id,
+      meetings: [{ ...active, transcription: 'live' }],
+    }))
+    await flushPromises()
+    expect(transcript.isVisible()).toBe(true)
+    await wrapper.get('#scribe-live-tab-notes').trigger('click')
+    expect(wrapper.get('[data-scribe-live-notes] .cm-editor').element).toBe(editor)
+    expect(view.state.doc.toString()).toBe('Ask about delivery. Check dates.')
+    expect(view.state.selection.main.anchor).toBe(4)
+    expect(view.state.selection.main.head).toBe(9)
+    expect(undo(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe('Ask about delivery.')
+    wrapper.unmount()
+  })
+
+  it('supports keyboard view changes and starts each new recording in Notes', async () => {
+    const active = meeting({ lifecycle: 'capturing' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id, meetings: [active],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true }, attachTo: document.body })
+    await flushPromises()
+    const notesTab = wrapper.get('#scribe-live-tab-notes')
+    const transcriptTab = wrapper.get('#scribe-live-tab-transcript')
+    await notesTab.trigger('keydown', { key: 'ArrowRight', isComposing: true })
+    expect(notesTab.attributes('aria-selected')).toBe('true')
+    for (const key of ['ArrowRight', 'End', 'ArrowLeft']) {
+      await notesTab.trigger('keydown', { key })
+      expect(transcriptTab.attributes('aria-selected')).toBe('true')
+      expect(transcriptTab.attributes('tabindex')).toBe('0')
+      expect(document.activeElement).toBe(transcriptTab.element)
+      await transcriptTab.trigger('keydown', { key: 'Home' })
+      expect(notesTab.attributes('aria-selected')).toBe('true')
+      expect(document.activeElement).toBe(notesTab.element)
+    }
+    await transcriptTab.trigger('click')
+    useMeetingsStore().applySnapshot(snapshot({
+      revision: 2, activeMeetingId: 'next',
+      meetings: [meeting({ id: 'next', lifecycle: 'capturing' })],
+    }))
+    await flushPromises()
+    expect(wrapper.get('#scribe-live-tab-notes').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#scribe-live-panel-notes').isVisible()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('keeps Stop visible above nonblocking transcription failure', async () => {
     const active = meeting({
       lifecycle: 'capturing',
@@ -449,14 +521,41 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
 
+    expect(wrapper.get('#scribe-live-panel-notes').isVisible()).toBe(true)
+    expect(wrapper.get('[data-scribe-error]').isVisible()).toBe(true)
     expect(wrapper.get('[data-scribe-error]').text()).toContain('Recording continues')
     expect(wrapper.get('[data-scribe-error]').text()).toContain('rate_limit_exceeded')
     expect(wrapper.get('[data-scribe-error]').text()).toContain('req_123')
     expect(wrapper.get('[data-scribe-error]').text()).toContain('[redacted]')
     expect(wrapper.get('[data-scribe-error]').text()).not.toContain('sk-secret-value')
     expect(wrapper.get('[data-scribe-ledger]').attributes('title')).toContain('microphone + system audio')
+    await wrapper.get('#scribe-live-tab-transcript').trigger('click')
+    expect(wrapper.get('[data-scribe-error]').isVisible()).toBe(true)
     await wrapper.get('[data-scribe-stop]').trigger('click')
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
+  })
+
+  it('shows a transcription failure in Notes even without an error message and with earlier speech', async () => {
+    const active = meeting({ lifecycle: 'capturing', transcription: 'failed', error: null })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id, meetings: [active],
+    }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
+      totalSegments: 1,
+      segments: [{ id: 's1', text: 'Earlier speech', startMs: 0, endMs: 1_000, channel: 'microphone', final: true, revision: 1 }],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true }, attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.get('#scribe-live-panel-notes').isVisible()).toBe(true)
+    expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('Earlier speech')
+    expect(wrapper.get('[data-scribe-error]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('Live transcription unavailable. Recording continues')
+    expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Transcript rebuild after Stop')
+    expect(wrapper.get('[data-scribe-ledger]').text()).not.toContain('Transcript live')
+    await wrapper.get('[data-scribe-error] button').trigger('click')
+    expect(wrapper.find('[data-scribe-error]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-stop]').isVisible()).toBe(true)
+    wrapper.unmount()
   })
 
   it('returns to the meeting overview while Stop finishes in the background', async () => {

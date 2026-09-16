@@ -49,29 +49,93 @@
         aria-label="Tools"
         class="shrink-0"
       >
-        <SidebarRow
-          v-for="tool in tools"
-          :key="tool.id"
-          compact
-          :data-tool-key="tool.id"
-          :class="{
-            'tool-drop-before': reorder.dropIndicator.value?.beforeId === tool.id,
-            'tool-drop-after': reorder.dropIndicator.value?.afterId === tool.id,
-          }"
-          :data-sidebar-row="`tool:${tool.id}`"
-          :label="tool.title"
-          :title="tool.title"
-          :collapsed="collapsed"
-          :active="activeToolId === tool.id"
-          @pointerdown="reorder.onPointerDown($event, tool.id)"
-          @keydown="moveTool($event, tool.id)"
-          @click="launch(tool.id)"
-          ><component
-            :is="iconFor(tool.icon)"
-            :size="16"
-            :stroke-width="1.7"
-            :monochrome="true"
-        /></SidebarRow>
+        <template v-for="tool in tools" :key="tool.id">
+          <SidebarRow
+            compact
+            :data-tool-key="tool.id"
+            :class="{
+              'tool-drop-before': reorder.dropIndicator.value?.beforeId === tool.id,
+              'tool-drop-after': reorder.dropIndicator.value?.afterId === tool.id,
+            }"
+            :data-sidebar-row="`tool:${tool.id}`"
+            :label="tool.title"
+            :title="collapsed && meetingCapture && tool.id === 'app:scribe' ? `${tool.title} · ${meetingCaptureLabel}` : tool.title"
+            :aria-label="collapsed && meetingCapture && tool.id === 'app:scribe' ? `${tool.title}, ${meetingCaptureLabel}` : ''"
+            :collapsed="collapsed"
+            :active="activeToolId === tool.id"
+            @pointerdown="reorder.onPointerDown($event, tool.id)"
+            @keydown="moveTool($event, tool.id)"
+            @click="launch(tool.id)"
+          >
+            <span class="sidebar-tool-icon">
+              <component
+                :is="iconFor(tool.icon)"
+                data-sidebar-tool-icon
+                :size="16"
+                :stroke-width="1.7"
+                :monochrome="true"
+              />
+              <span
+                v-if="collapsed && meetingCapture && tool.id === 'app:scribe'"
+                data-sidebar-recording-badge
+                class="sidebar-recording-badge"
+                aria-hidden="true"
+              >
+                <IconPlayerRecordFilled v-if="meetingRecording && !meetingCapture.stopPending" :size="6" class="text-rem" />
+                <IconLoader2 v-else :size="10" class="motion-safe:animate-spin" />
+              </span>
+            </span>
+          </SidebarRow>
+          <div
+            v-if="meetingCapture && tool.id === 'app:scribe'"
+            data-sidebar-meeting-capture
+            class="sidebar-recording"
+            role="group"
+            aria-label="Meeting recording controls"
+          >
+            <button
+              type="button"
+              data-sidebar-meeting-open
+              class="sidebar-recording-open"
+              :title="`${meetingCapture.title || 'Meeting'} · ${meetingCaptureLabel} ${meetingElapsed}`"
+              :aria-label="`Open recording: ${meetingCaptureLabel}, ${meetingElapsed}`"
+              @click="$emit('openMeeting')"
+            >
+              <span v-if="!collapsed" class="sidebar-recording-icon" aria-hidden="true">
+                <IconPlayerRecordFilled v-if="meetingRecording && !meetingCapture.stopPending" :size="10" class="text-rem" />
+                <IconLoader2 v-else :size="12" class="motion-safe:animate-spin" />
+              </span>
+              <span class="sidebar-recording-label" :class="{ 'sr-only': collapsed }" role="status">{{ meetingCaptureLabel }}</span>
+              <span data-sidebar-meeting-elapsed class="sidebar-recording-time">{{ meetingElapsed }}</span>
+            </button>
+            <div class="sidebar-recording-actions">
+              <button
+                type="button"
+                data-sidebar-meeting-microphone
+                class="sidebar-recording-action"
+                :class="{ 'is-muted': meetingCapture.micMuted }"
+                :title="meetingCapture.micMuted ? 'Unmute microphone' : 'Mute microphone'"
+                :aria-label="meetingCapture.micMuted ? 'Unmute microphone' : 'Mute microphone'"
+                :aria-pressed="meetingCapture.micMuted"
+                :disabled="!meetingRecording || meetingCapture.micPending || meetingCapture.stopPending"
+                @click="$emit('setMeetingMicMuted', !meetingCapture.micMuted)"
+              >
+                <IconMicrophoneOff v-if="meetingCapture.micMuted" :size="14" aria-hidden="true" /><IconMicrophone v-else :size="14" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                data-sidebar-meeting-stop
+                class="sidebar-recording-action"
+                title="Stop recording"
+                aria-label="Stop recording"
+                :disabled="!meetingRecording || meetingCapture.stopPending"
+                @click="$emit('stopMeeting')"
+              >
+                <IconPlayerStopFilled :size="12" class="text-rem" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        </template>
       </nav>
       <SidebarActivities
         :tabs="activities"
@@ -86,51 +150,6 @@
         @new="$emit('newActivity')"
       />
       </div>
-    </div>
-    <div
-      v-if="meetingCapture"
-      data-sidebar-meeting-capture
-      class="shrink-0 border-y border-rule text-[11px]"
-      role="group"
-      aria-label="Meeting recording controls"
-    >
-      <button
-        type="button"
-        class="sidebar-recording-control"
-        title="Open recording"
-        aria-label="Open recording"
-        @click="$emit('openMeeting')"
-      >
-        <span class="sidebar-recording-icon"><IconPlayerRecordFilled :size="12" class="text-rem" /></span>
-        <span :class="{ invisible: collapsed }" :aria-hidden="collapsed" class="truncate pr-2">
-          {{ meetingCapture.lifecycle === 'capturing' ? 'Recording' : 'Finalizing' }}
-        </span>
-      </button>
-      <button
-        type="button"
-        data-sidebar-meeting-microphone
-        class="sidebar-recording-control"
-        :title="meetingCapture.micMuted ? 'Unmute microphone' : 'Mute microphone'"
-        :aria-label="meetingCapture.micMuted ? 'Unmute microphone' : 'Mute microphone'"
-        @click="$emit('setMeetingMicMuted', !meetingCapture.micMuted)"
-      >
-        <span class="sidebar-recording-icon">
-          <IconMicrophoneOff v-if="meetingCapture.micMuted" :size="14" /><IconMicrophone v-else :size="14" />
-        </span>
-        <span :class="{ invisible: collapsed }" :aria-hidden="collapsed" class="truncate pr-2">
-          {{ meetingCapture.micMuted ? 'Unmute microphone' : 'Mute microphone' }}
-        </span>
-      </button>
-      <button
-        type="button"
-        class="sidebar-recording-control"
-        title="Stop recording"
-        aria-label="Stop recording"
-        @click="$emit('stopMeeting')"
-      >
-        <span class="sidebar-recording-icon"><IconPlayerStopFilled :size="12" /></span>
-        <span :class="{ invisible: collapsed }" :aria-hidden="collapsed" class="truncate pr-2">Stop recording</span>
-      </button>
     </div>
     <div data-sidebar-files class="sidebar-files-dock relative flex shrink-0 flex-col overflow-visible border-t border-rule"
       :style="{ height: `${filesHidden ? 28 : filesSize.height.value + 28}px` }">
@@ -182,6 +201,7 @@ import {
   IconFolderOpen,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconLoader2,
   IconMicrophone,
   IconMicrophoneOff,
   IconPlayerRecordFilled,
@@ -234,6 +254,31 @@ const emit = defineEmits([
 const sidebar = ref(null)
 const body = ref(null)
 const navigationScroll = ref(null)
+const meetingNow = ref(Date.now())
+const meetingRecording = computed(() => props.meetingCapture?.lifecycle === 'capturing')
+const meetingCaptureLabel = computed(() => (
+  props.meetingCapture?.stopPending || props.meetingCapture?.lifecycle === 'stopping'
+    ? 'Stopping…'
+    : meetingRecording.value ? 'Recording' : 'Finalizing'
+))
+const meetingElapsed = computed(() => {
+  const meeting = props.meetingCapture
+  const runStartedAt = Date.parse(meeting?.recordingStartedAt || meeting?.startedAt || '')
+  const currentRunMs = meetingRecording.value && Number.isFinite(runStartedAt)
+    ? Math.max(0, meetingNow.value - runStartedAt)
+    : 0
+  const seconds = Math.floor(Math.max(0, (Number(meeting?.durationMs) || 0) + currentRunMs) / 1000)
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor(seconds / 60) % 60
+  const remainder = String(seconds % 60).padStart(2, '0')
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${remainder}` : `${minutes}:${remainder}`
+})
+watch([() => props.meetingCapture?.id, meetingRecording], ([, recording], _previous, onCleanup) => {
+  meetingNow.value = Date.now()
+  if (!recording) return
+  const timer = window.setInterval(() => { meetingNow.value = Date.now() }, 1000)
+  onCleanup(() => window.clearInterval(timer))
+}, { immediate: true })
 let expandedScroll = 0
 watch(() => props.collapsed, rail => {
   if (rail) expandedScroll = navigationScroll.value?.scrollTop || 0
@@ -333,28 +378,99 @@ function launch(id) {
 }
 .tool-drop-before::before { top: 0; }
 .tool-drop-after::after { bottom: 0; }
-.sidebar-recording-control {
+.sidebar-tool-icon {
+  position: relative;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+}
+.sidebar-recording-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  display: grid;
+  width: 10px;
+  height: 10px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-chrome);
+}
+.sidebar-recording {
   display: flex;
-  width: 100%;
-  height: 28px;
+  flex: 0 0 48px;
+  height: 48px;
   align-items: center;
-  gap: 6px;
-  overflow: hidden;
+  border-block: 1px solid var(--color-rule);
+  padding-right: 8px;
+  color: var(--color-ink-2);
+}
+.sidebar-recording-open {
+  display: grid;
+  min-width: 0;
+  height: 46px;
+  flex: 1;
+  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-rows: 14px 16px;
+  align-content: center;
+  align-items: center;
   text-align: left;
-  color: var(--color-ink-3);
 }
 .sidebar-recording-icon {
   display: grid;
-  width: 28px;
-  height: 28px;
-  margin-left: 12px;
-  flex: 0 0 auto;
+  grid-column: 1;
+  grid-row: 1;
   place-items: center;
 }
-.sidebar-recording-control:hover {
+.sidebar-recording-label {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 11px;
+  line-height: 14px;
+}
+.sidebar-recording-time {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  white-space: nowrap;
+}
+.sidebar-recording-actions {
+  display: flex;
+  flex: 0 0 auto;
+}
+.sidebar-recording-action {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--color-ink-3);
+}
+.sidebar-recording-action.is-muted { color: var(--color-rem); }
+.sidebar-recording-action:disabled { opacity: 0.4; }
+.sidebar-recording-open:hover,
+.sidebar-recording-action:hover:not(:disabled) {
   background: var(--color-chrome-mid);
   color: var(--color-ink);
 }
+[data-sidebar-state="rail"] .sidebar-recording {
+  flex-direction: column;
+  border: 0;
+  padding-right: 0;
+}
+[data-sidebar-state="rail"] .sidebar-recording-open {
+  width: 100%;
+  height: 24px;
+  flex: 0 0 24px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 1fr;
+  text-align: center;
+}
+[data-sidebar-state="rail"] .sidebar-recording-time { grid-column: 1; grid-row: 1; }
+[data-sidebar-state="rail"] .sidebar-recording-action { width: 24px; height: 24px; }
 button:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;

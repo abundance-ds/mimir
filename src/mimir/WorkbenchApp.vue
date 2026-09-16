@@ -575,6 +575,7 @@ const meetingCapture = computed(() => {
     title: meeting.title,
     lifecycle: meeting.lifecycle,
     startedAt: meeting.startedAt,
+    recordingStartedAt: meeting.recordingStartedAt,
     durationMs: meeting.durationMs,
     micMuted: meeting.micMuted,
     micPending: Boolean(meetings.pending.mic),

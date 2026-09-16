@@ -45,6 +45,10 @@ Transcription follows committed audio and never blocks the capture callback.
 - A user-written title cannot be replaced by automatic work.
 - Preparation notes, Project, People, and scope stay editable before, during,
   and after capture, until filing.
+- Recording opens the Notes tab. Notes and Transcript each use the full content
+  width. Switching tabs retains the note selection, undo history, and each
+  view's scroll position. Recording controls and failure notices stay visible
+  above both views. Transcript updates do not change the selected tab.
 - Summary generation is a durable CLI Activity. **Ask agent** is a separate
   interactive Activity.
 - Scribe owns preparation, notes, audio, transcript, and summary generation.

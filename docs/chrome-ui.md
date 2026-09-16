@@ -302,8 +302,8 @@ window-button clearance still needs an installed-app check.
 
 ## 7. Sidebar icon positions
 
-Sidebar collapse changes the width and label visibility. It retains row
-spacing. Workspace, Tools, Activities, recording controls, Files, and Settings share
+Sidebar collapse changes the width and label visibility. Navigation rows keep
+their height, including the recording strip. Workspace, Tools, Activities, Files, and Settings share
 an icon centre 26 px from the left edge in both states.
 
 - Tools and Activities use 24 px navigation rows in the Sidebar and rail.
@@ -319,12 +319,23 @@ an icon centre 26 px from the left edge in both states.
   The top resize rule has a slightly stronger neutral color, an 8 px hit target,
   and a 2 px hover/focus highlight. Its behavior and saved state belong to
   [workbench-design.md](workbench-design.md#sidebar-and-main-tabs).
-- Recording controls use three fixed rows in both states. The rail hides
-  their labels; it does not wrap the controls or move Files below them.
+- Recording sits directly below the Scribe tool row and follows that row when
+  Tools are reordered. It stays with Scribe inside the shared navigation scroll
+  area in both expanded and rail states. The strip is 48 px in both states,
+  including two rules when expanded. The expanded Sidebar shows Recording above elapsed time, with Mute and Stop
+  beside them. Clicking the status opens Scribe; its tooltip includes the
+  meeting title. In the rail, a small recording dot sits on the Scribe icon.
+  A 48 px strip below it has one timer row and one row with equal 24 px Mute
+  and Stop buttons. The rail strip has no surrounding rules. Time remains visible without
+  hover. The recording dot and Stop use `rem`, matching Scribe's recording
+  controls. Muted uses the crossed microphone glyph. Stopping and Finalizing use
+  a progress glyph; their recording controls are disabled. The status uses a
+  live region for screen readers. The clock is outside that region.
 - Settings remains anchored in the 26 px footer.
 
 `scripts/check-sidebar-geometry.mjs` uses the real Files harness to compare
-navigation row spacing, the collapsed Files rail, and restored Sidebar scroll.
+icon positions through both collapse and expand round trips, the collapsed Files
+rail, and restored Sidebar scroll.
 It covers 240, 280, and 400 px sidebar widths, short and tall
 windows, long tool and session lists, recording controls, open/closed Files,
 drag resizing, drag collapse and reopening, size restoration, and search field geometry.
