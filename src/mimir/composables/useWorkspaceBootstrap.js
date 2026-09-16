@@ -534,6 +534,37 @@ export function useWorkspaceBootstrap({
     void Promise.allSettled(paths.map(path => loadWorkspaceConfig(path)))
   }
 
+  let configuringWorkspace = false
+  async function configureWorkspace() {
+    const workspace = workspaceFiles.workspacePath
+    if (!workspace || configuringWorkspace || disposed) return
+    configuringWorkspace = true
+    try {
+      const existing = await loadWorkspaceConfig(workspace)
+      const result = await queryGraph({ kinds: ['project'], limit: 500 })
+      if (disposed || workspaceFiles.workspacePath !== workspace) return
+      const draft = await requestWorkspaceSetup({ path: workspace, projects: result?.items || [], initialConfig: existing })
+      if (!draft || disposed || workspaceFiles.workspacePath !== workspace) return
+      let project = String(draft.project || '').trim()
+      const title = String(draft.newProjectTitle || '').trim()
+      if (title) {
+        const created = await createGraphNode({
+          kind: 'project', title, scopeId: graph.defaultWriteScope('project'),
+          properties: { projectStatus: 'planned' },
+        })
+        project = created.id
+      }
+      const saved = await saveWorkspaceConfig(workspace, { id: existing?.id, project, graphScope: draft.graphScope })
+      if (disposed || workspaceFiles.workspacePath !== workspace) return
+      graph.setWorkspaceConfiguration(saved)
+      await graph.refresh({ quiet: true })
+    } catch (cause) {
+      diagnostic.value = `Workspace setup failed: ${errorMessage(cause)}`
+    } finally {
+      configuringWorkspace = false
+    }
+  }
+
   function rememberWorkspace(path) {
     const normalized = String(path || '').trim()
     if (!normalized) return
@@ -623,6 +654,7 @@ export function useWorkspaceBootstrap({
 
   return {
     chooseWorkspace,
+    configureWorkspace,
     createWorkspace,
     dispose,
     ensureCoreActivities,

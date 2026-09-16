@@ -1101,6 +1101,7 @@ pub fn run() {
                 routines.inner().clone(),
                 supervisor.inner().clone(),
                 meeting_paths,
+                app.handle().clone(),
             )
             .map_err(std::io::Error::other)?;
             if !app.manage(meeting_jobs) {

@@ -17,6 +17,7 @@ const requireText = (source, expected, label) => {
 }
 
 const platform = read('src-tauri/src/meetings/platform.rs')
+const models = JSON.parse(read('src-tauri/resources/meeting-models.json'))
 const lockfile = read('src-tauri/Cargo.lock')
 const bunLock = read('bun.lock')
 const notices = read('src-tauri/vendor/THIRD_PARTY_NOTICES.md')
@@ -32,15 +33,31 @@ const anarlogNotice = read('src-tauri/vendor/anarlog/NOTICE.md')
 const upstream = read('src-tauri/vendor/anarlog/UPSTREAM')
 const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'))
 
-const revision = 'c521a4b02f422512d734391fdf08bb08c0862f68'
-const modelSha = '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b'
-for (const expected of [
-  `const REVISION: &str = "${revision}"`,
-  'const ARTIFACT_BYTES: u64 = 487_601_967',
-  `const SHA256: &str = "${modelSha}"`,
-  'https://huggingface.co/ggerganov/whisper.cpp/resolve/{REVISION}/ggml-small.bin',
-]) {
-  requireText(platform, expected, 'managed model catalog')
+requireText(platform, '../../resources/meeting-models.json', 'managed model catalog')
+if (!Array.isArray(models) || models.length === 0) throw new Error('Managed model catalog is empty')
+const modelIds = new Set()
+for (const model of models) {
+  if (!/^[a-z0-9_-]+$/.test(model.id) || modelIds.has(model.id)
+    || !/^[a-f0-9]{40}$/.test(model.revision)
+    || !/^ggml-[a-z0-9._-]+\.bin$/.test(model.file)
+    || !/^[a-f0-9]{64}$/.test(model.sha256)
+    || !Number.isSafeInteger(model.bytes) || model.bytes <= 0) {
+    throw new Error(`Invalid immutable model catalog entry: ${model.id}`)
+  }
+  modelIds.add(model.id)
+  const id = `model:${model.file}@${model.revision}`
+  const component = policy.vendorComponents.find(entry => entry.id === id)
+  const location = `https://huggingface.co/ggerganov/whisper.cpp/resolve/${model.revision}/${model.file}`
+  if (!component || component.sha256 !== model.sha256
+    || component.downloadLocation !== location || component.license !== 'MIT') {
+    throw new Error(`Model license inventory does not match the catalog: ${model.id}`)
+  }
+  requireText(notices,
+    `| \`${model.file}\` | \`${model.revision}\` | \`${model.bytes}\` | \`${model.sha256}\` |`,
+    'Scribe model notices')
+}
+if (policy.vendorComponents.filter(entry => entry.id.startsWith('model:')).length !== models.length) {
+  throw new Error('Model license inventory contains entries outside the catalog')
 }
 
 for (const expected of [
@@ -53,9 +70,6 @@ for (const expected of [
 }
 
 for (const expected of [
-  revision,
-  modelSha,
-  '`487601967` bytes',
   'whisper-rs` 0.16.0',
   'whisper-rs-sys` 0.15.0',
   'Embedded version: 1.8.3',

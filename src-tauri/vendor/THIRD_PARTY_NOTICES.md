@@ -102,21 +102,25 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## OpenAI Whisper Small multilingual model
+## OpenAI Whisper multilingual models
 
-- Upstream model: OpenAI Whisper Small multilingual, 244 million parameters
+- Upstream models: https://github.com/openai/whisper
+- Large-v3 Turbo: https://huggingface.co/openai/whisper-large-v3-turbo
 - Conversion repository: https://huggingface.co/ggerganov/whisper.cpp
-- Immutable repository commit:
-  `c521a4b02f422512d734391fdf08bb08c0862f68`
-- Artifact: `ggml-small.bin`
-- Exact length: `487601967` bytes
-- SHA-256:
-  `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b`
-- License: MIT; OpenAI states that Whisper code and model weights are
-  released under this license.
+- Catalog authority: `resources/meeting-models.json`.
+- License: MIT; OpenAI releases Whisper code and model weights under this license.
 - Distribution: downloaded on explicit user action, never embedded in Mimir;
   verified before installation and again before every load; removable in
   Scribe settings.
+
+| Artifact | Immutable revision | Bytes | SHA-256 |
+| --- | --- | --- | --- |
+| `ggml-tiny.bin` | `5359861c739e955e79d9a303bcbc70fb988958b1` | `77691713` | `be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21` |
+| `ggml-base.bin` | `5359861c739e955e79d9a303bcbc70fb988958b1` | `147951465` | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` |
+| `ggml-small.bin` | `c521a4b02f422512d734391fdf08bb08c0862f68` | `487601967` | `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
+| `ggml-medium.bin` | `5359861c739e955e79d9a303bcbc70fb988958b1` | `1533763059` | `6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208` |
+| `ggml-large-v3-turbo-q5_0.bin` | `5359861c739e955e79d9a303bcbc70fb988958b1` | `574041195` | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
+| `ggml-large-v3-q5_0.bin` | `5359861c739e955e79d9a303bcbc70fb988958b1` | `1081140203` | `d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1` |
 
 MIT License
 

@@ -29,6 +29,45 @@ async function setup() {
 }
 
 describe('Graph document actions', () => {
+  it('prepares bounded context through the explicit agent action', async () => {
+    const { wrapper, graph } = await setup()
+    graph.activeScopeIds = ['team:main']
+    vi.mocked(invoke).mockImplementation(async command => command === 'graph_context'
+      ? { graphRevision: 9, markdown: 'Project evidence.' } : null)
+    wrapper.findComponent(GraphInspector).vm.$emit('startWork')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('graph_context', { request: { focusId: 'plan', scopeIds: ['team:main'], maxNodes: 16 } })
+    expect(wrapper.emitted('startWork')[0][0]).toMatchObject({
+      nodeId: 'plan', nodeKind: 'issue', title: 'Plan', scopeIds: ['team:main'], graphRevision: 9,
+      prompt: expect.stringContaining('Project evidence.'),
+    })
+  })
+
+  it('keeps a failed save in the tab and does not launch agent work', async () => {
+    const { wrapper, file, files } = await setup()
+    file.dirty = true
+    vi.spyOn(files, 'save').mockResolvedValue(false)
+    wrapper.findComponent(GraphInspector).vm.$emit('startWork')
+    await flushPromises()
+    expect(wrapper.emitted('startWork')).toBeUndefined()
+    expect(wrapper.findComponent(GraphInspector).props('error')).toContain('Save the entry')
+    expect(file.dirty).toBe(true)
+  })
+
+  it.each(['unmount', 'workspace'])('does not launch late agent work after %s', async change => {
+    const { wrapper, graph } = await setup()
+    let finish
+    vi.mocked(invoke).mockImplementation(command => command === 'graph_context'
+      ? new Promise(resolve => { finish = resolve }) : Promise.resolve(null))
+    wrapper.findComponent(GraphInspector).vm.$emit('startWork')
+    await flushPromises()
+    if (change === 'unmount') wrapper.unmount()
+    else graph.projectRoot = '/another-workspace'
+    finish({ graphRevision: 9, markdown: 'Old context.' })
+    await flushPromises()
+    expect(wrapper.emitted('startWork')).toBeUndefined()
+  })
+
   it('resolves relative resources in the entry Project and scope', async () => {
     const { wrapper } = await setup()
     wrapper.findComponent(GraphInspector).vm.$emit('openFile', { path: 'outputs/report.md', nodeId: 'plan' })

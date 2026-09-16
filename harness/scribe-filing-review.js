@@ -3,9 +3,9 @@ import { createPinia } from 'pinia'
 import '../src/shared/styles/app.css'
 import ScribeApp from '../src/mimir/apps/ScribeApp.vue'
 import { useMeetingsStore } from '../src/stores/meetings.js'
+import { useSettingsStore } from '../src/stores/settings.js'
 import { summaryHash } from '../src/services/filedMeeting.js'
 const params = new URLSearchParams(location.search)
-document.documentElement.dataset.theme = params.get('theme') || 'parchment'
 let meeting = {
  id: 'm1', title: 'Planning the autumn release', lifecycle: 'ready', transcription: 'final',
  startedAt: '2026-09-11T10:00:00.000Z', stoppedAt:'2026-09-11T10:45:00.000Z', durationMs:2700000,
@@ -52,4 +52,6 @@ window.__TAURI_INTERNALS__ = {
 const app=createApp({render:()=>h(ScribeApp,{active:true,workspacePath:'/work'})})
 app.use(createPinia())
 app.mount('#app')
+await useSettingsStore().load()
+document.documentElement.dataset.theme = params.get('theme') || 'parchment'
 window.scribe=useMeetingsStore()

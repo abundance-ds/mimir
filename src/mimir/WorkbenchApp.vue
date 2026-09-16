@@ -116,6 +116,7 @@
                 @open-file="openFileInEditor"
                 @review-git="reviewGitInEditor"
                 @choose-workspace="chooseWorkspace"
+                @configure-workspace="configureWorkspace"
                 @request-stop="stopActivity"
                 @restart="restartActivity"
                 @launch-app="launchApp"
@@ -171,6 +172,7 @@
         @open-graph-node="openGraphNode"
         @open-graph-file="openFileInEditor"
         @open-graph-activity="selectActivity"
+        @start-graph-work="startGraphWork"
         @open-graph-meeting="openScribeMeeting"
         @focus-graph="focusGraph"
       />
@@ -386,6 +388,7 @@ const workspaceBootstrap = useWorkspaceBootstrap({
 })
 const {
   chooseWorkspace,
+  configureWorkspace,
   createWorkspace,
   ensureCoreActivities,
   focusNarrowPane,

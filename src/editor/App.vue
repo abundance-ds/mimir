@@ -121,6 +121,7 @@
             @open-file="$emit('openGraphFile', $event)"
             @open-url="openMarkdownUrlLink"
             @open-activity="$emit('openGraphActivity', $event)"
+            @start-work="$emit('startGraphWork', $event)"
             @open-meeting="$emit('openGraphMeeting', $event)"
             @diagnostic="showDiagnosticError"
           />
@@ -435,6 +436,7 @@ const emit = defineEmits([
   'openGraphNode',
   'openGraphFile',
   'openGraphActivity',
+  'startGraphWork',
   'openGraphMeeting',
   'focusGraph',
 ])

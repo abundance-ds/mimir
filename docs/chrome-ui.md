@@ -116,6 +116,7 @@ Heights include the rule. Layer is the background token.
 | Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Work and Graph tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
 | Tracker range | `TrackerApp.vue` | Range tabs, previous, range label, next | 36 px wrapping strip under a 40 px identity header |
 | Scribe transport | `ScribeApp.vue` | Recording dot, timer, status, save state, Mute, Stop 28 px | 42 px `chrome` |
+| Scribe overview | `ScribeApp.vue` | Search, Prepare, Record, Settings; 28 px controls | In-content title, action row, and status lines |
 | Scribe detail bar | `ScribeApp.vue` | Back, save state, Continue, menu | 40 px |
 | Scribe settings header | `scribe/ScribeSettings.vue` | Title | 40 px |
 | PDF preview | `editor/components/workspace/PdfPreview.vue` | Page controls | 40 px |
@@ -141,7 +142,7 @@ retains the pane-bar layout above. [Files](files.md) owns their behavior.
 | Files ledger status | `FilesActivity.vue` | Mono 10 px status line |
 | Files ledger columns | `FilesActivity.vue` | Mono 10 px column labels in the tree grid |
 | Graph entry view | `business-graph/GraphEntryDetails.vue` | 36 px band with Details and Source controls at 28 px; quiet save status, Save, and More; uses the Editor tab strip |
-| Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; frequent task filters beside the views; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
+| Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; current-project toggle and kind filter in Graph; frequent task filters in Work; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
 
 ### Canvases
 
@@ -165,7 +166,6 @@ retains the pane-bar layout above. [Files](files.md) owns their behavior.
 | Today status | `TodayApp.vue` | 26 | `chrome` | `rule` | Save state, date navigation 24 px |
 | Routines status | `RoutinesActivity.vue` | 26 | `chrome` | `rule` | Directory, notice or revision |
 | Launch plan | `LaunchPlanHost.vue` | 26 | `chrome` | `rule` | Plan state |
-| Graph dispatch | `business-graph/DispatchBar.vue` | 36 | `chrome-high` | `rule` | Prompt, mono 11 px input, node count; overlay above on `surface` |
 | Chat composer | `ChatActivity.vue` | grows, min 36 | `chrome-high` | `rule` | Bordered `surface` textarea, uploads |
 | Sidebar settings | `WorkbenchSidebar.vue` | 26 | `chrome` | `rule` | Settings button fills the row in expanded and rail states |
 
@@ -184,7 +184,7 @@ counted as a row.
 
 | Surface | Layer | Edge |
 |---|---|---|
-| Select menus, scope menu, columns menu, dispatch overlay, date picker | `surface` | 1 px `rule`, 3 to 5 px radius, shadow |
+| Select menus, scope menu, columns menu, date picker | `surface` | 1 px `rule`, 3 to 5 px radius, shadow |
 | Graph link suggestions | `surface`, `rule-light` edge, small shadow | 320 px preferred width within pane/viewport; title 12 px, kind/scope 10 px; body portal prevents clipping |
 | Graph create, confirm, summary dialogs | `surface` | own header and footer |
 | Routines dialogs | header 40 px `chrome-high` with `rule` | |
@@ -253,7 +253,7 @@ The 2026-09-04 repair made these changes:
 
 `E` means expanded. `R` means rail. Main and Editor cannot both stay in rail
 state. Each visible column has a 40 px top cell. Status and rail footers
-are 26 px. Chat and Graph input footers retain their input height.
+are 26 px. The Chat input footer retains its input height.
 
 | Sidebar | Main | Editor | Sidebar restore | Main restore | Editor restore |
 |---|---|---|---|---|---|

@@ -125,6 +125,16 @@ fn workbench_zoom_factor_from(settings: &Value) -> f64 {
     percent.clamp(50.0, 200.0) / 100.0
 }
 
+pub(crate) fn graph_self_person_id() -> Result<Option<String>, String> {
+    let _guard = lock_settings_io();
+    let loaded = load_settings_at(&settings_path()?)?;
+    Ok(loaded.settings["editor"]["businessGraphSelfPersonId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string))
+}
+
 #[tauri::command]
 pub fn settings_load() -> Result<SettingsLoadResponse, String> {
     let _guard = lock_settings_io();

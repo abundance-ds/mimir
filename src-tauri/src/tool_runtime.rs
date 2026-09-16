@@ -146,7 +146,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.find",
         public_name: "graph_find",
-        description: "Find graph nodes by text, kind, status, relations, or dates.",
+        description: "Find graph nodes by text and filters.",
         group: "graph",
         effect: "read",
         direct: false,
@@ -173,7 +173,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.create",
         public_name: "graph_create",
-        description: "Create a validated graph node.",
+        description: "Create a graph node.",
         group: "graph",
         effect: "write",
         direct: false,
@@ -182,7 +182,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.update",
         public_name: "graph_update",
-        description: "Update a graph node with revision checks.",
+        description: "Update a graph node.",
         group: "graph",
         effect: "write",
         direct: false,
@@ -209,7 +209,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.context",
         public_name: "graph_context",
-        description: "Build bounded context around a graph node.",
+        description: "Read context around a graph node.",
         group: "graph",
         effect: "read",
         direct: false,
@@ -218,7 +218,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.events",
         public_name: "graph_events",
-        description: "Read recent graph changes.",
+        description: "Read graph change history.",
         group: "graph",
         effect: "read",
         direct: false,
@@ -227,7 +227,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "graph.resource_add",
         public_name: "graph_resource_add",
-        description: "Add a file to a Team Resource node.",
+        description: "Copy a local file into a Team Resource.",
         group: "graph",
         effect: "write",
         direct: false,

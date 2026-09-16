@@ -8,7 +8,7 @@
  *   pane-bar           36 px, chrome-high, rule below. Row 2: whatever a pane shows first.
  *   pane-subbar        28 px, chrome-high, rule-light below. Row 3: ledgers, view filters.
  *   pane-footer        26 px, chrome, rule above, mono 10 px. Status footers.
- *   pane-footer-input  min 36 px, chrome-high, rule above. Composer and dispatch bars.
+ *   pane-footer-input  min 36 px, chrome-high, rule above. Composer bars.
  *
  * Kinds follow the row, not the role, so bars in neighbouring panes align.
  *
@@ -35,7 +35,6 @@ export const PANE_CHROME_INVENTORY = Object.freeze([
 
   { file: 'mimir/apps/business-graph/GraphAppHeader.vue', marker: 'data-graph-topbar', kind: 'pane-bar', cssClass: 'graph-topbar' },
   { file: 'mimir/apps/business-graph/GraphViewbar.vue', marker: 'data-graph-viewbar', kind: 'pane-subbar', cssClass: 'graph-viewbar' },
-  { file: 'mimir/apps/business-graph/DispatchBar.vue', marker: 'data-graph-dispatch', kind: 'pane-footer-input', cssClass: 'dispatch-bar' },
 
   { file: 'editor/components/workspace/EditorToolbar.vue', marker: 'data-editor-toolbar', kind: 'pane-bar', cssClass: 'editor-toolbar' },
   { file: 'editor/components/workspace/ScratchpadBar.vue', marker: 'data-scratchpad-toolbar', kind: 'pane-bar' },
@@ -53,6 +52,7 @@ export const PANE_CHROME_INVENTORY = Object.freeze([
   { file: 'mimir/apps/TrackerApp.vue', marker: 'data-tracker-rangebar', kind: 'pane-bar' },
   { file: 'mimir/apps/TodayApp.vue', marker: 'data-today-statusbar', kind: 'pane-footer' },
   { file: 'mimir/apps/ScribeApp.vue', marker: 'data-scribe-ledger', kind: 'pane-bar', cssClass: 'scribe-transport' },
+  { file: 'mimir/apps/ScribeApp.vue', marker: 'data-scribe-home-toolbar', kind: 'pane-bar' },
   { file: 'mimir/apps/ScribeApp.vue', marker: 'data-scribe-detail-header', kind: 'pane-bar', cssClass: 'scribe-bar' },
   { file: 'mimir/apps/scribe/ScribeSettings.vue', marker: 'data-scribe-settings-header', kind: 'pane-bar' },
   { file: 'mimir/apps/EmbeddedAppHost.vue', marker: 'data-embedded-app-toolbar', kind: 'pane-bar' },

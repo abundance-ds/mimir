@@ -6,6 +6,7 @@
     :active="active"
     @open-file="$emit('openFile', $event)"
     @choose-workspace="$emit('chooseWorkspace')"
+    @configure-workspace="$emit('configureWorkspace')"
     @open-activity="$emit('openActivity', $event)"
     @start-work="$emit('startWork', $event)"
     @open-meeting="$emit('openMeeting', $event)"
@@ -95,6 +96,7 @@ defineEmits([
   'openMeeting',
   'openGraphNode',
   'chooseWorkspace',
+  'configureWorkspace',
   'launchPlan',
   'diagnostic',
 ])

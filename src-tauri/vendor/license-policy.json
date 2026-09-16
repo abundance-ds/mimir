@@ -65,6 +65,24 @@
       "purl": "pkg:github/eigilnikolajsen/commit-mono@d407cd2bf8e01ca1db70544052fbbb9606406c3b"
     },
     {
+      "id": "model:ggml-tiny.bin@5359861c739e955e79d9a303bcbc70fb988958b1",
+      "name": "OpenAI Whisper Tiny multilingual model",
+      "version": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin",
+      "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-tiny.bin@5359861c739e955e79d9a303bcbc70fb988958b1"
+    },
+    {
+      "id": "model:ggml-base.bin@5359861c739e955e79d9a303bcbc70fb988958b1",
+      "name": "OpenAI Whisper Base multilingual model",
+      "version": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-base.bin@5359861c739e955e79d9a303bcbc70fb988958b1"
+    },
+    {
       "id": "model:ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68",
       "name": "OpenAI Whisper Small multilingual model",
       "version": "c521a4b02f422512d734391fdf08bb08c0862f68",
@@ -72,6 +90,33 @@
       "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-small.bin",
       "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
       "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68"
+    },
+    {
+      "id": "model:ggml-medium.bin@5359861c739e955e79d9a303bcbc70fb988958b1",
+      "name": "OpenAI Whisper Medium multilingual model",
+      "version": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+      "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-medium.bin@5359861c739e955e79d9a303bcbc70fb988958b1"
+    },
+    {
+      "id": "model:ggml-large-v3-turbo-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1",
+      "name": "OpenAI Whisper Large v3 Turbo (Q5) multilingual model",
+      "version": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-large-v3-turbo-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1"
+    },
+    {
+      "id": "model:ggml-large-v3-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1",
+      "name": "OpenAI Whisper Large v3 (Q5) multilingual model",
+      "version": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin",
+      "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-large-v3-q5_0.bin@5359861c739e955e79d9a303bcbc70fb988958b1"
     }
   ]
 }

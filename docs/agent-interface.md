@@ -17,6 +17,9 @@ mimir doctor
 MCP initially advertises only `mimir_state`, `mimir_reveal`, and
 `mimir_propose`; `mimir tools` progressively discloses the rest.
 
+Describe only what changes tool selection or arguments; let results explain
+themselves.
+
 ## Public tools
 
 Workbench:
@@ -42,6 +45,9 @@ graph_find  graph_status  graph_get  graph_create  graph_update
 graph_delete  graph_restore  graph_context  graph_events
 graph_resource_add
 ```
+
+`rel` aliases `relation` in create/update; `sourceRevision` aliases
+`expectedRevision` in delete; canonical names take precedence.
 
 `graph_get` returns authored `relations` and a separate read-only
 `bodyReferences` object with outgoing references and backlinks. Do not copy

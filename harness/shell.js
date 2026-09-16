@@ -4,6 +4,8 @@ import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
 import BusinessGraphApp from '../src/mimir/apps/BusinessGraphApp.vue'
+import { useBusinessGraphStore } from '../src/stores/businessGraph.js'
+import { loadWorkspaceConfig } from '../src/services/workspaceConfig.js'
 
 const params = new URLSearchParams(location.search)
 const theme = params.get('theme') || 'parchment'
@@ -42,7 +44,7 @@ const summaries = [
   mkIssue('issue-qc', 'QC the extraction sheet', 'review', { priority: 'normal', dueDate: iso(1) }),
   mkIssue('issue-kickoff', 'File kickoff notes', 'done', { priority: 'normal' }),
   {
-    id: 'project-atlas', kind: 'project', title: 'Atlas', summary: 'Global value evidence strategy',
+    id: 'project-atlas', kind: 'project', title: params.get('projectName') || 'Atlas', summary: 'Global value evidence strategy',
     slug: 'atlas', scopeId: 'team:main', sourceRevision: 'r2', updatedAt: stamp(9, 5),
     relations: [{ relation: 'for_company', target: 'company-acme' }],
   },
@@ -102,20 +104,35 @@ const fullNode = id => {
   }
 }
 
+function filterNodes(query = {}) {
+  const anchor = summaries.find(node => node.id === query.relatedTo)
+  const related = new Set(anchor ? [anchor.id, ...(anchor.relations || []).map(edge => edge.target)] : [])
+  if (anchor) summaries.forEach(node => {
+    if (node.projectId === anchor.id || node.relations?.some(edge => edge.target === anchor.id)) related.add(node.id)
+  })
+  return summaries.filter(node => (!query.scopeIds?.length || query.scopeIds.includes(node.scopeId))
+    && (!query.kinds?.length || query.kinds.includes(node.kind))
+    && (!query.relatedTo || related.has(node.id)))
+}
+
 window.__TAURI_INTERNALS__ = {
   invoke: async (cmd, args) => {
     switch (cmd) {
       case 'graph_open':
         return { scopes, nodeCount: summaries.length, diagnosticCount: 0, graphRevision: 44 }
-      case 'graph_query':
-        return { items: summaries, total: summaries.length, graphRevision: 44 }
+      case 'workspace_config_load':
+        return { id: 'workspace-atlas', project: params.has('noProject') ? '' : 'project-atlas', graphScope: 'team' }
+      case 'graph_query': {
+        const items = filterNodes(args?.query)
+        return { items, total: items.length, graphRevision: 44 }
+      }
       case 'graph_diagnostics':
         return []
       case 'graph_events':
         return { items: events, total: events.length, offset: 0, limit: 500 }
       case 'graph_search': {
         const query = String(args?.query || '').toLowerCase()
-        return summaries
+        return filterNodes(args)
           .filter(node => (
             node.title.toLowerCase().includes(query)
             || node.id.includes(query)
@@ -166,13 +183,17 @@ const app = createApp({
   },
 })
 app.use(pinia)
+const graph = useBusinessGraphStore(pinia)
+await loadWorkspaceConfig('/work/atlas')
+await graph.start('/work/atlas')
 app.mount('#app')
+graph.setSection(params.get('section') || 'all')
 
 const action = params.get('do')
 if (action) {
   setTimeout(async () => {
-    if (action === 'dispatch') {
-      const input = document.querySelector('[data-dispatch-input]')
+    if (action === 'search') {
+      const input = document.querySelector('[data-graph-search]')
       input?.focus()
       if (input) {
         input.value = 'alex'

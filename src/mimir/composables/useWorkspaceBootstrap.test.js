@@ -76,6 +76,31 @@ afterEach(() => {
 })
 
 describe('workspace Graph hydration', () => {
+  it('links the current workspace through setup without switching its folder', async () => {
+    const { bootstrap, graph, workspaceFiles, requestWorkspaceSetup } = setup()
+    await bootstrap.openWorkspace('/new', { activate: false })
+    config.loadWorkspaceConfig.mockResolvedValue({ id: 'ws-vandage', graphScope: 'team' })
+    requestWorkspaceSetup.mockClear()
+    workspaceFiles.openWorkspace.mockClear()
+    await bootstrap.configureWorkspace()
+    expect(requestWorkspaceSetup).toHaveBeenCalledWith(expect.objectContaining({ path: '/new', projects: [project] }))
+    expect(config.saveWorkspaceConfig).toHaveBeenLastCalledWith('/new', { id: 'ws-vandage', project: project.id, graphScope: 'team' })
+    expect(graph.workspaceProjectId).toBe(project.id)
+    expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('does not apply workspace setup after the active folder changes', async () => {
+    const { bootstrap, workspaceFiles, requestWorkspaceSetup } = setup()
+    let finish
+    requestWorkspaceSetup.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const pending = bootstrap.configureWorkspace()
+    await vi.waitFor(() => expect(requestWorkspaceSetup).toHaveBeenCalled())
+    workspaceFiles.workspacePath = '/different'
+    finish({ project: project.id, graphScope: 'team' })
+    await pending
+    expect(config.saveWorkspaceConfig).not.toHaveBeenCalled()
+  })
+
   it('adopts the setup mount and hydrates scopes before refreshing Editor documents', async () => {
     const { bootstrap, workspaceFiles, requestWorkspaceSetup, editorFiles, graph } = setup()
     await expect(bootstrap.openWorkspace('/new', { activate: false })).resolves.toBe(true)
