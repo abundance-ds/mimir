@@ -62,14 +62,14 @@ describe('GraphSelect', () => {
     wrapper.unmount()
   })
 
-  it('offers one direct create action only when search has no exact match', async () => {
+  it('keeps creation visible and selects matches before offering keyboard creation', async () => {
     const wrapper = mount(GraphSelect, {
       attachTo: document.body,
       props: {
         modelValue: '',
         ariaLabel: 'Meeting person',
         searchable: true,
-        createLabel: 'Create person',
+        createLabel: 'New person',
         options: [{ value: 'ana', label: 'Ana Smith' }],
       },
     })
@@ -78,14 +78,24 @@ describe('GraphSelect', () => {
     const search = new DOMWrapper(document.querySelector('[data-graph-select-search]'))
     await search.setValue('New Person')
     expect(document.querySelector('[data-graph-select-create]').textContent).toContain(
-      'Create person “New Person”',
+      'New person…',
     )
     await search.trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('create')).toEqual([['New Person']])
 
     await wrapper.get('[role="combobox"]').trigger('click')
     await new DOMWrapper(document.querySelector('[data-graph-select-search]')).setValue('ana smith')
-    expect(document.querySelector('[data-graph-select-create]')).toBeNull()
+    expect(document.querySelector('[data-graph-select-create]')).not.toBeNull()
+    await new DOMWrapper(document.querySelector('[data-graph-select-search]')).trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('update:modelValue')).toEqual([['ana']])
+    expect(wrapper.emitted('create')).toHaveLength(1)
+
+    await wrapper.get('[role="combobox"]').trigger('click')
+    const menu = new DOMWrapper(document.querySelector('[role="listbox"]'))
+    await menu.trigger('keydown', { key: 'End' })
+    expect(document.activeElement).toBe(document.querySelector('[data-graph-select-create]'))
+    await menu.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('create').at(-1)).toEqual([''])
     wrapper.unmount()
   })
 

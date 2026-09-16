@@ -15,7 +15,7 @@
         :menu-min-width="280"
         searchable
         search-placeholder="Find a project"
-        create-label="Create project"
+        create-label="New project"
         @update:model-value="setProject"
         @create="$emit('createEntity', { kind: 'project', title: $event })"
       />
@@ -48,7 +48,7 @@
           :menu-min-width="280"
           searchable
           search-placeholder="Find a person"
-          create-label="Create person"
+          create-label="New person"
           @update:model-value="addPerson"
           @create="$emit('createEntity', { kind: 'person', title: $event })"
         />

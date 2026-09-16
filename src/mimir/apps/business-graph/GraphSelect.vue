@@ -8,7 +8,7 @@
     :aria-label="ariaLabel"
     :aria-expanded="open"
     :aria-controls="open ? listboxId : undefined"
-    :aria-activedescendant="open && activeOption ? optionId(activeOption.value) : undefined"
+    :aria-activedescendant="open ? activeOptionId : undefined"
     class="graph-select-trigger"
     :class="`graph-select-${variant}`"
     @click="toggle"
@@ -57,9 +57,9 @@
           autocorrect="off"
           autocapitalize="off"
           spellcheck="false"
-          @keydown.down.prevent="focusOption(0)"
-          @keydown.up.prevent="focusOption(filteredOptions.length - 1)"
-          @keydown.enter.prevent="createFromQuery"
+          @keydown.down.prevent.stop="focusOption(0)"
+          @keydown.up.prevent.stop="focusOption(optionCount - 1)"
+          @keydown.enter.prevent.stop="selectSearchResult"
         />
       </div>
 
@@ -110,20 +110,23 @@
         >
           No matching options
         </p>
-        <button
-          v-if="canCreate"
-          type="button"
-          role="option"
-          aria-selected="false"
-          data-graph-control="select-create"
-          data-graph-select-create
-          class="graph-select-create"
-          @click="createFromQuery"
-        >
-          <span>+</span>
-          {{ createLabel }} “{{ normalizedQuery }}”
-        </button>
       </div>
+      <button
+        v-if="canCreate"
+        ref="createButton"
+        :id="`${listboxId}-create`"
+        type="button"
+        role="option"
+        aria-selected="false"
+        data-graph-control="select-create"
+        data-graph-select-create
+        class="graph-select-create"
+        @focus="activeIndex = filteredOptions.length"
+        @click="createFromQuery"
+      >
+        <span>+</span>
+        {{ createLabel }}…
+      </button>
     </div>
   </Teleport>
 </template>
@@ -163,6 +166,7 @@ const attrs = useAttrs()
 const trigger = ref(null)
 const menu = ref(null)
 const searchInput = ref(null)
+const createButton = ref(null)
 const optionRefs = ref([])
 const open = ref(false)
 const query = ref('')
@@ -196,12 +200,11 @@ const filteredOptions = computed(() => {
 })
 const activeOption = computed(() => filteredOptions.value[activeIndex.value])
 const normalizedQuery = computed(() => query.value.trim())
-const canCreate = computed(() => (
-  Boolean(props.createLabel && normalizedQuery.value)
-  && !normalizedOptions.value.some(option => (
-    option.label.trim().localeCompare(normalizedQuery.value, undefined, { sensitivity: 'accent' }) === 0
-  ))
-))
+const canCreate = computed(() => Boolean(props.createLabel))
+const optionCount = computed(() => filteredOptions.value.length + (canCreate.value ? 1 : 0))
+const activeOptionId = computed(() => activeOption.value
+  ? optionId(activeOption.value.value)
+  : canCreate.value ? `${listboxId}-create` : undefined)
 
 watch(filteredOptions, () => {
   activeIndex.value = Math.min(activeIndex.value, Math.max(0, filteredOptions.value.length - 1))
@@ -259,8 +262,14 @@ function choose(option) {
 function createFromQuery() {
   if (!canCreate.value) return
   const value = normalizedQuery.value
+  close()
+  trigger.value?.focus()
   emit('create', value)
-  close({ restoreFocus: true })
+}
+
+function selectSearchResult() {
+  if (activeOption.value) choose(activeOption.value)
+  else createFromQuery()
 }
 
 function positionMenu() {
@@ -317,26 +326,28 @@ function onMenuKeydown(event) {
   }
   if (event.key === 'Home' || event.key === 'End') {
     event.preventDefault()
-    focusOption(event.key === 'Home' ? 0 : filteredOptions.value.length - 1)
+    focusOption(event.key === 'Home' ? 0 : optionCount.value - 1)
     return
   }
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     const offset = event.key === 'ArrowDown' ? 1 : -1
-    const length = filteredOptions.value.length
+    const length = optionCount.value
     if (length) focusOption((activeIndex.value + offset + length) % length)
     return
   }
   if (event.key === 'Enter' && document.activeElement !== searchInput.value) {
     event.preventDefault()
-    if (activeOption.value) choose(activeOption.value)
+    if (activeIndex.value === filteredOptions.value.length) createFromQuery()
+    else if (activeOption.value) choose(activeOption.value)
   }
 }
 
 function focusOption(index) {
-  if (index < 0 || index >= filteredOptions.value.length) return
+  if (index < 0 || index >= optionCount.value) return
   activeIndex.value = index
-  optionRefs.value[index]?.focus()
+  if (index === filteredOptions.value.length) createButton.value?.focus()
+  else optionRefs.value[index]?.focus()
 }
 
 function adjacentFocusTarget(reverse = false) {

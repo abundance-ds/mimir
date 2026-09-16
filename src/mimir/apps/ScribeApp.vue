@@ -79,7 +79,7 @@
             :creating="graphEntityCreating"
             :error="graphCatalogError"
             @change="changeGraphDraft(meetings.activeMeeting.id, $event)"
-            @create-entity="createGraphContextEntity(meetings.activeMeeting.id, $event)"
+            @create-entity="openGraphEntityDialog(meetings.activeMeeting.id, $event)"
           />
           <button
             v-if="meetings.activeMeeting.graphNodeId"
@@ -248,7 +248,7 @@
               :creating="graphEntityCreating"
               :error="graphCatalogError"
               @change="changeGraphDraft(detailMeeting.id, $event)"
-              @create-entity="createGraphContextEntity(detailMeeting.id, $event)"
+              @create-entity="openGraphEntityDialog(detailMeeting.id, $event)"
             />
             <p v-if="filingHelp" id="scribe-filing-help" class="text-[10px] text-ink-3">
               {{ filingHelp }}
@@ -753,6 +753,15 @@
       @delete="deleteMeetingById(menuMeeting.id)"
     />
 
+    <ScribeCreateEntityDialog
+      :request="graphEntityRequest"
+      :scopes="graphCatalog.scopes"
+      :busy="graphEntityCreating"
+      :error="graphEntityError"
+      @close="graphEntityRequest = null"
+      @submit="createGraphContextEntity(graphEntityRequest.meetingId, $event)"
+    />
+
     <ScribeFollowUpDialog
       :open="summaryDialogOpen"
       mode="summary"
@@ -822,6 +831,7 @@ import ScribeMeetingMenu from './scribe/ScribeMeetingMenu.vue'
 import ScribeMarkdownEditor from './scribe/ScribeMarkdownEditor.vue'
 import ScribeMeetingContext from './scribe/ScribeMeetingContext.vue'
 import ScribeFollowUpDialog from './scribe/ScribeFollowUpDialog.vue'
+import ScribeCreateEntityDialog from './scribe/ScribeCreateEntityDialog.vue'
 import {
   summaryAgentOptions as buildSummaryAgentOptions,
   summaryPromptFor,
@@ -860,6 +870,8 @@ const graphCatalog = ref({ scopes: [], projects: [], people: [] })
 const graphCatalogLoading = ref(false)
 const graphCatalogError = ref('')
 const graphEntityCreating = ref(false)
+const graphEntityRequest = ref(null)
+const graphEntityError = ref('')
 const actionError = ref('')
 const dismissedNativeNotice = ref('')
 const now = ref(Date.now())
@@ -1389,45 +1401,51 @@ async function maybeSeedGraphDraft(meeting) {
   stageMeetingChange(meeting.id, { graphDraft: next })
 }
 
+function openGraphEntityDialog(meetingId, request) {
+  graphEntityError.value = ''
+  graphEntityRequest.value = {
+    ...request,
+    meetingId,
+    scopeId: graphDraft.value.scopeId || preferredMeetingGraphScope(graphCatalog.value.scopes),
+  }
+}
+
 async function createGraphContextEntity(meetingId, request) {
   if (!meetingId || graphEntityCreating.value) return
   const kind = request?.kind
   const requestedTitle = String(request?.title || '').trim()
   if (!requestedTitle || !['project', 'person'].includes(kind)) return
-  const collection = kind === 'project' ? graphCatalog.value.projects : graphCatalog.value.people
-  let entity = collection.find(candidate => (
-    String(candidate.title || '').localeCompare(requestedTitle, undefined, {
-      sensitivity: 'accent',
-    }) === 0
-  ))
+  const originalDraft = normalizeGraphDraft(graphDraft.value)
   graphEntityCreating.value = true
-  graphCatalogError.value = ''
+  graphEntityError.value = ''
   try {
-    if (!entity) {
-      entity = await createMeetingGraphEntity({
-        kind,
-        title: requestedTitle,
-        scopeId: preferredMeetingGraphScope(graphCatalog.value.scopes),
-      })
-      graphCatalog.value = {
-        ...graphCatalog.value,
-        [kind === 'project' ? 'projects' : 'people']: [...collection, entity],
-      }
+    const entity = await createMeetingGraphEntity({
+      kind,
+      title: requestedTitle,
+      scopeId: request.scopeId,
+    })
+    const key = kind === 'project' ? 'projects' : 'people'
+    graphCatalog.value = {
+      ...graphCatalog.value,
+      [key]: [...graphCatalog.value[key], entity],
     }
-    if (kind === 'project') {
-      changeGraphDraft(meetingId, {
-        ...graphDraft.value,
-        projectResolved: true,
-        projectId: entity.id,
-      })
-    } else {
-      changeGraphDraft(meetingId, {
-        ...graphDraft.value,
-        peopleIds: [...new Set([...graphDraft.value.peopleIds, entity.id])],
-      })
+    // Keep a delayed create attached to the meeting that opened the dialog.
+    const currentMeetingId = meetings.activeMeeting?.id || detailMeeting.value?.id
+    const currentDraft = currentMeetingId === meetingId
+      ? graphDraft.value
+      : originalDraft
+    const next = kind === 'project'
+      ? { ...currentDraft, projectResolved: true, projectId: entity.id }
+      : { ...currentDraft, peopleIds: [...new Set([...currentDraft.peopleIds, entity.id])] }
+    if (currentMeetingId === meetingId) changeGraphDraft(meetingId, next)
+    else {
+      meetings.stageMeetingPatch(meetingId, { graphDraft: next })
+      void meetings.flushMeetingDraft(meetingId).catch(error => { actionError.value = message(error) })
     }
+    graphEntityRequest.value = null
+    liveAnnouncement.value = `${entity.title || requestedTitle} added to meeting`
   } catch (error) {
-    graphCatalogError.value = message(error)
+    graphEntityError.value = message(error)
   } finally {
     graphEntityCreating.value = false
   }
@@ -1436,7 +1454,7 @@ async function createGraphContextEntity(meetingId, request) {
 function onDetailKeydown(event) {
   if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.repeat
     || !props.active || meetings.activeMeeting || !detailMeeting.value) return
-  if (summaryDialogOpen.value || agentDialogOpen.value) return
+  if (summaryDialogOpen.value || agentDialogOpen.value || graphEntityRequest.value) return
   event.preventDefault()
   event.stopPropagation()
   if (meetingMenuOpen.value) closeMeetingMenu()

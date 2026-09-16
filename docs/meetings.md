@@ -76,6 +76,12 @@ project or **None**, check People and Scope, then click **File to Graph** in the
 detail header. Mimir saves pending edits before filing. The button changes to
 **View in Graph**, which opens the linked meeting record.
 
+Project and People menus always offer **New project…** or **New person…**.
+The action opens a small dialog with the search text in Name and the meeting's
+scope in **Save in**. **Create and add** creates the Graph record and selects it
+in the meeting. Creation errors retain the entered values for retry. Cancel
+closes the dialog without creating a record. Notes and recording stay in place.
+
 After filing, Scribe shows the current Graph title, context, and summary.
 **In Graph · Team**, for example, shows where the record is stored. Use **View
 in Graph** to edit those saved values. Notes and transcript remain in Scribe.
