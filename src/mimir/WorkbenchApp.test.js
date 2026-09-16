@@ -1329,7 +1329,7 @@ describe('WorkbenchApp', () => {
     await flushPromises()
     await nextTick()
 
-    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('startWork', {
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('startGraphWork', {
       nodeId: 'issue-1',
       nodeKind: 'issue',
       title: 'Extract evidence',

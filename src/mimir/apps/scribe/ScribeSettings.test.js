@@ -19,6 +19,73 @@ const config = {
 }
 
 describe('ScribeSettings', () => {
+  const small = { id: 'whisper-small', title: 'Whisper Small', bytes: 487601967, status: 'installed' }
+  const turbo = { id: 'whisper-large-v3-turbo-q5_0', title: 'Whisper Large v3 Turbo (Q5)', bytes: 574041195, status: 'available' }
+  const permissions = { microphone: 'granted', systemAudio: 'granted' }
+
+  it('downloads a model without selecting it and selects it only after it is installed', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: { embedded: true, config, permissions, models: [small, turbo] },
+    })
+    expect(wrapper.get(`[data-scribe-selected-model="${small.id}"]`).text()).toBe('Selected')
+    expect(wrapper.find(`[data-scribe-use-model="${turbo.id}"]`).exists()).toBe(false)
+    await wrapper.get(`[data-scribe-download-model="${turbo.id}"]`).trigger('click')
+    expect(wrapper.emitted('installModel')).toEqual([[turbo.id]])
+    expect(wrapper.emitted('save')).toBeUndefined()
+
+    await wrapper.setProps({ models: [small, { ...turbo, status: 'installed' }] })
+    await wrapper.get(`[data-scribe-use-model="${turbo.id}"]`).trigger('click')
+    expect(wrapper.emitted('save')).toEqual([[{ localModel: turbo.id }]])
+    expect(wrapper.find(`[data-scribe-selected-model="${turbo.id}"]`).exists()).toBe(false)
+    await wrapper.setProps({ config: { ...config, localModel: turbo.id } })
+    expect(wrapper.get(`[data-scribe-selected-model="${turbo.id}"]`).text()).toBe('Selected')
+    expect(wrapper.get(`[data-scribe-use-model="${small.id}"]`).text()).toBe('Use')
+
+    await wrapper.get(`[data-scribe-remove-model="${small.id}"]`).trigger('click')
+    expect(wrapper.emitted('deleteModel')).toEqual([[small.id]])
+    expect(wrapper.emitted('save')).toHaveLength(1)
+  })
+
+  it('shows download progress and verification, and permits retry after a failure', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true, config, permissions,
+        models: [{ ...turbo, status: 'downloading', downloadedBytes: turbo.bytes / 2 }],
+      },
+    })
+    const download = () => wrapper.get(`[data-scribe-download-model="${turbo.id}"]`)
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('50')
+    expect(wrapper.text()).toContain('Downloading 50%')
+    expect(download().element.disabled).toBe(true)
+
+    await wrapper.setProps({ models: [{ ...turbo, status: 'verifying' }] })
+    expect(download().text()).toBe('Checking…')
+    expect(download().element.disabled).toBe(true)
+    expect(wrapper.find('[data-scribe-use-model]').exists()).toBe(false)
+
+    await wrapper.setProps({ models: [{ ...turbo, status: 'error', error: 'Download did not complete.' }] })
+    expect(wrapper.text()).toContain('Download did not complete.')
+    expect(download().text()).toBe('Retry')
+    expect(download().element.disabled).toBe(false)
+    await download().trigger('click')
+    expect(wrapper.emitted('installModel')).toEqual([[turbo.id]])
+  })
+
+  it('prevents model selection and removal while a config save or model removal is pending', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true, config, permissions, models: [small, { ...turbo, status: 'installed' }],
+        pending: { config: true },
+      },
+    })
+    expect(wrapper.get('[data-scribe-use-model]').element.disabled).toBe(true)
+    expect(wrapper.findAll('[data-scribe-remove-model]').every(button => button.element.disabled)).toBe(true)
+    await wrapper.setProps({ pending: { [`model:${turbo.id}`]: true } })
+    expect(wrapper.get('[data-scribe-use-model]').element.disabled).toBe(true)
+    expect(wrapper.get(`[data-scribe-remove-model="${turbo.id}"]`).text()).toBe('Removing…')
+    expect(wrapper.get(`[data-scribe-remove-model="${small.id}"]`).element.disabled).toBe(false)
+  })
+
   it('makes every config mutation visibly unavailable during an ordered save', () => {
     const wrapper = mount(ScribeSettings, {
       props: {

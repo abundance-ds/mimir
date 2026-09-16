@@ -181,6 +181,101 @@ fn model_install_is_background_verified_fsynced_and_atomically_published() {
 }
 
 #[test]
+fn model_download_selection_and_removal_remain_separate_across_restart() {
+    if RuntimePlatform::current().is_none() {
+        return;
+    }
+    let fixture = fixture();
+    let bytes = b"verified managed model".to_vec();
+    let target = "whisper-large-v3-turbo-q5_0";
+    let mut turbo_manifest = manifest(&bytes);
+    turbo_manifest.model_id = id(target);
+    let catalog = vec![
+        MeetingModelCatalogEntry {
+            title: "Whisper Small".into(),
+            manifest: manifest(&bytes),
+        },
+        MeetingModelCatalogEntry {
+            title: "Whisper Large v3 Turbo (Q5)".into(),
+            manifest: turbo_manifest,
+        },
+    ];
+    let open = || {
+        NativeMeetingPlatform::new(
+            fixture.paths.clone(),
+            fixture.store.clone(),
+            catalog.clone(),
+            fixture.secrets.clone(),
+            Arc::new(FakeEnvironment),
+            Arc::new(FakeDisk),
+            Arc::new(FakeDownloader {
+                bytes: bytes.clone(),
+                completion: fixture.completion.clone(),
+            }),
+            Arc::new(NoopMeetingPlatformChangeSink),
+        )
+        .unwrap()
+    };
+    let platform = open();
+    let initial = platform.projection().unwrap();
+    assert_eq!(
+        initial
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["whisper-small", target]
+    );
+    assert!(initial
+        .models
+        .iter()
+        .all(|model| model.status == "available"));
+    assert!(!*fixture.completion.0.lock().unwrap());
+    for unavailable in [target, "unknown-model"] {
+        assert!(platform
+            .update_config(&MeetingConfigPatch {
+                local_model: Some(unavailable.into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap_err()
+            .contains("Download the local model"));
+        assert_eq!(
+            platform.projection().unwrap().config.local_model,
+            "whisper-small"
+        );
+    }
+
+    platform.install_model(target).unwrap();
+    for _ in 0..500 {
+        if platform.projection().unwrap().models[1].status == "installed" {
+            break;
+        }
+        thread::sleep(StdDuration::from_millis(10));
+    }
+    let downloaded = platform.projection().unwrap();
+    assert_eq!(downloaded.models[1].status, "installed");
+    assert_eq!(downloaded.config.local_model, "whisper-small");
+    platform
+        .update_config(&MeetingConfigPatch {
+            local_model: Some(target.into()),
+            ..MeetingConfigPatch::default()
+        })
+        .unwrap();
+    drop(platform);
+
+    let reopened = open();
+    assert_eq!(reopened.projection().unwrap().config.local_model, target);
+    let artifact = reopened.managed_model_artifact(target).unwrap();
+    assert_eq!(fs::read(&artifact).unwrap(), bytes);
+    reopened.delete_model(target).unwrap();
+    assert!(!artifact.exists());
+    let removed = reopened.projection().unwrap();
+    assert_eq!(removed.config.local_model, target);
+    assert_eq!(removed.models[1].status, "available");
+    assert!(reopened.managed_model_artifact(target).is_err());
+}
+
+#[test]
 fn retention_skips_active_work_and_removes_only_expired_source_audio() {
     let fixture = fixture();
     create_meeting(&fixture, "meeting-old");
@@ -272,4 +367,3 @@ fn retention_skips_active_work_and_removes_only_expired_source_audio() {
         1
     );
 }
-

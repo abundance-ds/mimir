@@ -53,7 +53,7 @@
         @keydown.down.prevent="openFiltersMenu"
       >
         <IconFilter :size="13" />
-        <span>Filter</span>
+        <span>{{ section === 'all' && kindFilter ? optionLabel(kindOptions, kindFilter) : 'Filter' }}</span>
         <span v-if="activeFilters.length" class="graph-filter-count">{{ activeFilters.length }}</span>
       </button>
 
@@ -225,6 +225,7 @@
       <IconFolder v-else :size="12" aria-hidden="true" />
       <span v-if="currentProjectTitle" class="graph-current-project-prefix">Project:</span>
       <span class="graph-current-project-name">{{ currentProjectTitle || (projectLoading ? 'Loading project…' : projectUnavailable ? 'Project unavailable' : 'No linked project') }}</span>
+      <span v-if="currentProjectTitle" class="graph-project-tooltip" aria-hidden="true">{{ currentProjectTitle }}</span>
     </button>
     <div v-if="section === 'work'" ref="displayRoot" class="graph-display-root">
       <button
@@ -674,13 +675,15 @@ defineExpose({ closeMenus })
 
 <style scoped>
 .graph-viewbar { position: relative; min-width: 0; gap: 8px; }
-.graph-current-project { display: inline-flex; height: 22px; min-width: 50px; flex: 0 1 auto; align-items: center; gap: 4px; padding: 0 5px; color: var(--color-ink-3); font-size: 10px; }
+.graph-current-project { position: relative; display: inline-flex; height: 22px; min-width: 50px; flex: 0 1 auto; align-items: center; gap: 4px; padding: 0 5px; color: var(--color-ink-3); font-size: 10px; }
 .graph-current-project svg, .graph-current-project-prefix { flex: 0 0 auto; }
 .graph-current-project-name { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-current-project:hover { background: var(--color-chrome-mid); color: var(--color-ink); }
 .graph-current-project:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
 .graph-current-project-active { background: var(--color-accent-soft); color: var(--color-ink); }
 .graph-current-project:disabled { opacity: 0.5; }
+.graph-project-tooltip { display: none; position: absolute; z-index: 260; top: 26px; right: 0; width: max-content; max-width: min(260px, calc(100cqw - 24px)); border: 1px solid var(--color-rule); background: var(--color-surface); padding: 5px 7px; color: var(--color-ink); text-align: left; overflow-wrap: anywhere; pointer-events: none; }
+.graph-current-project:hover .graph-project-tooltip, .graph-current-project:focus-visible .graph-project-tooltip { display: block; }
 .graph-views { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 .graph-view { height: 22px; border-radius: 3px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
 .graph-view:hover { background: var(--graph-hover); color: var(--color-ink); }

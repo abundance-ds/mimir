@@ -5,11 +5,6 @@ task scope.
 
 ## Open
 
-- Scribe supply-chain check: `bun run check:meetings` fails because the SPDX
-  SBOM digest does not match the committed lockfiles and license policy.
-  The mismatch also exists at `HEAD`, before the summary-prompt change.
-  Refresh and verify the dependency inventory under its own checks.
-
 - Scribe tests: the reviewed-summary case in `ScribeApp.test.js` failed in a
   full-suite run but passed when that file ran alone; investigate its
   asynchronous completion check.

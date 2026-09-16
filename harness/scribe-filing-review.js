@@ -2,10 +2,17 @@ import { createApp, h } from 'vue'
 import { createPinia } from 'pinia'
 import '../src/shared/styles/app.css'
 import ScribeApp from '../src/mimir/apps/ScribeApp.vue'
+import ScribeSettingsSection from '../src/shared/ui/settings/ScribeSettingsSection.vue'
+import modelCatalog from '../src-tauri/resources/meeting-models.json'
 import { useMeetingsStore } from '../src/stores/meetings.js'
 import { useSettingsStore } from '../src/stores/settings.js'
 import { summaryHash } from '../src/services/filedMeeting.js'
 const params = new URLSearchParams(location.search)
+const models = modelCatalog.map(model => ({
+ id: model.id, title: model.title, bytes: model.bytes, downloadedBytes: 0,
+ status: model.id === 'whisper-small' ? 'installed' : 'available',
+}))
+const config = {transcriptionMode:'local',localModel:'whisper-small',summaryEnabled:true,summaryTemplate:'standard',summaryPreset:'',kgPreset:'',kgPrompt:'ask',retentionDays:30}
 let meeting = {
  id: 'm1', title: 'Planning the autumn release', lifecycle: 'ready', transcription: 'final',
  startedAt: '2026-09-11T10:00:00.000Z', stoppedAt:'2026-09-11T10:45:00.000Z', durationMs:2700000,
@@ -26,8 +33,8 @@ if (params.has('filed')) meeting.graphNodeId = graphNode.id
 if (params.has('draft')) meeting.summary = '# Updated release plan\n\nShip the release on Monday after one more review.\n\n- Ana will check the new transcript.'
 const snapshot = () => ({
  revision:1,meetings:[structuredClone(meeting)],activeMeetingId:null,activeMeeting:null,candidates:[],
- permissions:{microphone:'granted',systemAudio:'granted'},models:[{id:'whisper-small',title:'Whisper Small',status:'installed'}],
- config:{transcriptionMode:'local',localModel:'whisper-small',summaryEnabled:true,summaryTemplate:'standard',summaryPreset:'',kgPreset:'',kgPrompt:'ask',retentionDays:30},
+ permissions:{microphone:'granted',systemAudio:'granted'},models:structuredClone(models),
+ config:structuredClone(config),
 })
 window.__TAURI_INTERNALS__ = {
  transformCallback:() => 0, unregisterCallback(){},
@@ -36,6 +43,9 @@ window.__TAURI_INTERNALS__ = {
    case 'plugin:event|listen': return 1
    case 'plugin:event|unlisten': return null
    case 'meetings_snapshot': return snapshot()
+   case 'meetings_update_config': Object.assign(config,args.patch);return snapshot()
+   case 'meetings_install_model': models.find(model => model.id === args.modelId).status='installed';return snapshot()
+   case 'meetings_delete_model': models.find(model => model.id === args.modelId).status='available';return snapshot()
    case 'meetings_get': return structuredClone(meeting)
    case 'meetings_transcript_page': return {meetingId:'m1',revision:1,totalSegments:1,hasMore:false,nextBefore:null,summary:meeting.summary,segments:[{id:'s1',text:'We agreed on the next release.',startMs:0,endMs:2000,channel:'microphone',final:true,revision:1}]}
    case 'meetings_update': Object.assign(meeting,args.patch);return snapshot()
@@ -49,7 +59,9 @@ window.__TAURI_INTERNALS__ = {
   }
  },
 }
-const app=createApp({render:()=>h(ScribeApp,{active:true,workspacePath:'/work'})})
+const app=createApp({render:()=>params.has('models')
+ ? h('div',{class:'px-6 py-5'},[h(ScribeSettingsSection)])
+ : h(ScribeApp,{active:true,workspacePath:'/work'})})
 app.use(createPinia())
 app.mount('#app')
 await useSettingsStore().load()

@@ -322,10 +322,9 @@ pub fn builtin_model_catalog() -> Result<Vec<MeetingModelCatalogEntry>, String> 
         bytes: u64,
         sha256: String,
     }
-    let models: Vec<CatalogModel> = serde_json::from_str(include_str!(
-        "../../resources/meeting-models.json"
-    ))
-    .map_err(|error| format!("Invalid meeting model catalog: {error}"))?;
+    let models: Vec<CatalogModel> =
+        serde_json::from_str(include_str!("../../resources/meeting-models.json"))
+            .map_err(|error| format!("Invalid meeting model catalog: {error}"))?;
     models
         .into_iter()
         .map(|model| {
@@ -340,7 +339,9 @@ pub fn builtin_model_catalog() -> Result<Vec<MeetingModelCatalogEntry>, String> 
                 .map_err(|error| error.to_string())?,
                 platform: RuntimePlatform::MACOS_AARCH64,
                 artifact_bytes: model.bytes,
-                sha256: model.sha256.parse()
+                sha256: model
+                    .sha256
+                    .parse()
                     .map_err(|error: ModelIntegrityError| error.to_string())?,
                 download_url: ModelDownloadUrl::new(&format!(
                     "https://huggingface.co/ggerganov/whisper.cpp/resolve/{}/{}",

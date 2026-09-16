@@ -85,7 +85,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     return {
       ...(graphKinds.value.length ? { kinds: graphKinds.value } : {}),
       // An unavailable link must produce an empty view, never all entries.
-      ...(currentProjectOnly.value ? { relatedTo: workspaceProjectId.value } : {}),
+      ...(currentProjectOnly.value ? { relatedTo: workspaceProject.value?.id || '' } : {}),
     }
   })
   const hasGraphFilters = computed(() => Object.keys(graphFilters.value).length > 0)
@@ -219,7 +219,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
 
   async function loadGraphProjection(generation = lifecycleGeneration) {
     const request = ++projectionGeneration
-    if (!hasGraphFilters.value || !started || (currentProjectOnly.value && !workspaceProjectId.value)) {
+    if (!hasGraphFilters.value || !started || (currentProjectOnly.value && !graphFilters.value.relatedTo)) {
       graphItems.value = []
       projectionLoading.value = false
       return
@@ -229,6 +229,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       const result = await queryGraph({ scopeIds: activeScopeIds.value, ...graphFilters.value, limit: 500 })
       if (generation !== lifecycleGeneration || request !== projectionGeneration) return
       graphItems.value = Array.isArray(result?.items) ? result.items : []
+    } catch (cause) {
+      if (generation === lifecycleGeneration && request === projectionGeneration) throw cause
     } finally {
       if (generation === lifecycleGeneration && request === projectionGeneration) projectionLoading.value = false
     }
@@ -320,7 +322,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const query = String(value || '')
     searchQuery.value = query
     const generation = ++searchGeneration
-    if (!query.trim() || section.value === 'work' || (hasGraphFilters.value && currentProjectOnly.value && !workspaceProjectId.value)) {
+    if (!query.trim() || section.value === 'work' || (hasGraphFilters.value && currentProjectOnly.value && !graphFilters.value.relatedTo)) {
       searchResults.value = []
       searching.value = false
       return
@@ -487,6 +489,11 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const mounted = new Set(scopes.value.map(scope => scope.id))
     const next = [...new Set((ids || []).filter(id => mounted.has(id)))]
     activeScopeIds.value = next.length ? next : scopes.value.map(scope => scope.id)
+    searchGeneration += 1
+    searchResults.value = []
+    searching.value = false
+    projectionGeneration += 1
+    graphItems.value = []
     eventOffset.value = 0
     await refresh()
   }
@@ -532,6 +539,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     projectionGeneration += 1
     projectionLoading.value = false
     graphItems.value = []
+    searchResults.value = []
     workspaceProject.value = null
     lifecycleGeneration += 1
     nodeLoadGeneration += 1

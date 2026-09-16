@@ -290,7 +290,7 @@
               :disabled="modelBusy(model)"
               @click="$emit('installModel', model.id)"
             >
-              {{ modelBusy(model) ? model.status === 'verifying' ? 'Checking…' : 'Downloading…' : model.status === 'error' ? 'Retry' : 'Download' }}
+              {{ modelDownloadLabel(model) }}
             </button>
             <template v-else>
               <span
@@ -697,6 +697,12 @@ function onModeKeydown(event) {
 function modelBusy(model) {
   return Boolean(props.pending[`model:${model.id}`])
     || ['downloading', 'verifying'].includes(model.status)
+}
+
+function modelDownloadLabel(model) {
+  if (model.status === 'verifying') return 'Checking…'
+  if (modelBusy(model)) return 'Downloading…'
+  return model.status === 'error' ? 'Retry' : 'Download'
 }
 
 function modelStatus(model) {

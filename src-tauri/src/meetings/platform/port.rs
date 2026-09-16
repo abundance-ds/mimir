@@ -112,9 +112,10 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         validate_meeting_config(&config)?;
         if patch.local_model.is_some() && config.local_model != previous_config.local_model {
             let models = self.inner.models.projection()?;
-            if !models.iter().any(|model| {
-                model.id == config.local_model && model.status == "installed"
-            }) {
+            if !models
+                .iter()
+                .any(|model| model.id == config.local_model && model.status == "installed")
+            {
                 return Err("Download the local model before selecting it".into());
             }
         }

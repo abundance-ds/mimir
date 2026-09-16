@@ -168,6 +168,32 @@ describe('business graph store', () => {
     expect(store.visibleNodes).not.toContainEqual({ id: 'stale' })
   })
 
+  it('rejects late search results after selected scopes change', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setSection('all')
+    let finish
+    vi.mocked(searchGraph).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const oldSearch = store.search('evidence')
+    const changingScopes = store.setScopes(['team:main'])
+    finish([{ node: { id: 'private-result' } }])
+    await oldSearch
+    await changingScopes
+    expect(store.visibleNodes).toEqual([])
+  })
+
+  it('does not treat a linked non-Project entry as the current Project', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setSection('all')
+    store.setWorkspaceConfiguration({ project: 'project-alpha' })
+    store.currentProjectOnly = true
+    store.setWorkspaceConfiguration({ project: 'issue-1' })
+    await nextTick()
+    expect(store.workspaceProject).toBeNull()
+    expect(store.visibleNodes).toEqual([])
+  })
+
   it('mounts and composes all physical scopes by default', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
