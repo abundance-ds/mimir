@@ -3,10 +3,68 @@ import { Terminal } from '@xterm/xterm'
 import {
   createTerminalLinkProvider,
   findTerminalFileReferences,
+  findTerminalGraphReferences,
   resolveTerminalFileReference,
 } from './terminalLinks.js'
 
 describe('terminalLinks', () => {
+  it.each([
+    'mimir://graph/issue-1787176211-88fe',
+    'See `mimir://graph/issue-1787176211-88fe`.',
+    '[Issue](mimir://graph/issue-1787176211-88fe)',
+    '<mimir://graph/issue-1787176211-88fe>',
+    '(mimir://graph/issue-1787176211-88fe).',
+  ])('finds a complete Graph target in %s', text => {
+    const links = findTerminalGraphReferences(text)
+    expect(links).toHaveLength(1)
+    expect(links[0].id).toBe('issue-1787176211-88fe')
+    expect(text.slice(links[0].start, links[0].end)).toBe('mimir://graph/issue-1787176211-88fe')
+    expect(findTerminalFileReferences(text)).toEqual([])
+  })
+
+  it.each([
+    'mimir://graph/Upper', 'mimir://graph/jon-', 'mimir://other/jon',
+    'mimir://graph/jon?x=1', 'mimir://graph/jon?', 'mimir://graph/jon#heading',
+    'mimir://graph/%6aon', 'mimir://graph/jon/extra', 'MIMIR://graph/jon',
+    'prefixmimir://graph/jon', `mimir://graph/${'a'.repeat(121)}`,
+  ])('does not link an invalid Graph target: %s', text => {
+    expect(findTerminalGraphReferences(text)).toEqual([])
+  })
+
+  it('links Graph targets across real xterm wraps with wide characters before the link', async () => {
+    const terminal = new Terminal({ cols: 24, rows: 24 })
+    try {
+      await writeTerminal(terminal, '界 See mimir://graph/issue-1787176211-88fe.')
+      const onOpenUrl = vi.fn()
+      const provider = createTerminalLinkProvider(terminal, { onOpenUrl })
+      for (const line of [1, 2]) {
+        const links = await provide(provider, line)
+        expect(links).toHaveLength(1)
+        expect(links[0].range).toEqual({ start: { x: 8, y: 1 }, end: { x: 18, y: 2 } })
+        links[0].activate(new MouseEvent('click'), links[0].text)
+      }
+      expect(onOpenUrl).toHaveBeenCalledTimes(2)
+      expect(onOpenUrl).toHaveBeenCalledWith('mimir://graph/issue-1787176211-88fe')
+    } finally {
+      terminal.dispose()
+    }
+  })
+
+  it('links a Graph target split after a slash and an adjacent file', async () => {
+    const terminal = mockTerminal([
+      { text: 'See mimir://graph/' },
+      { text: '  issue-1787176211-88fe and README.md' },
+    ])
+    const onOpenUrl = vi.fn()
+    const provider = createTerminalLinkProvider(terminal, { onOpenUrl })
+    for (const line of [1, 2]) {
+      const links = await provide(provider, line)
+      expect(links).toHaveLength(line)
+      links[0].activate(new MouseEvent('click'), links[0].text)
+    }
+    expect(onOpenUrl).toHaveBeenCalledWith('mimir://graph/issue-1787176211-88fe')
+  })
+
   it('finds relative and absolute file references with source locations', () => {
     expect(findTerminalFileReferences(
       'Read src/mimir/App.vue:42:8 and /work/docs/README.md#L9C2.',

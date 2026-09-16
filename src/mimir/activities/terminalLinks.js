@@ -1,3 +1,5 @@
+import { graphLinkId } from '../../editor/codemirror/graphLinkSyntax.js'
+
 const TEXT_FILE_EXTENSIONS = new Set([
   'bash', 'bib', 'c', 'cc', 'cfg', 'conf', 'cpp', 'css', 'csv', 'fish', 'go',
   'h', 'hpp', 'htm', 'html', 'ini', 'java', 'js', 'json', 'jsonc', 'jsx',
@@ -20,6 +22,17 @@ const TOKEN_RE = /[^\s"'`<>]+/g
 const MARKDOWN_TARGET_RE = /\]\(([^)\s]+)\)/g
 
 export function findTerminalFileReferences(text) {
+  return findTerminalReferences(text, parseFileReference)
+}
+
+export function findTerminalGraphReferences(text) {
+  return findTerminalReferences(text, (target, start) => {
+    const id = graphLinkId(target)
+    return id ? { kind: 'graph', id, text: target, start, end: start + target.length } : null
+  }, ')]},.;!')
+}
+
+function findTerminalReferences(text, parseReference, trailingPunctuation) {
   const value = String(text || '')
   const found = []
   const occupied = []
@@ -27,7 +40,7 @@ export function findTerminalFileReferences(text) {
   for (const match of value.matchAll(MARKDOWN_TARGET_RE)) {
     const target = match[1]
     const start = match.index + match[0].indexOf(target)
-    const reference = parseFileReference(target, start)
+    const reference = parseReference(target, start)
     if (!reference) continue
     found.push(reference)
     occupied.push([reference.start, reference.end])
@@ -35,11 +48,11 @@ export function findTerminalFileReferences(text) {
 
   for (const match of value.matchAll(TOKEN_RE)) {
     if (match[0].includes('](')) continue
-    const trimmed = trimToken(match[0], match.index)
+    const trimmed = trimToken(match[0], match.index, trailingPunctuation)
     if (!trimmed.text || occupied.some(([start, end]) => (
       trimmed.start >= start && trimmed.end <= end
     ))) continue
-    const reference = parseFileReference(trimmed.text, trimmed.start)
+    const reference = parseReference(trimmed.text, trimmed.start)
     if (reference) found.push(reference)
   }
 
@@ -91,6 +104,14 @@ export function createTerminalLinkProvider(terminal, {
 
       // Full continuation candidates have priority over a shorter reference
       // that happens to be valid on one physical line.
+      for (const candidate of [...candidates, ...groups.map(candidateFromGroup)]) {
+        for (const reference of findTerminalGraphReferences(candidate.text)) {
+          addReferenceLinks(links, terminal, bufferLineNumber, candidate, reference, () => {
+            onOpenUrl(reference.text)
+          })
+        }
+      }
+
       for (const candidate of candidates) {
         for (const reference of findTerminalWebReferences(candidate.text)) {
           addReferenceLinks(links, terminal, bufferLineNumber, candidate, reference, () => {
@@ -178,14 +199,14 @@ function findTerminalWebReferences(text) {
   return found
 }
 
-function trimToken(text, start) {
+function trimToken(text, start, trailingPunctuation = ')]},.;!?:') {
   let value = text
   let offset = 0
   while (value && '([{'.includes(value[0])) {
     value = value.slice(1)
     offset++
   }
-  while (value && ')]},.;!?:'.includes(value.at(-1))) value = value.slice(0, -1)
+  while (value && trailingPunctuation.includes(value.at(-1))) value = value.slice(0, -1)
   return {
     text: value,
     start: start + offset,

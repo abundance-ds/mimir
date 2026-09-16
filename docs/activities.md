@@ -36,6 +36,14 @@ permission, and tool flags. Already running CLI processes need a new launch or
 resume to receive the override. Ordinary PTY redraws never replace an explicit
 CLI status signal.
 
+## Terminal links
+
+Click a `mimir://graph/<id>` link in terminal or agent output to open Graph
+Details in the Editor. Plain text, Markdown targets, and explicit CLI
+hyperlinks use the same action. Links remain active across visual line wraps
+and indented continuations after a slash. Graph targets use the same ID rules
+as Editor links. File links and web links retain their existing actions.
+
 ## Workspace projection
 
 The main tab strip shows the active working set for the current workspace. Workspace

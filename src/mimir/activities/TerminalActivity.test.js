@@ -371,6 +371,21 @@ describe('TerminalActivity', () => {
     expect(externalLinks.open).toHaveBeenNthCalledWith(2, 'https://example.com/osc8')
   })
 
+  it('opens detected and OSC 8 Graph links through the Workbench event', async () => {
+    xterm.bufferText = 'mimir://graph/issue-1787176211-88fe'
+    const wrapper = await initialize()
+    const links = await new Promise(resolve => (
+      xterm.linkProviders[0].provider.provideLinks(1, resolve)
+    ))
+    links[0].activate(new MouseEvent('click'), links[0].text)
+    xterm.terminals[0].options.linkHandler.activate(new MouseEvent('click'), 'mimir://graph/jon')
+    expect(wrapper.emitted('open-graph-node')).toEqual([
+      ['issue-1787176211-88fe'], ['jon'],
+    ])
+    expect(externalLinks.open).not.toHaveBeenCalled()
+    expect(wrapper.emitted('open-file')).toBeUndefined()
+  })
+
   it('resolves a home-relative file from the native data directory', async () => {
     xterm.bufferText = '~/Desktop/project/src/App.vue:42'
     const wrapper = await initialize()

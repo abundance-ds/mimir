@@ -119,6 +119,7 @@ import {
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
+import { graphLinkId } from '../../editor/codemirror/graphLinkSyntax.js'
 import { createTerminalLinkProvider } from './terminalLinks.js'
 import { createTerminalPromptTitleTracker } from './terminalPromptTitle.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
@@ -141,6 +142,7 @@ const emit = defineEmits([
   'activity-input',
   'diagnostic',
   'open-file',
+  'open-graph-node',
   'surface-error',
 ])
 
@@ -978,6 +980,11 @@ function errorMessage(cause, fallback) {
 }
 
 function openTerminalUrl(uri) {
+  const id = graphLinkId(uri)
+  if (id) {
+    emit('open-graph-node', id)
+    return
+  }
   void openExternalUrl(uri).catch((cause) => {
     emit('diagnostic', `Could not open the link: ${errorMessage(cause, 'Unknown failure')}`)
   })
