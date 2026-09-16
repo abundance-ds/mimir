@@ -131,6 +131,10 @@ honest `Interrupted` and `Failed` exits.
 
 - Managed Whisper uses pinned, length- and SHA-256-verified Metal models. Mimir
   does not silently fall back to CPU or network inference.
+- Local decoding checks repeated phrases across each audio window and excludes
+  repeated text from later context. A detected loop gets one retry with no prior
+  text and beam search. If it persists, transcription fails and retains the audio
+  for another attempt; a failed retranscription keeps the existing transcript.
 - Hosted endpoints must be public HTTPS. Secrets are endpoint-bound in macOS
   Keychain and never returned through IPC or Activity arguments.
 - OpenAI Realtime uses separate microphone and system sockets. Other endpoints

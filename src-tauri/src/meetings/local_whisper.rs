@@ -45,7 +45,6 @@ const VAD_MIN_CONSECUTIVE_FRAMES: usize = 2;
 const MAX_NO_SPEECH_PROBABILITY: f32 = 0.60;
 const MIN_SEGMENT_CONFIDENCE: f32 = 0.30;
 const MAX_IDENTICAL_SEGMENTS_PER_WINDOW: usize = 2;
-const MAX_REPEATED_PHRASE_TOKENS: usize = 8;
 // A real-model probe found that six repeated backchannels can dominate the
 // next window, while five remain safe. Keep short speech in the transcript,
 // but never reuse it as decoder context once it reaches that boundary.
@@ -337,13 +336,23 @@ struct DecodedSegment {
     confidence: Option<f32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecodeAttempt {
+    Initial,
+    Retry,
+}
+
 trait WhisperInferenceBackend: Send + Sync {
     fn prepare(&self, artifact: &VerifiedModelArtifact) -> Result<PreparedWhisperSession, String>;
 }
 
 trait WhisperInferenceSession: Send {
-    fn transcribe(&mut self, samples: &[f32], history: &str)
-        -> Result<Vec<DecodedSegment>, String>;
+    fn transcribe(
+        &mut self,
+        samples: &[f32],
+        history: &str,
+        attempt: DecodeAttempt,
+    ) -> Result<Vec<DecodedSegment>, String>;
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -467,6 +476,7 @@ impl WhisperInferenceSession for MetalWhisperSession {
         &mut self,
         samples: &[f32],
         history: &str,
+        attempt: DecodeAttempt,
     ) -> Result<Vec<DecodedSegment>, String> {
         use whisper_rs::{FullParams, SamplingStrategy};
 
@@ -477,7 +487,14 @@ impl WhisperInferenceSession for MetalWhisperSession {
             .context
             .create_state()
             .map_err(|error| format!("could not create a local Whisper decoder state: {error}"))?;
-        let mut parameters = FullParams::new(SamplingStrategy::Greedy { best_of: 2 });
+        let strategy = match attempt {
+            DecodeAttempt::Initial => SamplingStrategy::Greedy { best_of: 2 },
+            DecodeAttempt::Retry => SamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: -1.0,
+            },
+        };
+        let mut parameters = FullParams::new(strategy);
         let threads = std::thread::available_parallelism()
             .map(usize::from)
             .unwrap_or(4)
@@ -493,9 +510,8 @@ impl WhisperInferenceSession for MetalWhisperSession {
         parameters.set_suppress_blank(true);
         parameters.set_suppress_nst(true);
         parameters.set_temperature(0.0);
-        // Temperature fallback is useful for long-form media but turns weak
-        // acoustic evidence into increasingly creative text in short live
-        // windows. Keep local meeting decoding deterministic instead.
+        // The stream owns one repetition retry with fresh context and beam
+        // search. Keep both passes deterministic and prevent hidden retries.
         parameters.set_temperature_inc(0.0);
         parameters.set_logprob_thold(-0.8);
         parameters.set_no_speech_thold(MAX_NO_SPEECH_PROBABILITY);
@@ -503,7 +519,7 @@ impl WhisperInferenceSession for MetalWhisperSession {
         parameters.set_print_progress(false);
         parameters.set_print_realtime(false);
         parameters.set_print_timestamps(false);
-        if !history.is_empty() {
+        if attempt == DecodeAttempt::Initial && !history.is_empty() {
             parameters.set_initial_prompt(history);
         }
         state
@@ -642,8 +658,23 @@ impl StreamingState {
             return Ok(());
         }
         let history = safe_history_prompt(&window.history);
-        let decoded =
-            suppress_implausible_segments(inference.transcribe(&window.samples, history)?);
+        if history.is_empty() {
+            self.history_mut(window.channel_id).clear();
+        }
+        let mut decoded = inference.transcribe(&window.samples, history, DecodeAttempt::Initial)?;
+        if has_repetition_loop(&decoded) {
+            self.history_mut(window.channel_id).clear();
+            decoded = inference.transcribe(&window.samples, "", DecodeAttempt::Retry)?;
+            if has_repetition_loop(&decoded) {
+                return Err(format!(
+                    "Local transcription repeated text after retry ({} audio, {}–{} seconds). Recorded audio is available for another attempt.",
+                    window.channel_id,
+                    window.start_ms / 1_000,
+                    window.end_ms / 1_000,
+                ));
+            }
+        }
+        let decoded = suppress_implausible_segments(decoded);
         let duration_ms = window.end_ms.saturating_sub(window.start_ms);
         let mut partials = Vec::new();
         for (index, segment) in decoded.into_iter().enumerate() {
@@ -710,16 +741,24 @@ impl StreamingState {
         })
     }
 
-    fn remember_history(&mut self, channel_id: &str, text: &str) {
-        let target = if channel_id == self.microphone.channel_id {
+    fn history_mut(&mut self, channel_id: &str) -> &mut String {
+        if channel_id == self.microphone.channel_id {
             &mut self.microphone.history
         } else {
             &mut self.system.history
-        };
+        }
+    }
+
+    fn remember_history(&mut self, channel_id: &str, text: &str) {
+        let target = self.history_mut(channel_id);
         if !target.is_empty() {
             target.push(' ');
         }
         target.push_str(text.trim());
+        if safe_history_prompt(target).is_empty() {
+            target.clear();
+            return;
+        }
         if target.len() > MAX_HISTORY_BYTES {
             let mut boundary = target.len() - MAX_HISTORY_BYTES;
             while !target.is_char_boundary(boundary) {
@@ -870,6 +909,19 @@ fn contains_speech(samples: &[f32], detector: &mut VoiceActivityDetector) -> boo
         && longest_run >= VAD_MIN_CONSECUTIVE_FRAMES
 }
 
+fn has_repetition_loop(decoded: &[DecodedSegment]) -> bool {
+    // Check the whole window so segment boundaries cannot hide a loop.
+    let text = decoded
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    contains_repeated_phrase(
+        &normalized_phrase(&text),
+        MIN_IMPLAUSIBLE_SEGMENT_REPETITIONS,
+    )
+}
+
 fn suppress_implausible_segments(decoded: Vec<DecodedSegment>) -> Vec<DecodedSegment> {
     let mut repetitions = BTreeMap::<String, usize>::new();
     for segment in &decoded {
@@ -914,7 +966,7 @@ fn contains_repeated_phrase(normalized: &str, minimum_repetitions: usize) -> boo
     if minimum_repetitions < 2 || tokens.len() < minimum_repetitions {
         return false;
     }
-    let maximum_phrase_tokens = MAX_REPEATED_PHRASE_TOKENS.min(tokens.len() / minimum_repetitions);
+    let maximum_phrase_tokens = tokens.len() / minimum_repetitions;
     (1..=maximum_phrase_tokens).any(|phrase_tokens| {
         let run_tokens = phrase_tokens.saturating_mul(minimum_repetitions);
         tokens.windows(run_tokens).any(|window| {
@@ -1047,6 +1099,7 @@ mod tests {
             &mut self,
             samples: &[f32],
             _history: &str,
+            _attempt: DecodeAttempt,
         ) -> Result<Vec<DecodedSegment>, String> {
             self.calls.lock().unwrap().push(samples.to_vec());
             Ok(vec![DecodedSegment {
@@ -1319,6 +1372,183 @@ mod tests {
         assert_eq!(safe_history_prompt(&repeated_phrase), "");
     }
 
+    fn decision_loop(repetitions: usize) -> String {
+        std::iter::repeat_n(
+            "I think that's a really important decision right so",
+            repetitions,
+        )
+        .collect::<Vec<_>>()
+        .join(" ")
+    }
+
+    fn speech_segment(text: &str) -> DecodedSegment {
+        DecodedSegment {
+            start_ms: 0,
+            end_ms: 30_000,
+            text: text.into(),
+            language: Some("en".into()),
+            confidence: Some(0.95),
+        }
+    }
+
+    #[test]
+    fn long_repeated_phrases_are_detected_within_and_across_segments() {
+        let repeated = format!("you know. {} i think that's a really", decision_loop(21));
+        assert!(has_repetition_loop(&[speech_segment(&repeated)]));
+        assert_eq!(safe_history_prompt(&repeated), "");
+        assert!(suppress_implausible_segments(vec![speech_segment(&repeated)]).is_empty());
+
+        let segments = vec![speech_segment(&decision_loop(1)); 12];
+        assert!(has_repetition_loop(&segments));
+        assert!(!has_repetition_loop(&[speech_segment(&decision_loop(2))]));
+        assert!(!has_repetition_loop(&[speech_segment(
+            "Yes, yes. We can try it. No, no, keep the original. Yes, yes, that works.",
+        )]));
+    }
+
+    struct ScriptedSession {
+        responses: std::collections::VecDeque<Result<Vec<DecodedSegment>, String>>,
+        calls: Vec<(Vec<f32>, String, DecodeAttempt)>,
+    }
+
+    impl ScriptedSession {
+        fn new(responses: Vec<Result<Vec<DecodedSegment>, String>>) -> Self {
+            Self {
+                responses: responses.into(),
+                calls: Vec::new(),
+            }
+        }
+    }
+
+    impl WhisperInferenceSession for ScriptedSession {
+        fn transcribe(
+            &mut self,
+            samples: &[f32],
+            history: &str,
+            attempt: DecodeAttempt,
+        ) -> Result<Vec<DecodedSegment>, String> {
+            self.calls.push((samples.to_vec(), history.into(), attempt));
+            self.responses
+                .pop_front()
+                .expect("unexpected decoder retry")
+        }
+    }
+
+    fn speech_window(history: &str) -> Option<ReadyWindow> {
+        Some(ReadyWindow {
+            channel_id: "microphone",
+            speaker: "You",
+            start_ms: 2_880_000,
+            end_ms: 2_910_000,
+            samples: vec![0.1, -0.2, 0.3],
+            history: history.into(),
+            contains_speech: true,
+        })
+    }
+
+    #[test]
+    fn repeated_window_retries_same_audio_once_and_only_publishes_recovered_text() {
+        let mut stream = StreamingState::new("retry-run", 0, 30, DEFAULT_POLL_INTERVAL);
+        stream.remember_history("microphone", "Previous context.");
+        stream.remember_history("system", "Other speaker context.");
+        let mut inference = ScriptedSession::new(vec![
+            Ok(vec![speech_segment(&decision_loop(21))]),
+            Ok(vec![speech_segment("You know.")]),
+            Ok(vec![speech_segment("We can discuss it tomorrow.")]),
+        ]);
+        let mut sink = CollectingSink::default();
+        stream
+            .emit_channel(
+                speech_window("Previous context."),
+                &mut inference,
+                &mut sink,
+            )
+            .unwrap();
+
+        assert_eq!(inference.calls.len(), 2);
+        assert_eq!(inference.calls[0].0, inference.calls[1].0);
+        assert_eq!(inference.calls[0].1, "Previous context.");
+        assert_eq!(inference.calls[0].2, DecodeAttempt::Initial);
+        assert_eq!(inference.calls[1].1, "");
+        assert_eq!(inference.calls[1].2, DecodeAttempt::Retry);
+        assert_eq!(stream.microphone.history, "You know.");
+        assert_eq!(stream.system.history, "Other speaker context.");
+        assert_eq!(sink.batches.len(), 2);
+        for batch in &sink.batches {
+            assert_eq!(batch.segments[0].text, "You know.");
+            assert_eq!(batch.segments[0].start_ms, 2_880_000);
+            assert_eq!(batch.segments[0].end_ms, 2_910_000);
+        }
+        let history = stream.microphone.history.clone();
+        stream
+            .emit_channel(speech_window(&history), &mut inference, &mut sink)
+            .unwrap();
+        assert_eq!(inference.calls.len(), 3);
+        assert_eq!(inference.calls[2].1, "You know.");
+        assert_eq!(inference.calls[2].2, DecodeAttempt::Initial);
+    }
+
+    #[test]
+    fn persistent_repetition_or_retry_error_cannot_publish_a_successful_window() {
+        for retry in [
+            Ok(vec![speech_segment(&decision_loop(1)); 12]),
+            Err("decoder failed".into()),
+        ] {
+            let mut stream = StreamingState::new("retry-run", 0, 30, DEFAULT_POLL_INTERVAL);
+            stream.remember_history("microphone", "Previous context.");
+            let mut inference =
+                ScriptedSession::new(vec![Ok(vec![speech_segment(&decision_loop(21))]), retry]);
+            let mut sink = CollectingSink::default();
+            let error = stream
+                .emit_channel(
+                    speech_window("Previous context."),
+                    &mut inference,
+                    &mut sink,
+                )
+                .unwrap_err();
+            assert!(error.contains("repeated text after retry") || error == "decoder failed");
+            assert_eq!(inference.calls.len(), 2);
+            assert!(sink.batches.is_empty());
+            assert!(stream.microphone.history.is_empty());
+            assert_eq!(stream.provider_sequence, 0);
+        }
+    }
+
+    #[test]
+    fn short_repeated_speech_is_kept_without_retry_or_unsafe_context() {
+        let mut stream = StreamingState::new("retry-run", 0, 30, DEFAULT_POLL_INTERVAL);
+        let speech = ["Yeah."; 7].join(" ");
+        let mut inference = ScriptedSession::new(vec![Ok(vec![speech_segment(&speech)])]);
+        let mut sink = CollectingSink::default();
+        stream
+            .emit_channel(speech_window(""), &mut inference, &mut sink)
+            .unwrap();
+        assert_eq!(inference.calls.len(), 1);
+        assert_eq!(sink.batches[1].segments[0].text, speech);
+        assert!(stream.microphone.history.is_empty());
+    }
+
+    #[test]
+    fn unsafe_previous_context_is_cleared_even_when_no_speech_is_returned() {
+        let mut stream = StreamingState::new("retry-run", 0, 30, DEFAULT_POLL_INTERVAL);
+        let history = decision_loop(6);
+        stream.microphone.history = history.clone();
+        let mut inference = ScriptedSession::new(vec![Ok(Vec::new())]);
+        let mut sink = CollectingSink::default();
+        stream
+            .emit_channel(speech_window(&history), &mut inference, &mut sink)
+            .unwrap();
+        assert_eq!(inference.calls[0].1, "");
+        assert!(stream.microphone.history.is_empty());
+        assert!(sink.batches.is_empty());
+
+        // Repetition can also accumulate across otherwise acceptable windows.
+        stream.remember_history("microphone", &decision_loop(3));
+        assert!(!stream.microphone.history.is_empty());
+        stream.remember_history("microphone", &decision_loop(3));
+        assert!(stream.microphone.history.is_empty());
+    }
+
     #[test]
     fn finalization_drains_every_bounded_tail_page_before_returning() {
         let temporary = TempDir::new().unwrap();
@@ -1469,7 +1699,10 @@ mod tests {
         };
         let mut prepared = MetalWhisperBackend.prepare(&artifact).unwrap();
         let samples = read_mono_pcm16_wav(&wav_path).unwrap();
-        let segments = prepared.session.transcribe(&samples, "").unwrap();
+        let segments = prepared
+            .session
+            .transcribe(&samples, "", DecodeAttempt::Initial)
+            .unwrap();
 
         assert!(
             segments
@@ -1483,6 +1716,63 @@ mod tests {
                 .all(|pair| pair[0].start_ms <= pair[1].start_ms),
             "real Metal inference returned unordered segments"
         );
+    }
+
+    /// Supply one speech window (at most 30 seconds), a catalog model, and
+    /// optional prior context. Fixtures stay outside the repository.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    #[ignore = "requires MIMIR_SCRIBE_MODEL_PATH and MIMIR_SCRIBE_WAV_PATH"]
+    fn production_metal_window_repetition_regression() {
+        let model_path = PathBuf::from(std::env::var_os("MIMIR_SCRIBE_MODEL_PATH").unwrap());
+        let wav_path = PathBuf::from(std::env::var_os("MIMIR_SCRIBE_WAV_PATH").unwrap());
+        let history = std::env::var_os("MIMIR_SCRIBE_HISTORY_PATH")
+            .map(|path| fs::read_to_string(path).unwrap())
+            .unwrap_or_default();
+        let sha256 = Sha256Digest::calculate(File::open(&model_path).unwrap()).unwrap();
+        let length = fs::metadata(&model_path).unwrap().len();
+        assert!(crate::meetings::platform::builtin_model_catalog()
+            .unwrap()
+            .iter()
+            .any(
+                |entry| entry.manifest.sha256 == sha256 && entry.manifest.artifact_bytes == length
+            ));
+        let mut prepared = MetalWhisperBackend
+            .prepare(&VerifiedModelArtifact {
+                path: model_path,
+                sha256,
+            })
+            .unwrap();
+        let samples = read_mono_pcm16_wav(&wav_path).unwrap();
+        assert!(!samples.is_empty() && samples.len() <= 30 * SAMPLE_RATE_HZ);
+
+        // Exercise the real beam-search retry, including its context reset.
+        let recovered = prepared
+            .session
+            .transcribe(&samples, &decision_loop(21), DecodeAttempt::Retry)
+            .unwrap();
+        assert!(!has_repetition_loop(&recovered));
+        assert!(!suppress_implausible_segments(recovered).is_empty());
+
+        let mut stream = StreamingState::new("real-window", 0, 30, DEFAULT_POLL_INTERVAL);
+        let mut sink = CollectingSink::default();
+        stream
+            .emit_channel(
+                Some(ReadyWindow {
+                    channel_id: "microphone",
+                    speaker: "You",
+                    start_ms: 0,
+                    end_ms: samples.len() as u64 * 1_000 / SAMPLE_RATE_HZ as u64,
+                    contains_speech: true,
+                    samples,
+                    history,
+                }),
+                prepared.session.as_mut(),
+                &mut sink,
+            )
+            .unwrap();
+        assert!(sink.final_segment_count() > 0);
+        assert!(!stream.microphone.history.is_empty());
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
