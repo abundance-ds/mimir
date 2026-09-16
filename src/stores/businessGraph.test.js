@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
+
+vi.mock('../services/workspaceConfig.js', () => ({ cachedWorkspaceConfig: vi.fn() }))
+import { cachedWorkspaceConfig } from '../services/workspaceConfig.js'
 
 vi.mock('../services/businessGraph.js', () => ({
   createGraphNode: vi.fn(),
@@ -93,6 +97,76 @@ describe('business graph store', () => {
   })
 
   afterEach(() => useBusinessGraphStore().stop())
+
+  it('filters native queries and search without reducing the Work catalog', async () => {
+    vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'project-alpha' })
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setSection('all')
+    const oldNote = { id: 'old-note', kind: 'note', title: 'Old project note' }
+    vi.mocked(queryGraph).mockImplementation(async query => ({
+      items: query.relatedTo ? [oldNote] : summaries, total: query.relatedTo ? 1 : 2,
+    }))
+    store.currentProjectOnly = true
+    store.graphKinds = ['note']
+    await vi.waitFor(() => expect(store.visibleNodes).toEqual([oldNote]))
+    expect(queryGraph).toHaveBeenLastCalledWith({
+      scopeIds: scopes.map(scope => scope.id), relatedTo: 'project-alpha', kinds: ['note'], limit: 500,
+    })
+    await store.search('evidence')
+    expect(searchGraph).toHaveBeenLastCalledWith('evidence', {
+      scopeIds: scopes.map(scope => scope.id), relatedTo: 'project-alpha', kinds: ['note'], limit: 100,
+    })
+    store.clearSearch()
+    store.setSection('work')
+    expect(store.visibleNodes).toEqual([summaries[0]])
+    store.setSection('all')
+    store.setView('changes')
+    expect(store.visibleNodes).toEqual(summaries)
+    expect(store.currentProjectOnly).toBe(true)
+  })
+
+  it('resolves a Project beyond the first page and follows the workspace link', async () => {
+    const store = useBusinessGraphStore()
+    vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'old-project' })
+    vi.mocked(getGraphNode).mockResolvedValue({ id: 'old-project', kind: 'project', title: 'Old Project' })
+    await store.start('/alpha')
+    expect(store.workspaceProject.title).toBe('Old Project')
+    store.setSection('all')
+    store.currentProjectOnly = true
+    vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'project-alpha' })
+    await store.start('/beta')
+    expect(store.workspaceProject.title).toBe('Project Alpha')
+    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ relatedTo: 'project-alpha' }))
+    store.setWorkspaceConfiguration({})
+    await nextTick()
+    expect(store.workspaceProject).toBeNull()
+    expect(store.visibleNodes).toEqual([])
+    await store.search('anything')
+    expect(store.searchResults).toEqual([])
+    store.currentProjectOnly = false
+    store.clearSearch()
+    expect(store.visibleNodes).toEqual(summaries)
+  })
+
+  it('rejects old filtered queries and searches after the Project changes', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setWorkspaceConfiguration({ project: 'project-alpha' })
+    store.setSection('all')
+    let finishQuery, finishSearch
+    vi.mocked(queryGraph).mockReturnValueOnce(new Promise(resolve => { finishQuery = resolve }))
+    store.currentProjectOnly = true
+    vi.mocked(searchGraph).mockReturnValueOnce(new Promise(resolve => { finishSearch = resolve }))
+    const pendingSearch = store.search('evidence')
+    store.setWorkspaceConfiguration({ project: 'another-project' })
+    await vi.waitFor(() => expect(store.searching).toBe(false))
+    finishQuery({ items: [{ id: 'stale' }] })
+    finishSearch([{ node: { id: 'stale' } }])
+    await pendingSearch
+    store.clearSearch()
+    expect(store.visibleNodes).not.toContainEqual({ id: 'stale' })
+  })
 
   it('mounts and composes all physical scopes by default', async () => {
     const store = useBusinessGraphStore()

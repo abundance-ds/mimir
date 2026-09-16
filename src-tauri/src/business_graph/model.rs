@@ -428,6 +428,9 @@ impl GraphDiagnostic {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQuery {
+    /// The entry itself and its direct incoming/outgoing links, within scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related_to: Option<String>,
     #[serde(default)]
     pub scope_ids: BTreeSet<String>,
     #[serde(default)]

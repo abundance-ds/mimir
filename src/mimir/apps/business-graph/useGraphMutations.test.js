@@ -4,7 +4,7 @@ import { useGraphMutations } from './useGraphMutations.js'
 import { UNASSIGNED } from './workRow.js'
 
 describe('project board drag ordering', () => {
-  let scope, graph, actions, boardIssues, echoToolCall
+  let scope, graph, actions, boardIssues
   const owner = { relation: 'assigned_to', target: 'owner', legacy: false }
   const related = { relation: 'related_to', target: 'note', legacy: false }
   const task = (id, projectId, rank) => ({
@@ -16,13 +16,12 @@ describe('project board drag ordering', () => {
   beforeEach(() => {
     scope = effectScope()
     boardIssues = ref([])
-    echoToolCall = vi.fn()
     graph = reactive({
       projects: [{ id: 'project', kind: 'project', title: 'Project' }],
       update: vi.fn(async patch => ({ id: patch.id, sourceRevision: `${patch.id}-updated` })),
     })
     actions = scope.run(() => useGraphMutations({
-      graph, boardIssues, diagnostic: vi.fn(), echoToolCall, restoreGraphFocus: vi.fn(),
+      graph, boardIssues, diagnostic: vi.fn(), restoreGraphFocus: vi.fn(),
     }))
   })
   afterEach(() => scope.stop())
@@ -47,7 +46,6 @@ describe('project board drag ordering', () => {
         id: patch.id, expectedRevision: `${patch.id}-revision`, setProperties: { rank: expect.any(Number) },
       })
     }
-    expect(echoToolCall).not.toHaveBeenCalled()
   })
 
   it('moves from a project before an orphan, clearing only the moved task project assignment', async () => {
@@ -65,7 +63,6 @@ describe('project board drag ordering', () => {
       expect(Object.keys(patch).sort()).toEqual(['expectedRevision', 'id', 'setProperties'])
       expect(Object.keys(patch.setProperties)).toEqual(['rank'])
     }
-    expect(echoToolCall).toHaveBeenCalledWith('issues.update', { id: moved.id, project: '' })
   })
 
   it('appends a card after all No project variants when dropped at the end', async () => {
@@ -95,7 +92,6 @@ describe('project board drag ordering', () => {
     expect(graph.update).toHaveBeenCalledWith({
       id: moved.id, expectedRevision: moved.sourceRevision, setProperties: { rank: 2000 },
     })
-    expect(echoToolCall).not.toHaveBeenCalled()
   })
 })
 
@@ -111,7 +107,7 @@ describe('closed issue Undo', () => {
       update: vi.fn(async patch => ({ id: patch.id, provenance: { sourceRevision: `closed-${patch.id}` } })),
     })
     actions = scope.run(() => useGraphMutations({
-      graph, boardIssues: ref([issue]), diagnostic, echoToolCall: vi.fn(), restoreGraphFocus: vi.fn(),
+      graph, boardIssues: ref([issue]), diagnostic, restoreGraphFocus: vi.fn(),
     }))
   })
   afterEach(() => scope.stop())
@@ -186,7 +182,7 @@ describe('document navigation after graph mutations', () => {
       undoDelete: vi.fn(async () => ({ id: 'restored' })),
     })
     actions = scope.run(() => useGraphMutations({
-      graph, boardIssues: ref([]), diagnostic: vi.fn(), echoToolCall: vi.fn(),
+      graph, boardIssues: ref([]), diagnostic: vi.fn(),
       restoreGraphFocus: vi.fn(), openNode,
     }))
   })

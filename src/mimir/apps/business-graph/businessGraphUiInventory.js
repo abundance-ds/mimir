@@ -39,6 +39,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'create-submit',
   ],
   details: [
+    'entry-work-with-agent',
     'entry-properties',
     'entry-add-relation',
     'entry-cancel-relation',
@@ -86,11 +87,9 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-assignee-filter-clear',
     'board-priority-filter-clear',
     'board-columns-expand-all',
+    'current-project',
     'all-kind',
     'all-kind-filter-clear',
-  ],
-  dispatch: [
-    'dispatch',
   ],
   summary: [
     'changes-summarise',
@@ -131,7 +130,6 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
 export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'BusinessGraphApp.vue',
   '../../../shared/ui/DatePicker.vue',
-  'DispatchBar.vue',
   'EntityList.vue',
   'GraphAppFeedback.vue',
   'GraphAppHeader.vue',

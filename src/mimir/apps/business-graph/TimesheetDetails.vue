@@ -281,7 +281,7 @@ async function exportCsv() {
 }
 function onKeydown(event) {
   if (event.isComposing || event.keyCode === 229) return
-  if (['time-period', 'time-invoice-reference'].includes(event.target?.getAttribute?.('data-graph-control'))) return
+  if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.altKey) {
     event.preventDefault(); event.stopPropagation(); if (event.shiftKey) redo(); else undo()
   }

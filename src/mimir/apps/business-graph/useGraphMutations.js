@@ -2,7 +2,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
 import { isClosedIssue, workProjectId } from './workRow.js'
 
-export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall, restoreGraphFocus, openNode = () => {} }) {
+export function useGraphMutations({ graph, boardIssues, diagnostic, restoreGraphFocus, openNode = () => {} }) {
   const createOpen = ref(false)
   const createError = ref('')
   const createKind = ref('issue')
@@ -46,7 +46,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
           // Use the revision returned by closing, never the latest revision:
           // Undo must not overwrite an edit made since the issue was closed.
           await graph.update(entry.patch)
-          echoToolCall('issues.move', { id: entry.patch.id, status: entry.status || 'backlog' })
         } catch (cause) {
           failed.push(entry)
           failures.push(`${entry.title}: ${graphErrorMessage(cause)}`)
@@ -111,12 +110,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
         createOpen.value = false
         if (created?.id) openNode(created.id)
       }
-      echoToolCall(
-        create.kind === 'issue' ? 'issues.create' : 'graph.create',
-        create.kind === 'issue'
-          ? { title: create.title }
-          : { kind: create.kind, title: create.title },
-      )
     } catch (cause) {
       createError.value = graphErrorMessage(cause)
       diagnostic(createError.value)
@@ -187,7 +180,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
     deleteError.value = ''
     try {
       await graph.remove(deletedId)
-      echoToolCall('graph.delete', { id: deletedId })
       undoError.value = ''
       deleteOpen.value = false
       deleteRequest.value = null
@@ -213,7 +205,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
     try {
       const restored = await graph.undoDelete()
       if (restored?.id) openNode(restored.id)
-      echoToolCall('graph.restore', { undoToken: '‹token›' })
     } catch (cause) {
       undoError.value = graphErrorMessage(cause)
       diagnostic(`Could not restore graph item: ${undoError.value}`)
@@ -225,8 +216,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
       const patch = issueMovePatch(issue, status, projectId)
       const updated = await graph.update(patch)
       offerClosedUndo(closedUndoEntries(issue, updated, patch))
-      if (status !== undefined) echoToolCall('issues.move', { id: issue.id, status })
-      else echoToolCall('issues.update', { id: issue.id, project: projectId || '' })
     } catch (cause) {
       diagnostic(graphErrorMessage(cause))
     }
@@ -242,9 +231,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
       }
       const updated = await graph.update(patch)
       offerClosedUndo(closedUndoEntries(issue, updated, patch))
-      const { rank, ...visible } = setProperties
-      if (Object.keys(visible).length) echoToolCall('issues.update', { id: issue.id, ...visible })
-      else if (removeProperties.length) echoToolCall('graph.update', { id: issue.id, removeProperties })
     } catch (cause) {
       diagnostic(graphErrorMessage(cause))
     }
@@ -263,7 +249,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
         }
         const updated = await graph.update(patch)
         undoEntries.push(...closedUndoEntries(issue, updated, patch))
-        if (setProperties.status !== undefined) echoToolCall('issues.move', { id: issue.id, status: setProperties.status })
       } catch (cause) {
         failures.push(`${issue.title || issue.id}: ${graphErrorMessage(cause)}`)
       }
@@ -303,12 +288,6 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
         const updated = await graph.update(patch)
         if (candidate.id === issue.id && changesColumn) {
           offerClosedUndo(closedUndoEntries(issue, updated, patch))
-          echoToolCall(
-            groupBy === 'project' ? 'issues.update' : 'issues.move',
-            groupBy === 'project'
-              ? { id: issue.id, project: columnId === '__unassigned__' ? '' : columnId }
-              : { id: issue.id, status: columnId },
-          )
         }
       } catch (cause) {
         failures.push(`${candidate.title || candidate.id}: ${graphErrorMessage(cause)}`)

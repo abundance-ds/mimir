@@ -41,6 +41,9 @@ Companies use `roles` from
 Issue statuses: `backlog plan in-progress waiting review done cancelled`.
 Priorities: `low normal high urgent`.
 
+For `timesheet`, link the project with `part_of` and person with `assigned_to`;
+read `graph_create` and `graph_update` tool help for row rules.
+
 Preferred relations:
 
 ```text
@@ -61,16 +64,17 @@ Opportunity, Technology, Topic, Question, and Answer are not standard kinds.
 ## Writes and scopes
 
 - `private:local` is private, `project:*` is Workspace, and `team:*` is shared.
-  Without `scopeId`, normal kinds prefer Team and Journal prefers Private.
+  Without `scopeId`, workspace configuration applies first; otherwise normal
+  kinds prefer Team and Journal prefers Private.
   `graph_status` lists mounted ids.
 - Agent calls read `.mimir/workspace.toml`; new tasks use its Project link.
   This link does not restrict reads.
 - Workspace file references are relative, never absolute. Mimir resolves them
   through the node's Project workspaces, then the open workspace.
-- Use `graph_get.sourceRevision` as `expectedRevision` for update or delete.
+- Use `graph_get`'s `provenance.sourceRevision` as `expectedRevision`
+  for update or delete.
   Delete returns a `graph_restore` token.
-- Private data stays Private. Sensitive nodes are omitted from automatic
-  `graph_context` output.
+- Private data stays Private. `graph_context` hides sensitive content.
 
 ## Team resources
 

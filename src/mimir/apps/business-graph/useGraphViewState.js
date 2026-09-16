@@ -57,6 +57,12 @@ export function useGraphViewState({ graph, settings }) {
   const boardGroup = ref('status')
   const boardSort = ref('rank')
   const allKindFilter = ref('')
+  watch(allKindFilter, kind => {
+    graph.graphKinds = kind === 'knowledge'
+      ? ['note', 'resource', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
+        'model', 'endpoint', 'publication', 'submission', 'research-question', 'method', 'client-request']
+      : kind ? [kind] : []
+  }, { immediate: true, flush: 'sync' })
   const collapsedBoardStatuses = ref([])
   const showClosedIssues = ref(false)
   const showEmptyProjects = ref(false)
@@ -86,7 +92,7 @@ export function useGraphViewState({ graph, settings }) {
   ))
   /** One project scopes the view, so rows need not repeat it. */
   const projectScoped = computed(() => (
-    Boolean(projectFilter.value) && projectFilter.value !== UNASSIGNED
+    graph.section === 'work' && Boolean(projectFilter.value) && projectFilter.value !== UNASSIGNED
   ))
   /** Board and List share the group control. */
   const listGroupBy = computed(() => boardGroup.value)
@@ -100,6 +106,7 @@ export function useGraphViewState({ graph, settings }) {
   const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
   const emptyTitle = computed(() => {
     if (graph.section === 'work') return 'No work matches this view'
+    if (graph.currentProjectOnly) return 'No entries match this project filter'
     if (graph.searchQuery) return 'No matching graph items'
     return {
       work: 'No work in these scopes',
@@ -112,6 +119,7 @@ export function useGraphViewState({ graph, settings }) {
         ? 'Clear search or filters, include another scope, or create an issue.'
         : 'Clear search or filters, or enable Show closed issues in Display.'
     }
+    if (graph.currentProjectOnly) return 'Clear the project filter, change the kind or search, or include another scope.'
     return graph.searchQuery
       ? 'Try broader terms or include another physical scope.'
       : 'Create the first item or include another physical scope.'

@@ -2,7 +2,6 @@ export function useGraphKeyboard({
   sections,
   appHeader,
   workspaceSurface,
-  dispatchBar,
   createOpen,
   openCreate,
   setSection,
@@ -14,7 +13,7 @@ export function useGraphKeyboard({
       || event.target?.closest?.('.cm-editor')
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault()
-      dispatchBar.value?.focusInput()
+      appHeader.value?.focusSearch({ select: true })
       return
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
@@ -24,7 +23,7 @@ export function useGraphKeyboard({
     }
     if (event.key === '/' && !editing && !event.metaKey && !event.ctrlKey && !event.altKey) {
       event.preventDefault()
-      dispatchBar.value?.focusInput()
+      appHeader.value?.focusSearch({ select: true })
       return
     }
     if (event.key === 'Escape') {

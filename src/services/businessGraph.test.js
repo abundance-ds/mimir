@@ -13,6 +13,7 @@ import {
   moveGraphNodeScope,
   openBusinessGraph,
   queryGraph,
+  searchGraph,
   restoreGraphNode,
   serializeGraphSource,
   updateGraphNode,
@@ -61,6 +62,13 @@ describe('business graph service', () => {
         limit: 500,
       },
     })
+  })
+
+  it('passes project and kind restrictions to native search and queries', async () => {
+    await queryGraph({ relatedTo: 'project-a', kinds: ['note'] })
+    expect(invoke).toHaveBeenLastCalledWith('graph_query', { query: expect.objectContaining({ relatedTo: 'project-a', kinds: ['note'] }) })
+    await searchGraph(' old note ', { relatedTo: 'project-a', kinds: ['note'], scopeIds: ['team:main'], limit: 100 })
+    expect(invoke).toHaveBeenLastCalledWith('graph_search', { query: 'old note', relatedTo: 'project-a', kinds: ['note'], scopeIds: ['team:main'], limit: 100 })
   })
 
   it('normalizes bounded change-history pagination', async () => {

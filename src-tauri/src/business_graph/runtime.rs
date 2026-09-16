@@ -1194,8 +1194,23 @@ pub fn graph_search(
     query: String,
     scope_ids: BTreeSet<String>,
     limit: Option<usize>,
+    kinds: Option<BTreeSet<String>>,
+    related_to: Option<String>,
 ) -> Result<Vec<GraphSearchResult>, String> {
-    runtime.search(&query, &scope_ids, limit.unwrap_or(25))
+    Ok(runtime
+        .store
+        .read()
+        .map_err(|error| error.to_string())?
+        .search_query(
+            &query,
+            &GraphQuery {
+                scope_ids,
+                kinds: kinds.unwrap_or_default(),
+                related_to,
+                limit: limit.unwrap_or(25),
+                ..GraphQuery::default()
+            },
+        ))
 }
 
 #[tauri::command]

@@ -32,6 +32,14 @@
     </button>
     <div v-if="moreOpen" class="object-more-menu">
       <button
+        type="button"
+        data-graph-control="entry-work-with-agent"
+        @click="moreAction(() => emit('startWork'))"
+      >
+        <IconArrowForwardUp :size="14" />
+        Work with agent
+      </button>
+      <button
         v-if="node.kind === 'issue'"
         type="button"
         data-inspector-next-action

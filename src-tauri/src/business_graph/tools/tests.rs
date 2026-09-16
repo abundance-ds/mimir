@@ -42,6 +42,96 @@ fn fixture() -> (TempDir, GraphRuntime) {
 }
 
 #[test]
+fn graph_relation_aliases_work_for_create_and_update() {
+    let (_root, runtime) = fixture();
+    for (index, mut relation) in [
+        json!({"relation": "references"}),
+        json!({"rel": "references"}),
+        json!({"relation": "references", "rel": "ignored-alias"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        relation["target"] = json!("alex");
+        let id = format!("alias-{index}");
+        let created = execute_native_tool(
+            &runtime,
+            "graph.create",
+            json!({
+                "id": id, "kind": "note", "title": "Alias test", "relations": [relation.clone()]
+            }),
+        )
+        .unwrap()
+        .value;
+        assert_eq!(created["relations"][0]["relation"], "references");
+        assert_eq!(created["relations"][0]["target"], "alex");
+        assert!(created["relations"][0].get("rel").is_none());
+
+        relation["target"] = json!("project-alpha");
+        execute_native_tool(
+            &runtime,
+            "graph.update",
+            json!({
+                "id": id, "expectedRevision": created["provenance"]["sourceRevision"],
+                "relations": [relation]
+            }),
+        )
+        .unwrap();
+        let read = execute_native_tool(&runtime, "graph.get", json!({"id": id}))
+            .unwrap()
+            .value;
+        assert_eq!(read["relations"].as_array().unwrap().len(), 1);
+        assert_eq!(read["relations"][0]["relation"], "references");
+        assert_eq!(read["relations"][0]["target"], "project-alpha");
+    }
+}
+
+#[test]
+fn graph_delete_revision_alias_is_checked_and_canonical_value_wins() {
+    let (root, runtime) = fixture();
+    let path = root.path().join("graph/alex.md");
+    let changed = format!("{}\nExternal edit.\n", fs::read_to_string(&path).unwrap());
+    fs::write(&path, &changed).unwrap();
+    for input in [
+        json!({"id": "alex", "sourceRevision": "expected-stale"}),
+        json!({"id": "alex", "expectedRevision": "expected-stale"}),
+        json!({"id": "alex", "expectedRevision": "expected-stale", "sourceRevision": "ignored-alias"}),
+    ] {
+        let error = execute_native_tool(&runtime, "graph.delete", input).unwrap_err();
+        assert_eq!(error.code, ToolErrorCode::Handler);
+        let data = error.data.unwrap();
+        assert_eq!(data["conflict"], true);
+        assert_eq!(data["expectedRevision"], "expected-stale");
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        assert!(runtime.get("alex").unwrap().is_some());
+    }
+}
+
+#[test]
+fn graph_aliases_reject_invalid_types_before_writing() {
+    let (root, runtime) = fixture();
+    let path = root.path().join("graph/alex.md");
+    let changed = format!("{}\nExternal edit.\n", fs::read_to_string(&path).unwrap());
+    fs::write(&path, &changed).unwrap();
+    for (tool, input) in [
+        (
+            "graph.create",
+            json!({"id": "invalid-alias", "kind": "note", "title": "Invalid", "relations": [{"rel": 42, "target": "alex"}]}),
+        ),
+        (
+            "graph.update",
+            json!({"id": "alex", "relations": [{"rel": 42, "target": "project-alpha"}]}),
+        ),
+        ("graph.delete", json!({"id": "alex", "sourceRevision": 42})),
+    ] {
+        let error = execute_native_tool(&runtime, tool, input).unwrap_err();
+        assert_eq!(error.code, ToolErrorCode::InvalidInput);
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+    }
+    assert!(!root.path().join("graph/invalid-alias.md").exists());
+}
+
+#[test]
 fn timesheet_tools_round_trip_rows_reject_bad_data_and_check_revisions() {
     let (root, runtime) = fixture();
     let row = json!({ "id": "t1", "date": "2026-09-15", "minutes": 90, "description": "Test export", "custom": { "keep": true } });

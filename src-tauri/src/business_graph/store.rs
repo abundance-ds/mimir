@@ -550,15 +550,26 @@ impl GraphStore {
         scope_ids: &BTreeSet<String>,
         limit: usize,
     ) -> Vec<GraphSearchResult> {
-        let terms = search_terms(query);
+        self.search_query(
+            query,
+            &GraphQuery {
+                scope_ids: scope_ids.clone(),
+                limit,
+                ..GraphQuery::default()
+            },
+        )
+    }
+
+    pub fn search_query(&self, text: &str, query: &GraphQuery) -> Vec<GraphSearchResult> {
+        let terms = search_terms(text);
         if terms.is_empty() {
             return Vec::new();
         }
 
         let mut results = self
-            .nodes
-            .values()
-            .filter(|node| scope_ids.is_empty() || scope_ids.contains(&node.provenance.scope_id))
+            .candidate_ids(query)
+            .iter()
+            .filter_map(|id| self.nodes.get(id))
             .filter_map(|node| {
                 let score = search_score(node, &terms);
                 (score > 0).then(|| GraphSearchResult {
@@ -574,7 +585,7 @@ impl GraphStore {
                 .then_with(|| left.node.title.cmp(&right.node.title))
                 .then_with(|| left.node.id.cmp(&right.node.id))
         });
-        results.truncate(limit.clamp(1, MAX_SEARCH_LIMIT));
+        results.truncate(query.limit.clamp(1, MAX_SEARCH_LIMIT));
         results
     }
 
@@ -788,6 +799,30 @@ impl GraphStore {
             candidate = Some(match candidate {
                 Some(current) => current.intersection(&ids).cloned().collect(),
                 None => ids,
+            });
+        }
+        if let Some(id) = query.related_to.as_deref() {
+            let mut related = BTreeSet::new();
+            if self.visible_node(id, &query.scope_ids).is_some() {
+                related.insert(id.to_owned());
+                related.extend(
+                    self.outgoing
+                        .get(id)
+                        .into_iter()
+                        .flatten()
+                        .map(|(_, target)| target.clone()),
+                );
+                related.extend(
+                    self.incoming
+                        .get(id)
+                        .into_iter()
+                        .flatten()
+                        .map(|(_, source)| source.clone()),
+                );
+            }
+            candidate = Some(match candidate {
+                Some(current) => current.intersection(&related).cloned().collect(),
+                None => related,
             });
         }
         candidate
@@ -2143,6 +2178,107 @@ mod tests {
                 source_format: GraphSourceFormat::Graph,
             },
         }
+    }
+
+    #[test]
+    fn project_filter_uses_direct_links_before_query_and_search_limits() {
+        let mut project = linked_node(
+            "project",
+            "ZZ Project",
+            "[Resource](mimir://graph/resource)",
+            "team",
+        );
+        project.kind = "project".into();
+        project.relations.push(GraphRelation {
+            relation: "for_company".into(),
+            target: "company".into(),
+            legacy: false,
+        });
+        let mut issue = linked_node("issue", "ZZ Issue", "needle", "workspace");
+        issue.kind = "issue".into();
+        issue.relations.push(GraphRelation {
+            relation: "part_of".into(),
+            target: "project".into(),
+            legacy: false,
+        });
+        let note = linked_node(
+            "note",
+            "ZZ Note",
+            "needle [Project](mimir://graph/project)",
+            "private",
+        );
+        let mut nodes = vec![
+            project,
+            issue,
+            note,
+            linked_node("resource", "ZZ Resource", "needle", "team"),
+            linked_node("company", "ZZ Company", "needle", "team"),
+            linked_node(
+                "indirect",
+                "Indirect",
+                "needle [Task](mimir://graph/issue)",
+                "team",
+            ),
+        ];
+        for index in 0..600 {
+            nodes.push(linked_node(
+                &format!("other-{index}"),
+                "A needle",
+                "",
+                "team",
+            ));
+        }
+        let mut store = GraphStore::from_nodes(nodes, vec![]);
+        assert!(!store
+            .query(&GraphQuery {
+                limit: 500,
+                ..GraphQuery::default()
+            })
+            .items
+            .iter()
+            .any(|node| node.id == "project"));
+        assert!(!store
+            .search("needle", &BTreeSet::new(), 100)
+            .iter()
+            .any(|result| result.node.id == "note"));
+        let mut query = GraphQuery {
+            related_to: Some("project".into()),
+            limit: 500,
+            ..GraphQuery::default()
+        };
+        let ids: BTreeSet<_> = store
+            .query(&query)
+            .items
+            .into_iter()
+            .map(|node| node.id)
+            .collect();
+        assert_eq!(
+            ids,
+            BTreeSet::from([
+                "project".into(),
+                "issue".into(),
+                "note".into(),
+                "resource".into(),
+                "company".into()
+            ])
+        );
+        assert_eq!(store.search_query("needle", &query).len(), 4);
+        query.kinds = BTreeSet::from(["note".into()]);
+        assert_eq!(store.query(&query).total, 3);
+        query.scope_ids = BTreeSet::from(["team".into()]);
+        assert_eq!(store.query(&query).total, 2);
+        assert_eq!(store.search_query("needle", &query).len(), 2);
+        query.scope_ids = BTreeSet::from(["private".into()]);
+        assert_eq!(store.query(&query).total, 0); // The anchor is outside the selected scopes.
+        assert!(store.search_query("needle", &query).is_empty());
+        query.scope_ids.clear();
+        let mut note = store.get("note").unwrap().clone();
+        note.body = "needle".into();
+        store.apply_reconciled_nodes(vec![("note".into(), Some(note))], vec![]);
+        assert_eq!(store.query(&query).total, 2);
+        store.apply_reconciled_nodes(vec![("project".into(), None)], vec![]);
+        assert_eq!(store.query(&query).total, 0);
+        assert!(store.search_query("needle", &query).is_empty());
     }
 
     #[test]

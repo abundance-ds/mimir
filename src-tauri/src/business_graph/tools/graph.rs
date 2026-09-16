@@ -70,17 +70,27 @@ pub(super) fn execute(
         "graph.resolve_reference" => resolve_legacy_reference(runtime, &input),
         "graph.create" => {
             let created = runtime
-                .create(parse_input::<GraphNodeCreate>(input)?)
+                .create(parse_input::<GraphNodeCreate>(normalize_relation_alias(
+                    input,
+                ))?)
                 .map_err(mutation_error)?;
             mutation_value(created.clone(), created.provenance.source_path)
         }
         "graph.update" => {
             let updated = runtime
-                .update(parse_input::<GraphNodePatch>(input)?)
+                .update(parse_input::<GraphNodePatch>(normalize_relation_alias(
+                    input,
+                ))?)
                 .map_err(mutation_error)?;
             mutation_value(updated.clone(), updated.provenance.source_path)
         }
         "graph.delete" => {
+            let mut input = input;
+            if let Some(fields) = input.as_object_mut() {
+                if let Some(revision) = fields.remove("sourceRevision") {
+                    fields.entry("expectedRevision").or_insert(revision);
+                }
+            }
             let deleted = runtime
                 .delete(parse_input::<GraphNodeDelete>(input)?)
                 .map_err(mutation_error)?;
@@ -94,6 +104,19 @@ pub(super) fn execute(
         }
         _ => Err(super::unknown_tool(name)),
     }
+}
+
+fn normalize_relation_alias(mut input: Value) -> Value {
+    if let Some(relations) = input.get_mut("relations").and_then(Value::as_array_mut) {
+        for relation in relations {
+            if let Some(fields) = relation.as_object_mut() {
+                if let Some(alias) = fields.remove("rel") {
+                    fields.entry("relation").or_insert(alias);
+                }
+            }
+        }
+    }
+    input
 }
 
 fn resource_add(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolError> {
@@ -348,15 +371,16 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.find",
             "graph_find",
-            "Find graph nodes by text, physical scope, kind, tags, issue status, relation, or update time.",
+            "Find graph nodes by text and filters.",
             merge(
                 query_properties(),
                 json!({
-                    "query": { "type": "string", "minLength": 1, "maxLength": 500 },
-                    "relation": string_schema("Required outgoing relation name."),
-                    "targetId": string_schema("Required outgoing relation target id."),
-                    "updatedAfter": string_schema("Inclusive ISO-8601 lower update bound."),
-                    "updatedBefore": string_schema("Inclusive ISO-8601 upper update bound."),
+                    "query": { "type": "string", "minLength": 1, "maxLength": 500,
+                        "description": "Plain text." },
+                    "relation": string_schema("Outgoing relation."),
+                    "targetId": string_schema("Outgoing target node ID."),
+                    "updatedAfter": string_schema("UTC ISO-8601 timestamp, inclusive."),
+                    "updatedBefore": string_schema("UTC ISO-8601 timestamp, inclusive."),
                     "limit": integer_schema(1, 100),
                 }),
             ),
@@ -365,52 +389,52 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.status",
             "graph_status",
-            "Describe mounted private, project, and team graph scopes and the current graph revision.",
+            "Read mounted graph scopes and counts.",
             json!({}),
             &[],
         ),
         definition(
             "graph.resource_add",
             "graph_resource_add",
-            "Copy one file into Team resources and attach it to a new or existing Team Resource node.",
+            "Copy a local file into a Team Resource.",
             json!({
-                "sourcePath": string_schema("Absolute path of the local file to copy."),
-                "resourceId": string_schema("Existing Team Resource node id. Omit to create one."),
-                "title": string_schema("Title for a new Resource node. Defaults to the file name."),
-                "label": string_schema("Optional display label for the attached file."),
-                "expectedRevision": string_schema("Required source revision when updating an existing Resource node."),
+                "sourcePath": string_schema("Absolute local path."),
+                "resourceId": string_schema("Existing Team Resource; omit to create one."),
+                "title": string_schema("For new Resources."),
+                "label": { "type": "string" },
+                "expectedRevision": string_schema("Required with resourceId; use its provenance.sourceRevision."),
             }),
             &["sourcePath"],
         ),
         definition(
             "graph.list",
             "graph_list",
-            "List graph nodes through a bounded, source-aware projection query.",
+            "List graph nodes matching filters.",
             query_properties(),
             &[],
         ),
         definition(
             "graph.query",
             "graph_query",
-            "Query graph nodes by physical scopes, ontology kinds, tags, and issue status.",
+            "List graph nodes matching filters.",
             query_properties(),
             &[],
         ),
         definition(
             "graph.get",
             "graph_get",
-            "Get one full graph node including body, relations, properties, scope, and source revision.",
+            "Read a complete graph node.",
             id.clone(),
             &["id"],
         ),
         definition(
             "graph.search",
             "graph_search",
-            "Rank graph nodes using bounded text search across visible physical scopes.",
+            "Search graph text.",
             merge(
                 scopes.clone(),
                 json!({
-                    "query": string_schema("Plain-text terms."),
+                    "query": string_schema("Plain text."),
                     "limit": integer_schema(1, 100),
                 }),
             ),
@@ -419,25 +443,25 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.neighbors",
             "graph_neighbors",
-            "Traverse incoming and outgoing relations around one node, constrained to visible scopes.",
+            "Read incoming and outgoing graph neighbors.",
             merge(scopes.clone(), id.clone()),
             &["id"],
         ),
         definition(
             "graph.diagnostics",
             "graph_diagnostics",
-            "Return malformed source, duplicate id, dangling relation, and ontology diagnostics.",
+            "Report graph validation problems.",
             json!({}),
             &[],
         ),
         definition(
             "graph.events",
             "graph_events",
-            "List the durable authored change stream for the selected physical graph scopes.",
+            "Read graph change history.",
             merge(
                 scopes.clone(),
                 json!({
-                    "since": string_schema("Inclusive RFC 3339 timestamp lower bound."),
+                    "since": string_schema("RFC 3339 timestamp, inclusive."),
                     "offset": integer_schema(0, 1000000),
                     "limit": integer_schema(1, 500),
                 }),
@@ -447,18 +471,18 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.migration_report",
             "graph_migration_report",
-            "Dry-run the mounted legacy sources and report counts, aliases, collisions, dangling links, and identity resolution without writing.",
+            "Preview legacy graph migration.",
             json!({}),
             &[],
         ),
         definition(
             "graph.context",
             "graph_context",
-            "Build a bounded agent-ready graph context around one focus, preserving scope and source provenance while redacting sensitive records.",
+            "Read context around a graph node.",
             merge(
                 scopes.clone(),
                 json!({
-                    "focusId": string_schema("Optional focus node id. Traversal begins here."),
+                    "focusId": string_schema("Start node; omit for recently updated nodes."),
                     "maxNodes": integer_schema(1, 40),
                 }),
             ),
@@ -467,12 +491,12 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.resolve_reference",
             "graph_resolve_reference",
-            "Resolve one legacy issue project or assignee string to a validated real graph entity.",
+            "Resolve legacy issue references.",
             merge(
                 mutation_id_properties(),
                 json!({
                     "field": { "type": "string", "enum": ["project", "assignee"] },
-                    "targetId": string_schema("Validated project or person node id."),
+                    "targetId": { "type": "string" },
                 }),
             ),
             &["id", "field", "targetId"],
@@ -480,30 +504,30 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.create",
             "graph_create",
-            "Create one typed Markdown-backed graph node in a selected private, project, or team scope.",
+            "Create a graph node.",
             graph_create_properties(),
             &["kind", "title"],
         ),
         definition(
             "graph.update",
             "graph_update",
-            "Patch one graph node with conflict-safe source-revision checking; an omitted expectedRevision defaults to the last-loaded revision.",
+            "Update a graph node.",
             graph_update_properties(),
             &["id"],
         ),
         definition(
             "graph.delete",
             "graph_delete",
-            "Move one graph node source to the operating-system Trash after a conflict-safe source-revision check.",
+            "Move a graph node to Trash.",
             mutation_id_properties(),
             &["id"],
         ),
         definition(
             "graph.restore",
             "graph_restore",
-            "Restore one recently Trashed graph source using the undo token returned by graph_delete.",
+            "Restore with a graph_delete undo token.",
             json!({
-                "undoToken": string_schema("Undo token returned by graph_delete."),
+                "undoToken": { "type": "string" },
             }),
             &["undoToken"],
         ),
@@ -512,13 +536,13 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
 
 fn query_properties() -> Value {
     json!({
-        "scopeIds": string_array("Physical scope ids. Empty means all mounted scopes."),
+        "scopeIds": string_array("Empty or omitted: all mounted scopes."),
         "kinds": {
             "type": "array",
             "items": { "type": "string", "enum": ENTITY_KINDS },
             "uniqueItems": true,
         },
-        "tags": string_array("Required tags."),
+        "tags": string_array("All must match."),
         "status": { "type": "string" },
         "offset": integer_schema(0, 100000),
         "limit": integer_schema(1, 500),
@@ -527,33 +551,35 @@ fn query_properties() -> Value {
 
 fn graph_create_properties() -> Value {
     json!({
-        "scopeId": string_schema("Target physical scope id. When omitted, normal graph kinds prefer Team and Journal prefers Private."),
-        "id": string_schema("Optional stable lowercase slug id."),
+        "scopeId": string_schema("Default: configured workspace scope; otherwise prefers Team (Journal: Private)."),
+        "id": string_schema("Lowercase slug; generated if omitted."),
         "kind": { "type": "string", "enum": ENTITY_KINDS },
-        "title": string_schema("Human-readable title."),
+        "title": { "type": "string" },
         "summary": { "type": "string", "maxLength": 1000 },
-        "body": string_schema("Graph links: [Title](mimir://graph/<id>), using an ID from graph_find."),
-        "tags": string_array("Topic labels."),
+        "body": string_schema("Markdown; graph links: [Title](mimir://graph/<id>)."),
+        "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "relations": relation_array(),
         "properties": { "type": "object", "additionalProperties": true,
-            "description": "For timesheet: period is YYYY-MM; entries is a list of {id, date, minutes, description, invoice?}. Use unique stable row IDs, dates within the month, integer minutes from 1 to 1440, and optional non-empty invoice references. Omit invoice for Open rows. Totals are calculated." },
+            "description": "Timesheet: period YYYY-MM; entries [{id, date, minutes, description, invoice?}]. IDs unique/stable; dates within period; minutes integer 1–1440; invoice nonempty reference string (absent=Open)." },
     })
 }
 
 fn graph_update_properties() -> Value {
     json!({
-        "id": string_schema("Stable graph node id."),
+        "id": { "type": "string" },
         "expectedRevision": string_schema(
-            "Optional source revision for optimistic concurrency. Omitted, the check uses the revision last loaded by the workbench, so stale writes are rejected either way.",
+            "Use provenance.sourceRevision; defaults to Mimir's last loaded revision.",
         ),
         "kind": { "type": "string", "enum": ENTITY_KINDS },
         "title": { "type": "string" },
         "summary": { "type": "string", "maxLength": 1000 },
-        "body": string_schema("Graph links: [Title](mimir://graph/<id>), using an ID from graph_find."),
-        "tags": string_array("Replacement tags."),
-        "relations": relation_array(),
+        "body": string_schema("Markdown; graph links: [Title](mimir://graph/<id>)."),
+        "tags": string_array("Replaces all tags."),
+        "relations": merge(relation_array(), json!({
+            "description": "Replaces all outgoing links; use {relation, target}."
+        })),
         "setProperties": { "type": "object", "additionalProperties": true,
-            "description": "For timesheet edits, entries replaces the complete row list. Read the current node first, preserve row IDs and unknown fields, and send expectedRevision. Omit a row's invoice to mark it Open; use a non-empty reference to mark it Invoiced." },
-        "removeProperties": string_array("Property names to remove."),
+            "description": "Replaces whole property values, including arrays/objects. Timesheet: preserve other rows, IDs and unknown fields; invoice: nonempty reference string (absent=Open)." },
+        "removeProperties": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     })
 }

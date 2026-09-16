@@ -106,7 +106,6 @@ describe('Business Graph UI contract', () => {
       'data-date-value',
       'data-board-',
       'data-card-',
-      'data-dispatch-',
       'data-rail-',
       'data-standing-',
       'data-now-',
@@ -121,7 +120,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(25)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(24)
     expect(BUSINESS_GRAPH_SURFACES).toContain('TimesheetDetails.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
@@ -137,7 +136,7 @@ describe('Business Graph UI contract', () => {
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphViewbar.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphWorkspace.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
-    expect(BUSINESS_GRAPH_SURFACES).toContain('DispatchBar.vue')
+    expect(BUSINESS_GRAPH_SURFACES).not.toContain('DispatchBar.vue')
     expect(BUSINESS_GRAPH_SURFACES).not.toContain('GraphFilterBanner.vue')
   })
 })

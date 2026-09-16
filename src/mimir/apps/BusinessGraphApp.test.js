@@ -41,7 +41,6 @@ import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
-import DispatchBar from './business-graph/DispatchBar.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
 const scopeRows = [
@@ -237,6 +236,46 @@ describe('BusinessGraphApp', () => {
 
     await wrapper.get('[data-graph-section="work"]').trigger('click')
     expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual(['Board', 'List'])
+    wrapper.unmount()
+  })
+
+  it('offers a named current-project toggle and keeps it across Graph views', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const graph = useBusinessGraphStore(pinia)
+    graph.setWorkspaceConfiguration({ project: 'project-alpha' })
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await flushPromises()
+    const toggle = wrapper.get('[data-graph-control="current-project"]')
+    expect(toggle.text()).toContain('Project Alpha')
+    expect(toggle.attributes('aria-pressed')).toBe('false')
+    expect(wrapper.find('[data-graph-dispatch]').exists()).toBe(false)
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ relatedTo: 'project-alpha' }))
+    await wrapper.get('[data-graph-view="timeline"]').trigger('click')
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+    await wrapper.get('[data-graph-view="changes"]').trigger('click')
+    expect(wrapper.find('[data-graph-control="current-project"]').exists()).toBe(false)
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    await toggle.trigger('click')
+    expect(graph.currentProjectOnly).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('opens workspace setup when no Project is linked', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    const toggle = wrapper.get('[data-graph-control="current-project"]')
+    expect(toggle.text()).toContain('No linked project')
+    await toggle.trigger('click')
+    expect(wrapper.emitted('configureWorkspace')).toHaveLength(1)
+    expect(useBusinessGraphStore(pinia).currentProjectOnly).toBe(false)
+    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'k', metaKey: true })
+    expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
+    expect(wrapper.emitted('startWork')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -747,7 +786,7 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'f', metaKey: true })
     expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: '/' })
-    expect(document.activeElement).toBe(wrapper.get('[data-dispatch-input]').element)
+    expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
     await wrapper.get('[data-board-card="issue-1"]').trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'f' })
@@ -784,37 +823,11 @@ describe('BusinessGraphApp', () => {
     expect(document.activeElement).toBe(wrapper.get('[data-board-card="issue-1"]').element)
 
     // A repeat request must never steal focus already inside the app.
-    const input = wrapper.get('[data-dispatch-input]').element
+    const input = wrapper.get('[data-graph-search]').element
     input.focus()
     wrapper.vm.focusEntry()
     await flushPromises()
     expect(document.activeElement).toBe(input)
-    wrapper.unmount()
-  })
-
-  it('routes a dispatch lookup result to an Editor document', async () => {
-    const wrapper = render()
-    await flushPromises()
-    vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
-
-    const input = wrapper.get('[data-dispatch-input]')
-    input.element.focus()
-    await input.setValue('Extract')
-    await new Promise(resolve => setTimeout(resolve, 180))
-    await flushPromises()
-    await input.trigger('keydown', { key: 'Tab' })
-    await flushPromises()
-
-    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
-    expect(document.activeElement).toBe(input.element)
-    input.element.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-    }))
-    await flushPromises()
-    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
-    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'k', metaKey: true })
-    expect(document.activeElement).toBe(input.element)
     wrapper.unmount()
   })
 
@@ -1307,9 +1320,8 @@ describe('BusinessGraphApp', () => {
     const wrapper = render()
     await flushPromises()
 
-    const dispatch = wrapper.get('[data-dispatch-input]')
-    await dispatch.setValue('/find evidence')
-    await dispatch.trigger('keydown', { key: 'Enter' })
+    const graph = useBusinessGraphStore(pinia)
+    await graph.search('evidence')
     await flushPromises()
 
     const search = wrapper.get('[data-graph-search]')
@@ -1322,21 +1334,18 @@ describe('BusinessGraphApp', () => {
     expect(search.element.value).toBe('')
     expect(wrapper.find('[data-graph-control="clear-search"]').exists()).toBe(false)
 
-    await dispatch.setValue('/find evidence')
-    await dispatch.trigger('keydown', { key: 'Enter' })
+    await graph.search('evidence')
     await flushPromises()
     expect(search.element.value).toBe('evidence')
 
-    await dispatch.setValue('/clear')
-    await dispatch.trigger('keydown', { key: 'Enter' })
+    graph.clearSearch()
     await flushPromises()
     expect(search.element.value).toBe('')
     expect(wrapper.find('[data-graph-control="clear-search"]').exists()).toBe(false)
 
     const callsBeforePendingClear = searchGraph.mock.calls.length
     await search.setValue('bank')
-    await dispatch.setValue('/clear')
-    await dispatch.trigger('keydown', { key: 'Enter' })
+    graph.clearSearch()
     await flushPromises()
     await new Promise(resolve => setTimeout(resolve, 120))
     expect(search.element.value).toBe('')
@@ -1437,17 +1446,6 @@ describe('BusinessGraphApp', () => {
     createDialog.querySelector('[data-graph-control="create-close"]').click()
     await flushPromises()
 
-    vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
-    vi.mocked(graphContext).mockRejectedValue(new Error('Context could not be assembled'))
-    const input = wrapper.get('[data-dispatch-input]')
-    await input.trigger('focus')
-    await input.setValue('work Extract')
-    await new Promise(resolve => setTimeout(resolve, 180))
-    await flushPromises()
-    await input.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(wrapper.get('[data-dispatch-pack]').text()).toContain('Context could not be assembled')
-    expect(wrapper.emitted('startWork')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -1463,39 +1461,6 @@ describe('BusinessGraphApp', () => {
     expect(dialog.querySelector('[data-create-kind]').getAttribute('role')).toBe('combobox')
     expect(dialog.querySelector('[data-create-scope]').getAttribute('role')).toBe('combobox')
     expect(document.querySelector('select, datalist')).toBeNull()
-    wrapper.unmount()
-  })
-
-  it('assembles bounded scoped context before requesting an agent Activity', async () => {
-    const wrapper = render()
-    await flushPromises()
-    vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
-
-    const input = wrapper.get('[data-dispatch-input]')
-    await input.trigger('focus')
-    await input.setValue('work Extract')
-    await new Promise(resolve => setTimeout(resolve, 180))
-    await flushPromises()
-
-    await input.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(graphContext).toHaveBeenCalledWith({
-      focusId: 'issue-1',
-      scopeIds: ['private:local', 'project:alpha', 'team:main'],
-      maxNodes: 16,
-    })
-    expect(wrapper.get('[data-dispatch-pack]').text()).toContain('Issue context.')
-
-    await input.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(wrapper.emitted('startWork')[0][0]).toEqual(expect.objectContaining({
-      nodeId: 'issue-1',
-      nodeKind: 'issue',
-      graphRevision: 7,
-      prompt: expect.stringContaining('<graph-context>'),
-    }))
-    expect(wrapper.emitted('startWork')[0][0].prompt).toContain('untrusted business data')
-    expect(wrapper.emitted('startWork')[0][0].prompt).toContain('Objective:')
     wrapper.unmount()
   })
 
@@ -1518,48 +1483,5 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('routes dispatched lines to a background agent Activity with graph context', async () => {
-    const wrapper = render()
-    await flushPromises()
-    const input = wrapper.get('[data-dispatch-input]')
-    await input.trigger('focus')
-    await input.setValue('file the payer objection from the call')
-    await new Promise(resolve => setTimeout(resolve, 180))
-    await input.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
 
-    expect(graphContext).toHaveBeenCalledWith(expect.objectContaining({
-      scopeIds: ['private:local', 'project:alpha', 'team:main'],
-      maxNodes: 12,
-    }))
-    const request = wrapper.emitted('startWork')[0][0]
-    expect(request.background).toBe(true)
-    expect(request.prompt).toContain('file the payer objection from the call')
-    expect(request.prompt).toContain('untrusted business data')
-    wrapper.unmount()
-  })
-
-  it('does not pump queued dispatch work after the app unmounts', async () => {
-    vi.useFakeTimers()
-    try {
-      const wrapper = render()
-      await flushPromises()
-      const dispatch = wrapper.findComponent(DispatchBar)
-
-      dispatch.vm.$emit('dispatch', 'first capture')
-      dispatch.vm.$emit('dispatch', 'second capture')
-      await flushPromises()
-      expect(graphContext).toHaveBeenCalledTimes(1)
-      expect(wrapper.emitted('startWork')).toHaveLength(1)
-
-      wrapper.unmount()
-      await vi.advanceTimersByTimeAsync(1_600)
-      await flushPromises()
-
-      expect(graphContext).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.clearAllTimers()
-      vi.useRealTimers()
-    }
-  })
 })

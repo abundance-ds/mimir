@@ -47,6 +47,7 @@
     />
 
     <GraphWorkspace
+      @configure-workspace="$emit('configureWorkspace')"
       v-if="workspacePath"
       ref="workspaceSurface"
       :current-section="currentSection"
@@ -104,20 +105,6 @@
       @create-from-board="createFromBoard"
     />
 
-    <DispatchBar
-      ref="dispatchBar"
-      :scope-ids="graph.activeScopeIds"
-      :nodes="graph.nodes"
-      :node-count="graph.status?.nodeCount || graph.nodes.length"
-      :echoes="dispatchEchoes"
-      :running="dispatchRunningCount"
-      :queued="dispatchQueue.length"
-      @open-node="openNode"
-      @dispatch="submitDispatch"
-      @delegate="delegateWork"
-      @power="runPowerCommand"
-    />
-
     <GraphCreateDialog
       :nodes="graph.nodes"
       :self-person-id="settings.businessGraphSelfPersonId || ''"
@@ -145,18 +132,15 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useActivitiesStore } from '../../stores/activities.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
-import DispatchBar from './business-graph/DispatchBar.vue'
 import GraphAppFeedback from './business-graph/GraphAppFeedback.vue'
 import GraphAppHeader from './business-graph/GraphAppHeader.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 import GraphWorkspace from './business-graph/GraphWorkspace.vue'
 import { useGraphKeyboard } from './business-graph/useGraphKeyboard.js'
-import { useGraphDispatch } from './business-graph/useGraphDispatch.js'
 import { useGraphMutations } from './business-graph/useGraphMutations.js'
 import { useGraphNavigation } from './business-graph/useGraphNavigation.js'
 import { useGraphSearch } from './business-graph/useGraphSearch.js'
@@ -172,16 +156,15 @@ const emit = defineEmits([
   'openGraphNode',
   'startWork',
   'chooseWorkspace',
+  'configureWorkspace',
   'diagnostic',
 ])
-const activities = useActivitiesStore()
 const settings = useSettingsStore()
 const launchers = useLaunchersStore()
 const graph = useBusinessGraphStore()
 const root = ref(null)
 const appHeader = ref(null)
 const workspaceSurface = ref(null)
-const dispatchBar = ref(null)
 
 const {
   allKindFilter,
@@ -274,26 +257,6 @@ watch(
   { immediate: true, flush: 'post' },
 )
 const {
-  delegateWork,
-  dispatchEchoes,
-  dispatchQueue,
-  dispatchRunningCount,
-  echoToolCall,
-  runPowerCommand,
-  submitDispatch,
-} = useGraphDispatch({
-  graph,
-  activities,
-  sections,
-  priorityFilter,
-  kindFilter: allKindFilter,
-  setSection,
-  setView,
-  openNode,
-  startWork: request => emit('startWork', request),
-  diagnostic: message => emit('diagnostic', message),
-})
-const {
   bulkMoveIssues,
   bulkPatchIssues,
   createError,
@@ -318,7 +281,6 @@ const {
   graph,
   boardIssues,
   diagnostic: message => emit('diagnostic', message),
-  echoToolCall,
   restoreGraphFocus,
   openNode,
 })
@@ -326,14 +288,11 @@ const { onKeydown } = useGraphKeyboard({
   sections,
   appHeader,
   workspaceSurface,
-  dispatchBar,
   createOpen,
   openCreate,
   setSection,
 })
-// The shell stays mounted while the graph mounts so the topbar, viewbar, and
-// dispatch bar paint immediately; only the projection waits for the first
-// query, and a reload keeps the nodes already on screen.
+// Keep navigation mounted while the first projection loads.
 const composing = computed(() => graph.loading && !graph.nodes.length)
 </script>
 

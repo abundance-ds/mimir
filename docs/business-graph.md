@@ -153,6 +153,9 @@ Native validation and agent writes share tests with renderer validation.
 Component tests cover edits, range selection, filtered export, invoice groups,
 undo after save, and invalid-source recovery. The browser preview is
 `harness/timesheet.html`; it uses fixture data and does not write Graph files.
+Chrome checks covered a 760 px light pane and a 380 px dark pane, row
+selection, invoice assignment, and the resulting totals. These checks do not
+establish native dialog or installed-app behavior.
 
 ## Inline links and backlinks
 
@@ -302,9 +305,23 @@ immediately by title, summary, tags, project, owner, and work details. Terms
 combine and ignore case and accents. Board keeps its columns, and List keeps
 its groups and sort order. Empty search columns remain visible; clearing the
 query restores the work. Graph uses debounced content search.
-The dispatch bar supports lookup, deterministic commands, and agent work with a
-bounded, source-aware context pack. Raw ids and source revisions stay out of
-normal UI. Projection navigation stays direct at every width.
+Graph offers a current-project toggle beside the kind filter. Its name comes
+from the Project linked to the current workspace. The toggle includes that
+Project and entries with a direct incoming or outgoing relation or body link.
+It respects selected storage scopes and does not follow further links. Project
+and kind filters run before query and search result limits. The toggle starts
+off, stays selected across views, and follows the linked Project when the
+workspace changes. Long names truncate to the available width; the control
+exposes the full name. No linked project opens workspace setup. A missing or
+excluded Project produces no matches while the filter is active.
+
+The filters apply to List, Timeline, and Graph search results. Changes without
+a search remains an event view and does not show these controls. The Graph
+has no command footer. Cmd/Ctrl+F, Cmd/Ctrl+K, and `/` focus its search field.
+Entry Details offers **Work with agent** in More actions. It saves the entry,
+then prepares bounded context for an agent Activity. **New** creates entries.
+Raw ids and source revisions stay out of normal UI. Projection navigation
+stays direct at every width.
 
 Work rows share one grammar (`business-graph/workRow.js`) across Board and
 List. A Board card has a fixed height and fixed slots: a two-line title with

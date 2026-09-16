@@ -31,10 +31,12 @@ export function queryGraph(query = {}) {
   return invoke('graph_query', { query: normalizeQuery(query) })
 }
 
-export function searchGraph(query, { scopeIds = [], limit = 25 } = {}) {
+export function searchGraph(query, { scopeIds = [], kinds = [], relatedTo = '', limit = 25 } = {}) {
   return invoke('graph_search', {
     query: String(query || '').trim(),
     scopeIds: normalizeStrings(scopeIds),
+    ...(kinds.length ? { kinds: normalizeStrings(kinds) } : {}),
+    ...(relatedTo ? { relatedTo: requiredId(relatedTo) } : {}),
     limit,
   })
 }
@@ -138,6 +140,7 @@ export function listenForGraphChanges(handler) {
 
 function normalizeQuery(query) {
   return {
+    ...(query.relatedTo ? { relatedTo: requiredId(query.relatedTo) } : {}),
     scopeIds: normalizeStrings(query.scopeIds),
     kinds: normalizeStrings(query.kinds),
     tags: normalizeStrings(query.tags),

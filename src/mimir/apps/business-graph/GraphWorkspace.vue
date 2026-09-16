@@ -23,6 +23,13 @@
         :statuses="boardStatuses"
         :kind-filter="allKindFilter"
         :kind-options="allKindOptions"
+        :search-active="Boolean(graph.searchQuery.trim())"
+        :current-project-only="graph.currentProjectOnly"
+        :current-project-title="graph.workspaceProject?.title || ''"
+        :project-unavailable="Boolean(graph.workspaceProjectId) && !graph.workspaceProject"
+        :project-loading="graph.loading"
+        @update:current-project-only="graph.currentProjectOnly = $event"
+        @configure-workspace="$emit('configureWorkspace')"
         @set-view="$emit('setView', $event)"
         @update:project-filter="$emit('update:projectFilter', $event)"
         @update:assignee-filter="$emit('update:assigneeFilter', $event)"
@@ -35,10 +42,9 @@
         @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
         @expand-all="$emit('expandAllBoardStatuses')"
       />
-      <div v-if="composing" data-graph-loading class="graph-state">
+      <div v-if="composing || (graph.projectionLoading && !graph.searchQuery.trim())" data-graph-loading class="graph-state" role="status">
         <span class="graph-loading-mark" aria-hidden="true" />
-        <h2>Composing your graph</h2>
-        <p>Private, project, and team knowledge are being indexed.</p>
+        <h2>Loading graph entries</h2>
       </div>
       <EntityList
         v-else-if="graph.searchQuery && graph.section !== 'work'"
@@ -164,6 +170,7 @@ defineProps({
 })
 
 defineEmits([
+  'configureWorkspace',
   'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard',
   'expandAllBoardStatuses', 'expandBoardStatus',
   'loadNowPage', 'markNowSeen', 'moveIssue', 'openCreate',

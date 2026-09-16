@@ -236,25 +236,26 @@ pub(super) fn definition(
 
 pub(super) fn scopes_properties() -> Value {
     json!({
-        "scopeIds": string_array("Physical private, project, or team scope ids. Empty means all mounted scopes.")
+        "scopeIds": string_array("Empty or omitted: all mounted scopes.")
     })
 }
 
 pub(super) fn id_properties() -> Value {
-    json!({ "id": string_schema("Stable graph node id.") })
+    json!({ "id": { "type": "string" } })
 }
 
 pub(super) fn mutation_id_properties() -> Value {
     json!({
-        "id": string_schema("Stable graph node id."),
-        "expectedRevision": string_schema("Optional source revision for optimistic concurrency."),
-        "sourceRevision": string_schema("Legacy spelling of expectedRevision."),
+        "id": { "type": "string" },
+        "expectedRevision": string_schema("Source revision; defaults to Mimir's last loaded revision."),
+        "sourceRevision": string_schema("Legacy; use expectedRevision."),
     })
 }
 
 pub(super) fn relation_array() -> Value {
     json!({
         "type": "array",
+        "description": "Use {relation, target}.",
         "items": {
             "type": "object",
             "properties": {
