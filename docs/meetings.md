@@ -33,7 +33,7 @@ Transcription follows committed audio and never blocks the capture callback.
 - Only one meeting records at a time. A workbench control always exposes time,
   microphone mute, and Stop while recording.
 - Mute writes aligned microphone silence; there is no pause state.
-- Transcription uses the managed local Whisper model or one explicit hosted
+- Transcription uses a selected local Whisper model or one explicit hosted
   endpoint. There is no hidden provider fallback.
 - Stop ends capture at once and leaves the recording surface. Transcript tail
   processing continues in the background and produces one terminal transcript.
@@ -57,6 +57,12 @@ Scribe is the meeting workspace. Its overview and search show only meetings
 that have no Graph record. **Load older meetings** extends the overview.
 Filed meetings are available in Graph through its **Meetings** kind filter.
 Filing removes a meeting from the Scribe overview without deleting its source.
+
+The overview has one fixed toolbar: Search, Prepare, Record, and Settings.
+Meetings appear directly below, grouped by date. The list updates from
+Scribe events; **Retry** appears if loading fails. Model and
+provider details belong in Settings. If recording needs setup, the Settings
+button also shows **Setup**.
 
 The Scribe flow is overview → details → overview. **Back** or **Escape** returns
 to the overview and saves pending edits in the background. An open menu or
@@ -120,7 +126,7 @@ honest `Interrupted` and `Failed` exits.
 
 ## Transcription and follow-up
 
-- Managed Whisper is a pinned, length- and SHA-256-verified Metal model. Mimir
+- Managed Whisper uses pinned, length- and SHA-256-verified Metal models. Mimir
   does not silently fall back to CPU or network inference.
 - Hosted endpoints must be public HTTPS. Secrets are endpoint-bound in macOS
   Keychain and never returned through IPC or Activity arguments.
@@ -135,6 +141,36 @@ honest `Interrupted` and `Failed` exits.
 - Permanent deletion is visible at the durable tombstone boundary. The meeting
   disappears at once. An already running follow-up can release its process
   lease in the background before private file and database cleanup completes.
+
+### Local models
+
+Scribe uses OpenAI Whisper through `whisper.cpp` with Metal. In
+**Settings → Scribe → Transcription**, **Download** installs a model, **Use**
+selects it for new recordings, and **Remove** deletes it. Downloads do not change
+the selection. Existing recordings retain their model. Removing the selected
+model requires a download or another selection before recording.
+
+`src-tauri/resources/meeting-models.json` owns the catalog, pinned revisions,
+sizes, and checksums. Models download to `~/.mimir/models/stt/` on user action
+and are never bundled. Existing Small downloads remain usable.
+
+## Summary prompts and context
+
+`src-tauri/resources/meeting-summary-prompts.json` owns the built-in prompts
+for the renderer and native service. Former built-in defaults migrate to the
+selected format; custom prompts and queued instructions remain unchanged.
+The summary dialog loads the saved prompt when opened. Selecting the saved
+format uses its custom prompt; other formats use their built-in prompts.
+
+Each summary job reads the transcript and user notes. Its prompt includes a
+context block, saved as `meeting-context.json` for retries. The block contains
+`TITLE`, `YOU`, `THEM: [names]`, and `PROJECT`. Names come
+from the selected Graph records. The configured Graph **You** person is excluded
+from `THEM`. Filed meetings use their current Graph title and relations;
+unfiled meetings use their Scribe selections. Retries reuse the saved context;
+a new generation reads the current selections. Missing selected records report
+an error instead of silently omitting names. `Them` and `Others` refer to the
+`THEM` list; multiple names identify the group, not each voice.
 
 ## Agent and data boundaries
 

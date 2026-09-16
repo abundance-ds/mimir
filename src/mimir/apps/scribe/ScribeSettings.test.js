@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ScribeSettings from './ScribeSettings.vue'
+import { summaryPromptFor } from './summaryRecipes.js'
 
 const config = {
   ignoredApps: [{ appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }],
@@ -268,7 +269,7 @@ describe('ScribeSettings', () => {
       .trigger('click')
     expect(wrapper.emitted('save').at(-1)).toEqual([expect.objectContaining({
       summaryTemplate: 'brief',
-      summaryPrompt: expect.stringContaining('BLUF approach'),
+      summaryPrompt: summaryPromptFor('brief'),
     })])
   })
 

@@ -255,7 +255,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "discloses OpenAI processing inline without adding a confirmation step",
+      "selector": "starts hosted recording without a provider label or an extra confirmation step",
       "scenarios": [
         "MTG-006"
       ]

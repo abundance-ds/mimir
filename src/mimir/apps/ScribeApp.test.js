@@ -252,7 +252,7 @@ describe('ScribeApp', () => {
 
     expect(wrapper.get('[data-scribe-home-toolbar]').text()).not.toContain('Record this meeting')
     expect(wrapper.text()).not.toContain('Mimir records your microphone')
-    expect(wrapper.get('[data-scribe-route-disclosure]').text()).toBe('Using local model')
+    expect(wrapper.find('[data-scribe-route-disclosure]').exists()).toBe(false)
     expect(wrapper.find('[data-scribe-consent-checkbox]').exists()).toBe(false)
     await wrapper.get('[data-scribe-new]').trigger('click')
 
@@ -304,8 +304,9 @@ describe('ScribeApp', () => {
     })))
   })
 
-  it('discloses OpenAI processing inline without adding a confirmation step', async () => {
+  it('starts hosted recording without a provider label or an extra confirmation step', async () => {
     const hosted = snapshot({
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
       config: {
         ...snapshot().config,
         transcriptionMode: 'custom',
@@ -324,10 +325,15 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').attributes('disabled')).toBeUndefined())
 
-    expect(wrapper.get('[data-scribe-route-disclosure]').text()).toBe('Using OpenAI')
+    expect(wrapper.find('[data-scribe-route-disclosure]').exists()).toBe(false)
     expect(wrapper.find('[data-scribe-consent]').exists()).toBe(false)
     await wrapper.get('[data-scribe-new]').trigger('click')
     await vi.waitFor(() => expect(startMeeting).toHaveBeenCalledTimes(1))
+    expect(issueMeetingStartConsent).toHaveBeenCalledWith(expect.objectContaining({
+      transcriptionMode: 'custom',
+      destination: 'https://api.openai.com/v1/realtime',
+      model: 'gpt-live-transcribe',
+    }))
   })
 
   it('keeps a failed start on the ready screen with a local actionable message', async () => {
@@ -340,6 +346,57 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-error]').text())
       .toContain('Capture device unavailable'))
     expect(wrapper.get('[data-scribe-new]').exists()).toBe(true)
+  })
+
+  it('retries a failed initial load and resumes automatic list updates', async () => {
+    vi.mocked(loadMeetingSnapshot).mockRejectedValueOnce(new Error('Cannot load meetings'))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-scribe-load-error]').text()).toContain('Cannot load meetings')
+    expect(wrapper.text()).not.toContain('No unfiled meetings')
+    expect(wrapper.find('[aria-label="Refresh meetings"]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scribe-load-error]').exists()).toBe(false)
+    expect(wrapper.find('[data-scribe-error]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No unfiled meetings')
+    expect(listenToMeetingEvents).toHaveBeenCalledTimes(1)
+
+    const onEvent = vi.mocked(listenToMeetingEvents).mock.calls[0][0]
+    vi.mocked(loadMeetingSnapshot).mockResolvedValueOnce(snapshot({
+      revision: 2, meetings: [meeting()],
+    }))
+    onEvent({ revision: 2, refresh: true })
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Planning')
+
+    vi.mocked(loadMeetingSnapshot).mockRejectedValueOnce(new Error('Cannot update meetings'))
+    onEvent({ revision: 3, refresh: true })
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Planning')
+    expect(wrapper.get('[data-scribe-load-error]').text()).toContain('Cannot update meetings')
+
+    vi.mocked(loadMeetingSnapshot).mockResolvedValueOnce(snapshot({
+      revision: 3, meetings: [meeting({ title: 'Updated planning' })],
+    }))
+    await wrapper.get('[data-scribe-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Updated planning')
+    expect(wrapper.find('[data-scribe-retry]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps recording setup available when no model is installed', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ models: [] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-new]').element.disabled).toBe(true)
+    expect(wrapper.get('[data-scribe-new]').text()).toBe('Record')
+    expect(wrapper.get('[data-scribe-settings]').text()).toBe('Setup')
+    await wrapper.get('[data-scribe-settings]').trigger('click')
+    expect(wrapper.emitted('openSettings')).toEqual([['scribe']])
+    wrapper.unmount()
   })
 
   it('ignores an app through saved config while retaining existing exclusions', async () => {
@@ -665,7 +722,7 @@ describe('ScribeApp', () => {
     expect(wrapper.find('[data-scribe-summary-actions]').exists()).toBe(false)
   })
 
-  it('keeps per-run summary controls in one compact dialog', async () => {
+  it('loads the current saved prompt when opening the summary dialog and reselecting its format', async () => {
     const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
     vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
@@ -677,9 +734,18 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
 
+    const savedPrompt = 'Use the updated summary instructions.'
+    vi.mocked(updateMeetingsConfig).mockResolvedValueOnce(snapshot({
+      revision: 2,
+      meetings: [reviewed],
+      config: { ...snapshot().config, summaryPrompt: savedPrompt },
+    }))
+    await useMeetingsStore().saveConfig({ summaryPrompt: savedPrompt })
+
     await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
     const dialog = activeFollowUpDialog(wrapper, 'summary')
     expect(dialog).toBeTruthy()
+    expect(dialog.props('prompt')).toBe(savedPrompt)
     expect(dialog.props('formats').map(option => option.label)).toEqual([
       'Standard',
       'Brief',
@@ -688,6 +754,10 @@ describe('ScribeApp', () => {
     dialog.vm.$emit('update:format', 'brief')
     await flushPromises()
     expect(activeFollowUpDialog(wrapper, 'summary').props('prompt')).toBe(summaryPromptFor('brief'))
+    dialog.vm.$emit('update:format', 'standard')
+    await flushPromises()
+    expect(dialog.props('prompt')).toBe(savedPrompt)
+    dialog.vm.$emit('update:format', 'brief')
     dialog.vm.$emit('update:prompt', 'Fine-tuned summary prompt')
     await flushPromises()
     activeFollowUpDialog(wrapper, 'summary').vm.$emit('submit')
@@ -722,6 +792,14 @@ describe('ScribeApp', () => {
     expect(dialog).toBeTruthy()
     expect(dialog.props('agents').map(option => option.label)).toContain('Codex')
     dialog.vm.$emit('update:prompt', 'Challenge the release plan.')
+    dialog.vm.$emit('close')
+    await flushPromises()
+    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
+    activeFollowUpDialog(wrapper, 'summary').vm.$emit('close')
+    await flushPromises()
+    await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
+    await wrapper.get('[data-scribe-ask-agent]').trigger('click')
+    expect(activeFollowUpDialog(wrapper, 'agent').props('prompt')).toBe('Challenge the release plan.')
     await flushPromises()
     activeFollowUpDialog(wrapper, 'agent').vm.$emit('submit')
 
@@ -1155,7 +1233,6 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await flushPromises()
     expect(wrapper.find('[data-scribe-unfiled]').exists()).toBe(false)
-    expect(wrapper.get('#scribe-recent-title').text()).toBe('Unfiled meetings')
     expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(1)
     await wrapper.get('[data-scribe-load-older]').trigger('click')
     await flushPromises()

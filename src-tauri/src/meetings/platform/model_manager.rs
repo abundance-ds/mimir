@@ -3,6 +3,7 @@ use super::*;
 pub(super) struct ModelManager {
     paths: MeetingPlatformPaths,
     catalog: BTreeMap<String, MeetingModelCatalogEntry>,
+    catalog_order: Vec<String>,
     disk: Arc<dyn MeetingDiskSpaceProbe>,
     downloader: Arc<dyn ModelArtifactDownloader>,
     changes: Arc<dyn MeetingPlatformChangeSink>,
@@ -23,12 +24,14 @@ impl ModelManager {
         ensure_private_directory(&paths.models_root)
             .map_err(|error| format!("Could not secure managed model directory: {error}"))?;
         let mut indexed = BTreeMap::new();
+        let mut catalog_order = Vec::new();
         for entry in catalog {
             entry
                 .manifest
                 .validate()
                 .map_err(|error| format!("Invalid managed model manifest: {error}"))?;
             let id = entry.manifest.model_id.as_str().to_string();
+            catalog_order.push(id.clone());
             if indexed.insert(id.clone(), entry).is_some() {
                 return Err(format!("Duplicate managed model manifest '{id}'"));
             }
@@ -36,6 +39,7 @@ impl ModelManager {
         let manager = Arc::new(Self {
             paths,
             catalog: indexed,
+            catalog_order,
             disk,
             downloader,
             changes,
@@ -96,9 +100,10 @@ impl ModelManager {
         let mut state = self.load_state()?;
         let mut changed = false;
         let models = self
-            .catalog
+            .catalog_order
             .iter()
-            .map(|(id, entry)| {
+            .map(|id| {
+                let entry = &self.catalog[id];
                 let installation = state.models.entry(id.clone()).or_default();
                 let before = installation.clone();
                 installation.invalidate_if_manifest_changed(&entry.manifest);

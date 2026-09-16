@@ -22,7 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, MutexGuard, Weak,
+        Arc, Mutex, MutexGuard, OnceLock, Weak,
     },
 };
 use thiserror::Error;
@@ -292,21 +292,14 @@ fn require_summary_preset(value: &str) -> Result<(), MeetingRuntimeError> {
 }
 
 pub(crate) fn summary_template_instructions(value: &str) -> Option<&'static str> {
-    match value {
-        "standard" => Some(
-            "Use the BLUF approach. Return a concise Markdown document. Use these sections in order: # BLUF, # Key points, and # Follow-up. Under # BLUF, write one short paragraph of one or two sentences that states the outcome or direction. Under # Key points, write short flat bullets for only the essential decisions, facts, constraints, or risks. Under # Follow-up, combine actions, open questions, and blockers in one flat list; start each bullet with a useful bold cue such as **Action — Paul:**, **Open:**, or **Blocker:**. Omit # Follow-up when nothing useful belongs there. Prefer more short bullets over fewer long bullets. Keep each bullet to one sentence and at most 25 words. Do not repeat information across sections. Document height is not a target; achieve concision by selecting useful information, not by flattening structure. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.",
-        ),
-        "brief" => Some(
-            "Use the BLUF approach. Return a short Markdown document with # BLUF and # Key points, plus # Follow-up only when needed. BLUF is one sentence. Key points contain 2 to 4 short flat bullets. Follow-up combines only critical actions, open questions, or blockers; label each with **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 20 words. Prefer more short bullets over fewer long bullets. Do not repeat information. Read the user notes with judgment.",
-        ),
-        "decisions-actions" => Some(
-            "Use the BLUF approach. Return a concise Markdown document with # BLUF and # Decisions and follow-up. BLUF is one short paragraph. Combine decisions, actions, open questions, and blockers in one flat list; label each bullet with **Decision:**, **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 25 words. Prefer more short bullets over fewer long bullets. Preserve owners and dates only when stated. Do not repeat information. Read the user notes with judgment.",
-        ),
-        "detailed" => Some(
-            "Write a detailed chronological summary that preserves important reasoning, decisions, action items, risks, disagreements, and open questions without inventing facts.",
-        ),
-        _ => None,
-    }
+    static PROMPTS: OnceLock<HashMap<String, String>> = OnceLock::new();
+    PROMPTS
+        .get_or_init(|| {
+            serde_json::from_str(include_str!("../../resources/meeting-summary-prompts.json"))
+                .expect("bundled meeting summary prompts must be valid")
+        })
+        .get(value)
+        .map(String::as_str)
 }
 
 pub(crate) fn default_summary_prompt() -> String {

@@ -110,6 +110,14 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
             config.retention_days = value;
         }
         validate_meeting_config(&config)?;
+        if patch.local_model.is_some() && config.local_model != previous_config.local_model {
+            let models = self.inner.models.projection()?;
+            if !models.iter().any(|model| {
+                model.id == config.local_model && model.status == "installed"
+            }) {
+                return Err("Download the local model before selecting it".into());
+            }
+        }
         let next_endpoint = stored_custom_stt_endpoint(&config)?;
         let detection_changed = previous_config.detection_enabled != config.detection_enabled;
         if detection_changed {

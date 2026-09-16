@@ -64,6 +64,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   const activeMeetingId = ref(null)
   const loaded = ref(false)
   const loading = ref(false)
+  const loadError = ref('')
   const error = ref('')
   const pending = ref({})
   let unlisten = null
@@ -121,6 +122,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
         if (!unlisten) unlisten = await listenToMeetingEvents(onEvent)
         await refresh()
       } catch (cause) {
+        loadError.value = message(cause)
         error.value = message(cause)
         throw cause
       } finally {
@@ -138,6 +140,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     loading.value = true
     try {
       applySnapshot(await loadMeetingSnapshot())
+      loadError.value = ''
       error.value = ''
       loaded.value = true
       // History detail is secondary to the recorder. Do not hold the usable
@@ -145,13 +148,14 @@ export const useMeetingsStore = defineStore('meetings', () => {
       // independently once the authoritative recorder state is visible.
       void refreshVisibleTranscripts()
     } catch (cause) {
+      loadError.value = message(cause)
       error.value = message(cause)
       throw cause
     } finally {
       loading.value = false
       if (refreshQueued) {
         refreshQueued = false
-        void refresh()
+        void refresh().catch(() => {})
       }
     }
   }
@@ -649,6 +653,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!event || event.revision <= revision.value) return
     if (event.snapshot) {
       applySnapshot(event.snapshot)
+      loadError.value = ''
       loaded.value = true
       return
     }
@@ -661,7 +666,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     queueMicrotask(() => {
       if (!refreshQueued) return
       refreshQueued = false
-      void refresh()
+      void refresh().catch(() => {})
     })
   }
 
@@ -833,6 +838,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     activeMeetingId,
     loaded,
     loading,
+    loadError,
     error,
     pending,
     selectedMeeting,

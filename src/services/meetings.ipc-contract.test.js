@@ -9,6 +9,7 @@ import {
   startMeeting,
 } from './meetings.js'
 import { loadIpcFixture } from '../test/ipcFixtures.js'
+import { summaryPromptFor } from '../mimir/apps/scribe/summaryRecipes.js'
 
 const expectedLiveMeeting = {
   id: 'meeting-live-01',
@@ -128,7 +129,7 @@ const expectedSnapshot = {
     localModel: 'whisper-small',
     summaryEnabled: true,
     summaryTemplate: 'standard',
-    summaryPrompt: 'Use the BLUF approach. Return a concise Markdown document. Use these sections in order: # BLUF, # Key points, and # Follow-up. Under # BLUF, write one short paragraph of one or two sentences that states the outcome or direction. Under # Key points, write short flat bullets for only the essential decisions, facts, constraints, or risks. Under # Follow-up, combine actions, open questions, and blockers in one flat list; start each bullet with a useful bold cue such as **Action — Paul:**, **Open:**, or **Blocker:**. Omit # Follow-up when nothing useful belongs there. Prefer more short bullets over fewer long bullets. Keep each bullet to one sentence and at most 25 words. Do not repeat information across sections. Document height is not a target; achieve concision by selecting useful information, not by flattening structure. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.',
+    summaryPrompt: summaryPromptFor('standard'),
     summaryPreset: 'meeting-follow-up',
     kgPrompt: 'ask',
     kgPreset: 'meeting-kg-draft',

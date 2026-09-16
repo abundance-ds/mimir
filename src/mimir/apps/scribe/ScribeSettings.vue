@@ -257,21 +257,22 @@
           </button>
         </div>
 
-        <div v-if="config.transcriptionMode === 'local'" class="mt-3">
+        <div v-if="config.transcriptionMode === 'local'" class="mt-3 divide-y divide-rule-light border-y border-rule-light">
           <div
             v-for="model in models"
             :key="model.id"
-            class="mt-2 flex min-h-10 items-center border-y border-rule-light py-2"
+            :data-scribe-model="model.id"
+            class="flex min-h-12 items-center gap-2 py-2"
           >
             <span class="min-w-0 flex-1">
-              <strong class="block truncate text-[10px] font-medium">{{ model.title }}</strong>
-              <small class="block font-mono text-[9px] text-ink-3">
+              <strong class="block text-[10px] font-medium">{{ model.title }}</strong>
+              <small class="block text-[9px] text-ink-3" role="status">
                 {{ modelStatus(model) }}
               </small>
               <span
                 v-if="model.status === 'downloading'"
                 role="progressbar"
-                :aria-label="`Installing ${model.title}`"
+                :aria-label="`Downloading ${model.title}`"
                 :aria-valuenow="modelProgress(model)"
                 aria-valuemin="0"
                 aria-valuemax="100"
@@ -283,21 +284,40 @@
             <button
               v-if="model.status !== 'installed'"
               type="button"
-              class="scribe-settings-button"
-              :disabled="Boolean(pending[`model:${model.id}`])"
+              :data-scribe-download-model="model.id"
+              class="scribe-settings-button shrink-0"
+              :aria-label="`Download ${model.title}`"
+              :disabled="modelBusy(model)"
               @click="$emit('installModel', model.id)"
             >
-              {{ pending[`model:${model.id}`] ? 'Installing…' : 'Install' }}
+              {{ modelBusy(model) ? model.status === 'verifying' ? 'Checking…' : 'Downloading…' : model.status === 'error' ? 'Retry' : 'Download' }}
             </button>
-            <button
-              v-else
-              type="button"
-              class="scribe-settings-button text-rem"
-              :disabled="Boolean(pending[`model:${model.id}`])"
-              @click="$emit('deleteModel', model.id)"
-            >
-              {{ pending[`model:${model.id}`] ? 'Removing…' : 'Remove' }}
-            </button>
+            <template v-else>
+              <span
+                v-if="config.localModel === model.id"
+                :data-scribe-selected-model="model.id"
+                class="px-2 text-[10px] text-ink-3"
+              >Selected</span>
+              <button
+                v-else
+                type="button"
+                :data-scribe-use-model="model.id"
+                class="scribe-settings-button shrink-0"
+                :aria-label="`Use ${model.title}`"
+                :disabled="configPending || modelBusy(model)"
+                @click="save({ localModel: model.id })"
+              >Use</button>
+              <button
+                type="button"
+                :data-scribe-remove-model="model.id"
+                class="scribe-settings-button shrink-0 text-rem"
+                :aria-label="`Remove ${model.title}`"
+                :disabled="configPending || modelBusy(model)"
+                @click="$emit('deleteModel', model.id)"
+              >
+                {{ pending[`model:${model.id}`] ? 'Removing…' : 'Remove' }}
+              </button>
+            </template>
           </div>
         </div>
 
@@ -674,12 +694,18 @@ function onModeKeydown(event) {
     ?.focus()
 }
 
+function modelBusy(model) {
+  return Boolean(props.pending[`model:${model.id}`])
+    || ['downloading', 'verifying'].includes(model.status)
+}
+
 function modelStatus(model) {
   if (model.status === 'downloading') {
     return `Downloading ${modelProgress(model)}%`
   }
+  if (model.status === 'verifying') return 'Checking download…'
   if (model.status === 'installed') {
-    return `${formatBytes(model.bytes)} · Installed`
+    return `${formatBytes(model.bytes)} · Downloaded`
   }
   if (model.error) return model.error
   return `${formatBytes(model.bytes)} download`

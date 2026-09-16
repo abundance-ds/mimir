@@ -42,11 +42,11 @@ Feature: Detect meetings without recording before the user has authority
     And the dismissal does not count as recording consent
 
   @MTG-006 @automated @desktop @legal @security
-  Scenario: Hosted processing is disclosed without a confirmation maze
-    Given the OpenAI transcription route is selected
-    When Scribe presents the ready-to-record state
-    Then Mimir identifies that microphone and system audio are sent to OpenAI
-    And the same deliberate Record action starts capture without another screen
+  Scenario: Record uses the hosted route selected in Settings
+    Given the OpenAI transcription route is selected in Scribe settings
+    When the user chooses Record in the overview
+    Then capture uses the selected OpenAI route without another screen
+    And the overview has no model or provider status label
 
   @MTG-007 @automated @desktop @legal
   Scenario: Detection never grants automatic recording authority

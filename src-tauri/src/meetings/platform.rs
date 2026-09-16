@@ -309,41 +309,53 @@ pub struct MeetingModelCatalogEntry {
     pub manifest: ModelManifest,
 }
 
-/// Mimir-owned, immutable manifest for the default local Whisper model.
-///
-/// The Hugging Face revision, byte length, and SHA-256 are pinned together;
-/// model installation never resolves a mutable `main` branch. Updating this
-/// catalog is a supply-chain change that must update all three values.
+/// Downloadable whisper.cpp artifacts. Existing pins remain stable so an app
+/// update does not invalidate a model the user has already downloaded.
 pub fn builtin_model_catalog() -> Result<Vec<MeetingModelCatalogEntry>, String> {
-    const REVISION: &str = "c521a4b02f422512d734391fdf08bb08c0862f68";
-    const ARTIFACT_BYTES: u64 = 487_601_967;
-    const SHA256: &str = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
-    let model_id = ConfigIdentifier::new("whisper-small", "managed model id")
-        .map_err(|error| error.to_string())?;
-    let version = ConfigIdentifier::new(format!("hf-{REVISION}"), "managed model version")
-        .map_err(|error| error.to_string())?;
-    let sha256 = SHA256
-        .parse()
-        .map_err(|error: ModelIntegrityError| error.to_string())?;
-    let download_url = ModelDownloadUrl::new(&format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/{REVISION}/ggml-small.bin"
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CatalogModel {
+        id: String,
+        title: String,
+        revision: String,
+        file: String,
+        bytes: u64,
+        sha256: String,
+    }
+    let models: Vec<CatalogModel> = serde_json::from_str(include_str!(
+        "../../resources/meeting-models.json"
     ))
-    .map_err(|error| error.to_string())?;
-    let manifest = ModelManifest {
-        schema_version: MODEL_MANIFEST_SCHEMA_VERSION,
-        model_id,
-        version,
-        platform: RuntimePlatform::MACOS_AARCH64,
-        artifact_bytes: ARTIFACT_BYTES,
-        sha256,
-        download_url,
-        disk_reserve_bytes: MIN_MODEL_DISK_RESERVE_BYTES,
-    };
-    manifest.validate().map_err(|error| error.to_string())?;
-    Ok(vec![MeetingModelCatalogEntry {
-        title: "Whisper Small · multilingual".into(),
-        manifest,
-    }])
+    .map_err(|error| format!("Invalid meeting model catalog: {error}"))?;
+    models
+        .into_iter()
+        .map(|model| {
+            let manifest = ModelManifest {
+                schema_version: MODEL_MANIFEST_SCHEMA_VERSION,
+                model_id: ConfigIdentifier::new(model.id, "managed model id")
+                    .map_err(|error| error.to_string())?,
+                version: ConfigIdentifier::new(
+                    format!("hf-{}", model.revision),
+                    "managed model version",
+                )
+                .map_err(|error| error.to_string())?,
+                platform: RuntimePlatform::MACOS_AARCH64,
+                artifact_bytes: model.bytes,
+                sha256: model.sha256.parse()
+                    .map_err(|error: ModelIntegrityError| error.to_string())?,
+                download_url: ModelDownloadUrl::new(&format!(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/{}/{}",
+                    model.revision, model.file,
+                ))
+                .map_err(|error| error.to_string())?,
+                disk_reserve_bytes: MIN_MODEL_DISK_RESERVE_BYTES,
+            };
+            manifest.validate().map_err(|error| error.to_string())?;
+            Ok(MeetingModelCatalogEntry {
+                title: model.title,
+                manifest,
+            })
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -443,6 +455,13 @@ const LEGACY_LOOSE_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Write an 
 const LEGACY_FLAT_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Return one flat Markdown list of 5 to 8 bullets, with no headings, sections, paragraphs, or nested bullets. Put the bottom line first. Keep one useful idea per bullet and use active voice. Include owners and dates only when known. Omit greetings, repetition, obvious background, and discussion that produced no useful result. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.";
 const LEGACY_LABELED_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Return one flat Markdown list of 5 to 8 bullets. Start the first bullet with **BLUF:**. Start each later bullet with one short bold cue chosen for its meaning, such as **Decision:**, **Action — Paul:**, **Open:**, **Risk:**, **Blocker:**, or **Context:**. Use only useful cues; do not force categories. Each bullet must contain one sentence and no more than 25 words after its cue. Do not bundle points with semicolons. Prefer concrete nouns and active verbs. Include owners and dates only when known. Use no headings, sections, paragraphs, or nested bullets. Omit greetings, repetition, obvious background, and low-value discussion. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.";
 
+const LEGACY_SECTIONED_SUMMARY_PROMPTS: &[&str] = &[
+    "Use the BLUF approach. Return a concise Markdown document. Use these sections in order: # BLUF, # Key points, and # Follow-up. Under # BLUF, write one short paragraph of one or two sentences that states the outcome or direction. Under # Key points, write short flat bullets for only the essential decisions, facts, constraints, or risks. Under # Follow-up, combine actions, open questions, and blockers in one flat list; start each bullet with a useful bold cue such as **Action — Paul:**, **Open:**, or **Blocker:**. Omit # Follow-up when nothing useful belongs there. Prefer more short bullets over fewer long bullets. Keep each bullet to one sentence and at most 25 words. Do not repeat information across sections. Document height is not a target; achieve concision by selecting useful information, not by flattening structure. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.",
+    "Use the BLUF approach. Return a short Markdown document with # BLUF and # Key points, plus # Follow-up only when needed. BLUF is one sentence. Key points contain 2 to 4 short flat bullets. Follow-up combines only critical actions, open questions, or blockers; label each with **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 20 words. Prefer more short bullets over fewer long bullets. Do not repeat information. Read the user notes with judgment.",
+    "Use the BLUF approach. Return a concise Markdown document with # BLUF and # Decisions and follow-up. BLUF is one short paragraph. Combine decisions, actions, open questions, and blockers in one flat list; label each bullet with **Decision:**, **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 25 words. Prefer more short bullets over fewer long bullets. Preserve owners and dates only when stated. Do not repeat information. Read the user notes with judgment.",
+    "Write a detailed chronological summary that preserves important reasoning, decisions, action items, risks, disagreements, and open questions without inventing facts.",
+];
+
 fn replaced_builtin_summary_prompt(value: &str) -> bool {
     matches!(
         value,
@@ -450,7 +469,7 @@ fn replaced_builtin_summary_prompt(value: &str) -> bool {
             | LEGACY_LOOSE_BLUF_SUMMARY_PROMPT
             | LEGACY_FLAT_BLUF_SUMMARY_PROMPT
             | LEGACY_LABELED_BLUF_SUMMARY_PROMPT
-    )
+    ) || LEGACY_SECTIONED_SUMMARY_PROMPTS.contains(&value)
 }
 
 impl<'de> Deserialize<'de> for PersistedMeetingConfig {

@@ -35,7 +35,7 @@ Feature: Keep recording state operable and understandable throughout Mimir
   Scenario: Meeting controls survive the release visual matrix
     Given narrow, default, and wide workbench layouts
     When each theme, reduced motion, and 100, 125, and 150 percent zoom is exercised
-    Then recording identity, provider route, progress, errors, and controls remain legible and stable
+    Then recording identity, progress, errors, and controls remain legible and stable
     And no required action exists only in a tooltip or hover state
 
   @MTG-205 @automated @desktop @accessibility

@@ -468,92 +468,78 @@
     </template>
 
     <template v-else>
-      <main class="min-h-0 flex-1 overflow-y-auto">
-        <div class="mx-auto max-w-3xl px-5 py-4">
-          <p class="mb-3 text-[11px] text-ink-3">Scribe</p>
-          <section class="border-b border-rule pb-4">
-            <div data-scribe-home-toolbar class="flex items-center gap-2">
-              <button
-                type="button"
-                data-scribe-new
-                class="scribe-record-button"
-                :disabled="Boolean(meetings.pending.start) || !canStart"
-                @click="start(null)"
-              >
-                <IconMicrophone :size="15" />
-                {{ meetings.pending.start ? 'Starting…' : primaryActionLabel }}
-              </button>
-              <button
-                type="button"
-                data-scribe-prepare
-                class="scribe-quiet-button"
-                :disabled="Boolean(meetings.pending.prepare)"
-                @click="prepare"
-              >
-                <IconNotes :size="14" />
-                {{ meetings.pending.prepare ? 'Preparing…' : 'Prepare' }}
-              </button>
-              <button
-                v-if="!canStart"
-                type="button"
-                class="text-[10px] text-ink-3 underline underline-offset-2 hover:text-ink"
-                @click="openSettings"
-              >
-                Setup
-              </button>
-              <label class="relative min-w-0 flex-1">
-                <span class="sr-only">Search meetings</span>
-                <IconSearch
-                  :size="13"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
-                />
-                <input
-                  ref="meetingSearchInput"
-                  v-model="meetingSearchDraft"
-                  data-scribe-meeting-search
-                  type="search"
-                  class="scribe-search-input"
-                  placeholder="Search"
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  spellcheck="false"
-                />
-                <button
-                  v-if="meetingSearchDraft"
-                  type="button"
-                  data-scribe-clear-search
-                  class="absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center text-ink-3 hover:text-ink"
-                  aria-label="Clear search"
-                  @click="clearMeetingSearch"
-                >
-                  <IconX :size="12" />
-                </button>
-              </label>
-              <button
-                type="button"
-                data-scribe-settings
-                class="scribe-icon-button shrink-0"
-                aria-label="Scribe settings"
-                title="Scribe settings"
-                @click="openSettings"
-              >
-                <IconSettings :size="14" />
-              </button>
-            </div>
-            <p
-              data-scribe-route-disclosure
-              class="mt-2 text-[10px] leading-relaxed text-ink-3"
+      <header data-scribe-home-toolbar class="pane-bar" aria-label="Meeting controls">
+        <div class="mx-auto flex min-w-0 w-full max-w-3xl items-center gap-2">
+          <label class="relative min-w-0 flex-1">
+            <span class="sr-only">Search meetings</span>
+            <IconSearch
+              :size="13"
+              class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
+            />
+            <input
+              ref="meetingSearchInput"
+              v-model="meetingSearchDraft"
+              data-scribe-meeting-search
+              type="search"
+              class="scribe-search-input"
+              placeholder="Search"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <button
+              v-if="meetingSearchDraft"
+              type="button"
+              data-scribe-clear-search
+              class="absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center text-ink-3 hover:text-ink"
+              aria-label="Clear search"
+              @click="clearMeetingSearch"
             >
-              {{ routeDisclosure }}
-            </p>
-            <p v-if="readyLabel" class="mt-1 font-mono text-[9px] text-ink-3">{{ readyLabel }}</p>
-            <p v-if="homeNotice" data-scribe-error role="status" class="mt-3 text-[10px] leading-relaxed text-rem">
-              {{ homeNotice }}
-            </p>
-          </section>
+              <IconX :size="12" />
+            </button>
+          </label>
+          <button
+            type="button"
+            data-scribe-prepare
+            class="scribe-quiet-button shrink-0"
+            :disabled="Boolean(meetings.pending.prepare)"
+            @click="prepare"
+          >
+            <IconNotes :size="14" />
+            {{ meetings.pending.prepare ? 'Preparing…' : 'Prepare' }}
+          </button>
+          <button
+            type="button"
+            data-scribe-new
+            class="scribe-record-button shrink-0"
+            :disabled="Boolean(meetings.pending.start) || !canStart"
+            :title="!canStart ? 'Set up recording in Scribe settings' : undefined"
+            @click="start(null)"
+          >
+            <IconMicrophone :size="15" />
+            {{ meetings.pending.start ? 'Starting…' : 'Record' }}
+          </button>
+          <button
+            type="button"
+            data-scribe-settings
+            :class="meetings.loaded && !canStart ? 'scribe-quiet-button shrink-0' : 'scribe-icon-button shrink-0'"
+            aria-label="Scribe settings"
+            title="Scribe settings"
+            @click="openSettings"
+          >
+            <IconSettings :size="14" />
+            <span v-if="meetings.loaded && !canStart">Setup</span>
+          </button>
+        </div>
+      </header>
+      <main class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div class="mx-auto max-w-3xl">
+          <p v-if="homeNotice" data-scribe-error role="status" class="mb-3 text-[10px] leading-relaxed text-rem">
+            {{ homeNotice }}
+          </p>
 
-          <section v-if="meetings.candidates.length" data-scribe-candidates class="border-b border-rule py-4">
+          <section v-if="meetings.candidates.length" data-scribe-candidates class="mb-3 border-b border-rule pb-3">
             <div
               v-for="candidate in meetings.candidates"
               :key="candidate.id"
@@ -583,22 +569,17 @@
             </div>
           </section>
 
-          <section class="pt-4" aria-labelledby="scribe-recent-title">
-            <div class="flex items-center">
-              <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">
-                {{ meetingSearchActive ? 'Search unfiled meetings' : 'Unfiled meetings' }}
-              </h2>
+          <section aria-label="Meetings">
+            <div v-if="meetings.loadError" data-scribe-load-error role="status" class="my-2 flex items-center gap-2 text-[10px] text-rem">
+              <span class="min-w-0 flex-1">{{ safeFailureDetail(meetings.loadError) }}</span>
               <button
-                v-if="!meetingSearchActive"
                 type="button"
-                class="scribe-quiet-button"
+                data-scribe-retry
+                class="scribe-quiet-button shrink-0"
                 :disabled="meetings.loading"
-                aria-label="Refresh meetings"
-                title="Refresh meetings"
-                @click="refresh"
+                @click="retryMeetings"
               >
-                <IconRefresh :size="13" />
-                <span class="scribe-responsive-label">Refresh</span>
+                {{ meetings.loading ? 'Loading…' : 'Retry' }}
               </button>
             </div>
             <p v-if="meetingSearchActive && meetings.pending.search" class="py-5 text-[10px] text-ink-3" role="status">
@@ -607,7 +588,7 @@
             <p v-else-if="meetingSearchActive && !visibleSearchResults.length" class="py-5 text-[10px] text-ink-3">
               No matches
             </p>
-            <div v-else-if="meetingSearchActive" class="mt-2 divide-y divide-rule-light border-t border-rule-light">
+            <div v-else-if="meetingSearchActive" class="divide-y divide-rule-light border-t border-rule-light">
               <div
                 v-for="hit in visibleSearchResults"
                 :key="hit.meeting.id"
@@ -673,10 +654,10 @@
             <p v-else-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
               Loading…
             </p>
-            <p v-else-if="!visibleMeetings.length" class="py-5 text-[10px] text-ink-3">
+            <p v-else-if="!visibleMeetings.length && !meetings.loadError" class="py-5 text-[10px] text-ink-3">
               No unfiled meetings
             </p>
-            <div v-else class="mt-2">
+            <div v-else>
               <section
                 v-for="group in meetingGroups"
                 :key="group.id"
@@ -684,7 +665,7 @@
                 :data-group="group.id"
                 class="mt-4 first:mt-0"
               >
-                <h3 class="font-mono text-[9px] text-ink-3">{{ group.label }}</h3>
+                <h2 class="font-mono text-[9px] text-ink-3">{{ group.label }}</h2>
                 <div class="mt-1 divide-y divide-rule-light border-t border-rule-light">
                   <div
                     v-for="meeting in group.meetings"
@@ -1034,32 +1015,11 @@ const notesSaveState = computed(() => {
   return 'Saved'
 })
 const isHosted = computed(() => meetings.config.transcriptionMode === 'custom')
-const hostedProviderName = computed(() => {
-  try {
-    const host = new URL(meetings.config.customUrl).hostname
-    return host === 'api.openai.com' ? 'OpenAI' : host || 'hosted service'
-  } catch {
-    return 'hosted service'
-  }
-})
 const canStart = computed(() => {
   if (isHosted.value) return Boolean(meetings.config.apiKeyConfigured)
   return meetings.models.some(model => (
     model.id === meetings.config.localModel && model.status === 'installed'
   ))
-})
-const primaryActionLabel = computed(() => (
-  canStart.value ? 'Record' : isHosted.value ? 'API key required' : 'Local model required'
-))
-const readyLabel = computed(() => (
-  isHosted.value
-    ? meetings.config.apiKeyConfigured
-      ? ''
-      : `${hostedProviderName.value} API key required`
-    : canStart.value ? '' : 'Local model required'
-))
-const routeDisclosure = computed(() => {
-  return isHosted.value ? `Using ${hostedProviderName.value}` : 'Using local model'
 })
 const captureStatus = computed(() => {
   const channels = meetings.activeMeeting?.channels || []
@@ -1098,7 +1058,8 @@ const recordingNotice = computed(() => {
   return safeFailureDetail(notice)
 })
 const homeNotice = computed(() => safeFailureDetail(actionError.value || (
-  meetings.error === dismissedNativeNotice.value ? '' : meetings.error
+  meetings.error === dismissedNativeNotice.value || meetings.error === meetings.loadError
+    ? '' : meetings.error
 )))
 const emptyLiveTranscript = computed(() => {
   const state = meetings.activeMeeting?.transcription
@@ -1163,8 +1124,8 @@ onMounted(async () => {
   }, 1000)
   try {
     await meetings.initialize()
-  } catch (error) {
-    actionError.value = message(error)
+  } catch {
+    // The store exposes the load failure and keeps initialization retryable.
   }
 })
 
@@ -1270,6 +1231,7 @@ async function openMeeting(id, tab = '') {
   summaryDialogOpen.value = false
   agentDialogOpen.value = false
   resetSummaryRunDraft()
+  customTaskPrompt.value = 'Follow up on this meeting.'
   nextTick(focusEntry)
 }
 
@@ -1575,11 +1537,12 @@ async function requestMeetingRecovery(meeting) {
   }
 }
 
-async function refresh() {
+async function retryMeetings() {
   try {
-    await meetings.refresh()
-  } catch (error) {
-    actionError.value = message(error)
+    if (meetings.loaded) await meetings.refresh()
+    else await meetings.initialize()
+  } catch {
+    // Keep the load error visible until a later attempt succeeds.
   }
 }
 
@@ -1700,19 +1663,19 @@ function resetSummaryRunDraft() {
   ))
     ? meetings.config.summaryTemplate
     : 'standard'
-  summaryTask.value = template
-  summaryPromptDraft.value = meetings.config.summaryPrompt || summaryPromptFor(template)
+  selectSummaryTask(template)
   summaryAgent.value = meetings.config.summaryPreset || ''
-  customTaskPrompt.value = 'Follow up on this meeting.'
 }
 
 function selectSummaryTask(task) {
   summaryTask.value = task
-  summaryPromptDraft.value = summaryPromptFor(task)
+  summaryPromptDraft.value = (task === meetings.config.summaryTemplate && meetings.config.summaryPrompt)
+    || summaryPromptFor(task)
 }
 
 function openSummaryDialog() {
   if (!canRunSummary.value || summaryRunPending.value) return
+  resetSummaryRunDraft()
   summaryDialogOpen.value = true
 }
 
@@ -2339,7 +2302,7 @@ function safeFailureDetail(value) {
 }
 
 .scribe-record-button {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0 10px;
   font-size: 10px;
 }
@@ -2464,11 +2427,11 @@ button:disabled {
 }
 
 .scribe-search-input {
-  height: 32px;
+  height: 28px;
   width: 100%;
   border: 1px solid var(--color-rule);
   background: var(--color-surface);
-  padding: 0 30px 0 26px;
+  padding: 0 8px 0 26px;
   color: var(--color-ink);
   font-size: 10px;
   outline: none;
@@ -2478,6 +2441,10 @@ button:disabled {
   border-color: var(--color-accent);
   outline: 1px solid var(--color-accent);
   outline-offset: 1px;
+}
+
+.scribe-search-input:not(:placeholder-shown) {
+  padding-right: 30px;
 }
 
 @media (max-width: 620px) {

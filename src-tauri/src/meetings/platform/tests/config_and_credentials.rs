@@ -186,6 +186,46 @@ fn legacy_balanced_summary_default_migrates_to_the_selected_recipe() {
 }
 
 #[test]
+fn sectioned_summary_defaults_migrate_but_custom_context_survives() {
+    for (template, prompt) in ["standard", "brief", "decisions-actions", "detailed"]
+        .into_iter()
+        .zip(LEGACY_SECTIONED_SUMMARY_PROMPTS)
+    {
+        let stored = StoredMeetingConfig {
+            summary_template: template.into(),
+            summary_prompt: (*prompt).into(),
+            ..StoredMeetingConfig::from(MeetingConfig::default())
+        };
+        let encoded = serde_json::to_string(&PersistedMeetingConfig {
+            schema_version: CONFIG_SCHEMA_VERSION,
+            config: stored,
+        })
+        .unwrap();
+        let decoded: PersistedMeetingConfig = serde_json::from_str(&encoded).unwrap();
+        let migrated = MeetingConfig::from(decoded.config);
+        assert_eq!(migrated.summary_template, template);
+        assert_eq!(
+            migrated.summary_prompt,
+            super::super::runtime::summary_template_instructions(template).unwrap()
+        );
+
+        let custom = format!("{prompt}\nThis was an exploratory discussion. Keep the views separate.");
+        let stored = StoredMeetingConfig {
+            summary_template: template.into(),
+            summary_prompt: custom.clone(),
+            ..StoredMeetingConfig::from(MeetingConfig::default())
+        };
+        let encoded = serde_json::to_string(&PersistedMeetingConfig {
+            schema_version: CONFIG_SCHEMA_VERSION,
+            config: stored,
+        })
+        .unwrap();
+        let decoded: PersistedMeetingConfig = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(MeetingConfig::from(decoded.config).summary_prompt, custom);
+    }
+}
+
+#[test]
 fn config_is_atomic_quarantined_and_custom_urls_are_strict() {
     let fixture = fixture();
     fixture
@@ -335,8 +375,19 @@ fn durable_detection_setting_is_applied_at_startup_and_after_updates() {
 #[test]
 fn builtin_model_manifest_pins_revision_size_and_sha256() {
     let catalog = builtin_model_catalog().unwrap();
-    assert_eq!(catalog.len(), 1);
-    let manifest = &catalog[0].manifest;
+    assert_eq!(catalog.len(), 6);
+    let mut ids = std::collections::HashSet::new();
+    for model in &catalog {
+        assert!(ids.insert(model.manifest.model_id.as_str()));
+        model.manifest.validate().unwrap();
+        assert!(!model.manifest.download_url.as_str().contains("/main/"));
+        assert!(model.manifest.download_url.as_str().ends_with(".bin"));
+    }
+    assert!(ids.contains("whisper-large-v3-turbo-q5_0"));
+    assert!(ids.contains("whisper-large-v3-q5_0"));
+    let manifest = &catalog.iter()
+        .find(|model| model.manifest.model_id.as_str() == "whisper-small")
+        .unwrap().manifest;
     assert_eq!(manifest.model_id.as_str(), "whisper-small");
     assert_eq!(manifest.artifact_bytes, 487_601_967);
     assert_eq!(
