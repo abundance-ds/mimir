@@ -236,3 +236,263 @@ fn repair_reconciliation_is_one_revision_beyond_one_hundred_thousand_segments() 
     assert!(overview.is_final);
 }
 
+fn failed_repair_with_replacement() -> MeetingStore {
+    let store = store();
+    start_recording(&store);
+    let mut original = segment(
+        "original",
+        "Keep this transcript until replacement succeeds",
+    );
+    original.is_final = true;
+    store
+        .apply_transcript_batch(&batch(
+            "original-transcript",
+            0,
+            vec![TranscriptChange::UpsertSegment { segment: original }],
+        ))
+        .unwrap();
+    interrupt(&store);
+    store
+        .begin_transcript_repair("meeting-1", "abandoned", "abandoned-provider", T2)
+        .unwrap();
+    store
+        .stage_transcript_repair_batch(
+            "abandoned",
+            "abandoned-provider",
+            &batch(
+                "abandoned-partial",
+                1,
+                vec![TranscriptChange::UpsertSegment {
+                    segment: segment("partial", "Failed attempt"),
+                }],
+            ),
+        )
+        .unwrap();
+    let meeting = store.get_meeting("meeting-1").unwrap();
+    store
+        .transition_meeting(
+            "meeting-1",
+            meeting.revision,
+            MeetingStatus::Failed,
+            T2,
+            Some(&MeetingFailure {
+                code: "transcription-failed".into(),
+                message: "provider unavailable".into(),
+                retryable: false,
+            }),
+        )
+        .unwrap();
+    store
+        .begin_transcript_retranscription("meeting-1", "replacement", "replacement-provider", T3)
+        .unwrap();
+    store
+}
+
+#[test]
+fn successful_retranscription_releases_abandoned_holds_without_losing_history() {
+    let store = failed_repair_with_replacement();
+    let mut exhausted = job("failed-transcription", "failed-transcription", 1);
+    exhausted.kind = FollowUpJobKind::Custom("transcription".into());
+    exhausted.payload = json!({"captureGeneration": "abandoned"});
+    store.enqueue_job(&exhausted, T2).unwrap();
+    let claimed = store.claim_next_job("worker", T2, T3).unwrap().unwrap();
+    let failed = store
+        .finish_job(
+            &claimed.definition.id,
+            claimed.lease_token.as_deref().unwrap(),
+            &JobFinish::Failed {
+                error: "provider unavailable".into(),
+                retryable: false,
+                retry_at: None,
+            },
+            T2,
+        )
+        .unwrap();
+    assert_eq!(failed.state, JobState::Failed);
+    assert!(store.has_retention_hold("meeting-1").unwrap());
+
+    let mut replacement = job("replacement-job", "replacement-job", 3);
+    replacement.kind = FollowUpJobKind::Custom("transcription".into());
+    replacement.payload = json!({"captureGeneration": "replacement"});
+    store.enqueue_job(&replacement, T3).unwrap();
+    let active = store.claim_next_job("worker", T3, T4).unwrap().unwrap();
+
+    let terminal = repair_terminal(1);
+    store
+        .commit_transcript_repair("replacement", "replacement-provider", &terminal)
+        .unwrap();
+    // The transcript commit does not release the still-running worker's hold.
+    assert!(store.has_retention_hold("meeting-1").unwrap());
+    assert!(store
+        .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T3)
+        .is_err());
+    store
+        .finish_job(
+            &active.definition.id,
+            active.lease_token.as_deref().unwrap(),
+            &JobFinish::Succeeded { result: json!({}) },
+            T3,
+        )
+        .unwrap();
+    assert!(!store.has_retention_hold("meeting-1").unwrap());
+    assert!(store
+        .transcript_snapshot("meeting-1", None)
+        .unwrap()
+        .segments
+        .is_empty());
+    assert_eq!(
+        store
+            .transcript_snapshot("meeting-1", Some(1))
+            .unwrap()
+            .segments[0]
+            .segment
+            .id,
+        "original"
+    );
+    assert!(
+        store
+            .commit_transcript_repair("replacement", "replacement-provider", &terminal)
+            .unwrap()
+            .duplicate
+    );
+    assert!(store
+        .stage_transcript_repair_batch(
+            "abandoned",
+            "abandoned-provider",
+            &batch(
+                "late",
+                2,
+                vec![TranscriptChange::UpsertSegment {
+                    segment: segment("late-segment", "Late output from abandoned repair"),
+                }]
+            )
+        )
+        .is_err());
+    store
+        .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T4)
+        .unwrap();
+}
+
+#[test]
+fn failed_retranscription_keeps_audio_holds_and_the_existing_transcript() {
+    let store = failed_repair_with_replacement();
+    store
+        .stage_transcript_repair_batch(
+            "replacement",
+            "replacement-provider",
+            &batch(
+                "incomplete-replacement",
+                1,
+                vec![TranscriptChange::UpsertSegment {
+                    segment: segment("new-partial", "Still incomplete"),
+                }],
+            ),
+        )
+        .unwrap();
+    assert!(store
+        .commit_transcript_repair("replacement", "replacement-provider", &repair_terminal(1))
+        .is_err());
+    assert!(store.has_retention_hold("meeting-1").unwrap());
+    assert_eq!(
+        store
+            .transcript_snapshot("meeting-1", None)
+            .unwrap()
+            .segments[0]
+            .segment
+            .id,
+        "original"
+    );
+    assert!(store
+        .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T4)
+        .is_err());
+}
+
+#[test]
+fn legacy_obsolete_holds_are_released_by_retention_and_explicit_audio_deletion() {
+    for automatic in [false, true] {
+        let store = failed_repair_with_replacement();
+        store
+            .commit_transcript_repair("replacement", "replacement-provider", &repair_terminal(1))
+            .unwrap();
+        // Older builds kept this row even after a later replacement committed.
+        store
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO transcript_repair_runs (
+               meeting_id,capture_generation,provider_run_id,state,
+               started_at,updated_at,terminal_revision
+             ) VALUES ('meeting-1','legacy','legacy-provider','collecting',?1,?1,NULL)",
+                [timestamp(T2).unwrap()],
+            )
+            .unwrap();
+        if automatic {
+            assert!(!store.has_retention_hold("meeting-1").unwrap());
+        }
+        store
+            .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T4)
+            .unwrap();
+        assert_eq!(
+            store.transcript_overview("meeting-1", 1).unwrap().revision,
+            2
+        );
+        assert_eq!(
+            store
+                .transcript_snapshot("meeting-1", Some(1))
+                .unwrap()
+                .segments
+                .len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn replacement_preserves_pending_running_and_newer_repair_holds() {
+    for scenario in ["pending", "running", "newer", "unknown-generation"] {
+        let store = failed_repair_with_replacement();
+        let protected = if scenario == "newer" {
+            store
+                .begin_transcript_retranscription("meeting-1", "newer", "newer-provider", T4)
+                .unwrap();
+            ("newer", "newer-provider")
+        } else {
+            let mut active = job("active-transcription", "active-transcription", 3);
+            active.kind = FollowUpJobKind::Custom("transcription".into());
+            active.payload = if scenario == "unknown-generation" {
+                json!({})
+            } else {
+                json!({"captureGeneration": "abandoned"})
+            };
+            store.enqueue_job(&active, T2).unwrap();
+            if scenario == "running" {
+                store.claim_next_job("worker", T2, T4).unwrap().unwrap();
+            }
+            ("abandoned", "abandoned-provider")
+        };
+        store
+            .commit_transcript_repair("replacement", "replacement-provider", &repair_terminal(1))
+            .unwrap();
+        assert!(store.has_retention_hold("meeting-1").unwrap(), "{scenario}");
+        // The protected worker can still persist its own staging after commit.
+        store
+            .stage_transcript_repair_batch(
+                protected.0,
+                protected.1,
+                &batch(
+                    "still-active",
+                    2,
+                    vec![TranscriptChange::UpsertSegment {
+                        segment: segment("active-segment", "Still running"),
+                    }],
+                ),
+            )
+            .unwrap();
+        assert!(
+            store
+                .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T4)
+                .is_err(),
+            "{scenario}"
+        );
+    }
+}

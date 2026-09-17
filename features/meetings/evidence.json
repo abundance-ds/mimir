@@ -381,6 +381,14 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests/stop_and_continue.rs",
+      "selector": "repeated_continue_records_while_earlier_runs_drain_out_of_order",
+      "scenarios": [
+        "MTG-026"
+      ]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/capture.rs",
       "selector": "requested_system_open_failure_retains_mic_and_persists_aligned_gap_silence",
       "scenarios": [
@@ -1168,6 +1176,14 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/runtime/tests/failure_races.rs",
       "selector": "mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_content",
+      "scenarios": [
+        "MTG-153"
+      ]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests/stop_and_continue.rs",
+      "selector": "delete_during_multiple_transcript_drains_is_immediate_and_never_reappears",
       "scenarios": [
         "MTG-153"
       ]

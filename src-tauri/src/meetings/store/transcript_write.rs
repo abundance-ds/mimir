@@ -5,12 +5,35 @@ impl MeetingStore {
         &self,
         batch: &TranscriptBatch,
     ) -> Result<TranscriptApplyResult, MeetingStoreError> {
-        validate_transcript_batch(batch).map_err(MeetingStoreError::Validation)?;
-        let observed_at = timestamp(&batch.observed_at)?;
-        let batch_hash = transcript_batch_fingerprint(batch, &observed_at)?;
+        self.apply_transcript_batch_inner(batch, false)
+    }
+
+    /// Provider runs append independent segment IDs. Read the shared revision
+    /// and append in one transaction so simultaneous tails cannot conflict.
+    pub(crate) fn append_provider_transcript_batch(
+        &self,
+        batch: &TranscriptBatch,
+    ) -> Result<TranscriptApplyResult, MeetingStoreError> {
+        self.apply_transcript_batch_inner(batch, true)
+    }
+
+    fn apply_transcript_batch_inner(
+        &self,
+        batch: &TranscriptBatch,
+        append: bool,
+    ) -> Result<TranscriptApplyResult, MeetingStoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let meeting = load_meeting_tx(&transaction, &batch.meeting_id)?;
+        let mut batch = batch.clone();
+        if append {
+            batch.base_revision = meeting.transcript_revision;
+            batch.marks_final = false;
+        }
+        let batch = &batch;
+        validate_transcript_batch(batch).map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(&batch.observed_at)?;
+        let batch_hash = transcript_batch_fingerprint(batch, &observed_at)?;
         if !meeting.status.accepts_transcript_changes() {
             return Err(MeetingStoreError::Validation(format!(
                 "meeting '{}' is {} and cannot accept transcript changes",
@@ -550,6 +573,7 @@ impl MeetingStore {
              WHERE meeting_id=?1 AND capture_generation=?2",
             params![terminal.meeting_id, capture_generation],
         )?;
+        release_obsolete_repair_holds_tx(&transaction, &terminal.meeting_id)?;
         transaction.commit()?;
         Ok(TranscriptApplyResult {
             revision,

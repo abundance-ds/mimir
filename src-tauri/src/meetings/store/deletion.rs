@@ -3,9 +3,12 @@ use super::*;
 impl MeetingStore {
     pub fn has_retention_hold(&self, meeting_id: &str) -> Result<bool, MeetingStoreError> {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
-        let connection = self.lock()?;
-        require_meeting(&connection, meeting_id)?;
-        let held = connection.query_row(
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_meeting_tx(&transaction, meeting_id)?;
+        // Repair holds left by older builds are reconciled before retention.
+        release_obsolete_repair_holds_tx(&transaction, meeting_id)?;
+        let held = transaction.query_row(
             "SELECT
                EXISTS(
                  SELECT 1 FROM follow_up_jobs
@@ -22,6 +25,7 @@ impl MeetingStore {
             [meeting_id],
             |row| row.get::<_, bool>(0),
         )?;
+        transaction.commit()?;
         Ok(held)
     }
 
@@ -37,6 +41,16 @@ impl MeetingStore {
         meeting_id: &str,
         mode: MeetingDeletionMode,
         observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        self.begin_deletion_with_capture_hold(meeting_id, mode, observed_at, false)
+    }
+
+    pub(crate) fn begin_deletion_with_capture_hold(
+        &self,
+        meeting_id: &str,
+        mode: MeetingDeletionMode,
+        observed_at: &str,
+        capture_pending: bool,
     ) -> Result<MeetingDeletion, MeetingStoreError> {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
         let observed_at = timestamp(observed_at)?;
@@ -61,13 +75,16 @@ impl MeetingStore {
             )
             .optional()?;
         let status = status.ok_or_else(|| not_found("meeting", meeting_id))?;
-        if matches!(status.as_str(), "recording" | "stopping" | "finalizing") {
+        if matches!(status.as_str(), "recording" | "stopping")
+            || (status == "finalizing" && mode == MeetingDeletionMode::Audio)
+        {
             return Err(MeetingStoreError::Validation(
                 "an active meeting cannot be deleted".into(),
             ));
         }
 
         if mode == MeetingDeletionMode::Audio {
+            release_obsolete_repair_holds_tx(&transaction, meeting_id)?;
             let staged_chunks: bool = transaction.query_row(
                 "SELECT EXISTS(
                    SELECT 1 FROM audio_chunks
@@ -114,7 +131,7 @@ impl MeetingStore {
             params![
                 meeting_id,
                 mode.storage_key(),
-                if running_jobs == 0 {
+                if running_jobs == 0 && status != "finalizing" && !capture_pending {
                     MeetingDeletionStage::FilesPending.storage_key()
                 } else {
                     MeetingDeletionStage::WaitingForJobs.storage_key()
@@ -122,6 +139,14 @@ impl MeetingStore {
                 observed_at
             ],
         )?;
+        if capture_pending && mode == MeetingDeletionMode::All {
+            // This hidden record holds the files until the last native reader
+            // exits. Restart recovery releases the same durable lifecycle hold.
+            transaction.execute(
+                "UPDATE meetings SET status='finalizing' WHERE id=?1",
+                [meeting_id],
+            )?;
+        }
         if mode == MeetingDeletionMode::All {
             transaction.execute(
                 "UPDATE follow_up_jobs SET
@@ -136,6 +161,30 @@ impl MeetingStore {
             .expect("inserted meeting deletion must exist");
         existing.running_jobs = running_jobs;
         let deletion = refresh_deletion_tx(&transaction, existing, &observed_at)?;
+        transaction.commit()?;
+        Ok(deletion)
+    }
+
+    /// The last native transcriber has released its files. Tombstoned records
+    /// are intentionally inaccessible through the ordinary meeting reader.
+    pub(crate) fn release_deleted_capture(
+        &self,
+        meeting_id: &str,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+        if deletion.mode != MeetingDeletionMode::All {
+            return Err(MeetingStoreError::Validation(
+                "capture release requires whole-meeting deletion".into(),
+            ));
+        }
+        transaction.execute("UPDATE meetings SET status='interrupted',updated_at=?2 WHERE id=?1 AND status='finalizing'",
+            params![meeting_id, observed_at])?;
+        let deletion = refresh_deletion_tx(&transaction, deletion, &observed_at)?;
         transaction.commit()?;
         Ok(deletion)
     }

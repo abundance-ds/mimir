@@ -372,8 +372,13 @@ fn execute_summary(inner: &MeetingJobWorkerInner, job: &FollowUpJob) -> Result<V
     require_terminal_job_transcript(inner, job)?;
     inner
         .runtime
-        .update_meeting(
+        .apply_generated_summary(
             &job.definition.meeting_id,
+            job.definition
+                .payload
+                .get("transcriptRevision")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "Summary job has no transcript revision".to_string())?,
             MeetingUpdatePatch {
                 generated_title: Some(output.title.clone()),
                 summary: Some(summary.clone()),

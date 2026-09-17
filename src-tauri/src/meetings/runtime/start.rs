@@ -25,6 +25,7 @@ impl MeetingRuntime {
                 events,
                 operation: Mutex::new(()),
                 active: Mutex::new(None),
+                drains: Mutex::new(HashMap::new()),
                 revision: AtomicU64::new(u64::from(recovered)),
                 diagnostic: Mutex::new(None),
             }),
@@ -132,7 +133,11 @@ impl MeetingRuntime {
             let meeting = self.inner.store.get_meeting(meeting_id)?;
             if !matches!(
                 meeting.status,
-                MeetingStatus::Detected | MeetingStatus::Completed
+                MeetingStatus::Detected
+                    | MeetingStatus::Completed
+                    | MeetingStatus::Finalizing
+                    | MeetingStatus::Interrupted
+                    | MeetingStatus::Failed
             ) {
                 return Err(MeetingRuntimeError::Validation(format!(
                     "meeting '{meeting_id}' is {} and cannot be recorded",
@@ -230,8 +235,14 @@ impl MeetingRuntime {
         let prepared = match request.continue_meeting_id.as_deref() {
             Some(meeting_id) => {
                 let meeting = self.inner.store.get_meeting(meeting_id)?;
-                if meeting.status == MeetingStatus::Completed {
-                    return self.continue_completed_unlocked(request, &projection, request_key);
+                if matches!(
+                    meeting.status,
+                    MeetingStatus::Completed
+                        | MeetingStatus::Finalizing
+                        | MeetingStatus::Interrupted
+                        | MeetingStatus::Failed
+                ) {
+                    return self.continue_stopped_unlocked(request, &projection, request_key);
                 }
                 if meeting.status != MeetingStatus::Detected {
                     return Err(MeetingRuntimeError::Validation(format!(
@@ -449,7 +460,7 @@ impl MeetingRuntime {
         self.publish_start_unlocked("capture-started", &recording, &projection, run_id)
     }
 
-    fn continue_completed_unlocked(
+    fn continue_stopped_unlocked(
         &self,
         request: StartMeetingRequest,
         projection: &MeetingPlatformProjection,
@@ -466,7 +477,14 @@ impl MeetingRuntime {
             ));
         }
         let previous = self.inner.store.get_meeting(meeting_id)?;
-        if previous.status != MeetingStatus::Completed {
+        let previous_transcript_final = self.transcript_is_final(&previous)?;
+        if !matches!(
+            previous.status,
+            MeetingStatus::Completed
+                | MeetingStatus::Finalizing
+                | MeetingStatus::Interrupted
+                | MeetingStatus::Failed
+        ) {
             return Err(MeetingRuntimeError::Validation(format!(
                 "meeting '{meeting_id}' is {} and cannot be continued",
                 previous.status
@@ -500,6 +518,22 @@ impl MeetingRuntime {
             MeetingRuntimeError::Validation("meeting metadata must be an object".into())
         })?;
         metadata_object.insert("continuationPreviousMetadata".into(), previous_metadata);
+        metadata_object.insert(
+            "continuationPreviousStatus".into(),
+            Value::String(previous.status.to_string()),
+        );
+        metadata_object.insert(
+            "continuationPreviousFailure".into(),
+            serde_json::to_value(&previous.failure).unwrap_or(Value::Null),
+        );
+        metadata_object.insert(
+            "continuationPreviousInterruptedAt".into(),
+            serde_json::to_value(&previous.interrupted_at).unwrap_or(Value::Null),
+        );
+        metadata_object.insert(
+            "continuationPreviousInterruptionReason".into(),
+            serde_json::to_value(&previous.interruption_reason).unwrap_or(Value::Null),
+        );
         metadata_object.insert("runId".into(), Value::String(run_id.clone()));
         metadata_object.insert(
             "captureRunCount".into(),
@@ -540,13 +574,20 @@ impl MeetingRuntime {
                 .map(Value::String)
                 .unwrap_or(Value::Null),
         );
-        let recording = self.inner.store.reopen_completed_meeting(
-            meeting_id,
-            previous.revision,
-            &run_id,
-            &metadata,
-            &observed_at,
-        )?;
+        let mut revision = previous.revision;
+        let recording = loop {
+            match self.inner.store.reopen_stopped_meeting(
+                meeting_id,
+                revision,
+                &run_id,
+                &metadata,
+                &observed_at,
+            ) {
+                Ok(recording) => break recording,
+                Err(MeetingStoreError::RevisionConflict { actual, .. }) => revision = actual,
+                Err(error) => return Err(error.into()),
+            }
+        };
         let channels = recording
             .channels
             .iter()
@@ -583,6 +624,19 @@ impl MeetingRuntime {
             return Err(port_error("meeting capture start", message));
         }
 
+        if matches!(
+            previous.status,
+            MeetingStatus::Interrupted | MeetingStatus::Failed
+        ) && !previous_transcript_final
+        {
+            self.inner
+                .drains
+                .lock()
+                .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?
+                .entry(meeting_id.into())
+                .or_default()
+                .error = Some("Earlier audio needs transcription repair".into());
+        }
         let transcription_request = TranscriptionStart {
             meeting_id: meeting_id.into(),
             run_id: run_id.clone(),

@@ -86,6 +86,8 @@ pub struct MeetingView {
     #[serde(default)]
     pub summary_truncated: bool,
     pub summary_state: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub summary_needs_update: bool,
     pub kg_state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_node_id: Option<String>,

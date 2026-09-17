@@ -99,6 +99,8 @@ const OPENAI_VAD_SETTLE_TIMEOUT: Duration = Duration::from_millis(1_500);
 const OPENAI_FINALIZE_TIMEOUT: Duration = Duration::from_secs(20);
 
 struct TranscriptionSession {
+    meeting_id: String,
+    end_sequence: Arc<AtomicU64>,
     finalize: Sender<FinalizeCommand>,
     worker: thread::JoinHandle<Result<WorkerCompletion, String>>,
     readiness: thread::JoinHandle<()>,
@@ -225,7 +227,7 @@ impl NativeMeetingTranscriber {
 impl MeetingTranscriptionPort for NativeMeetingTranscriber {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String> {
         let mut sessions = self.sessions()?;
-        if sessions.contains_key(&request.meeting_id) {
+        if sessions.contains_key(&request.run_id) {
             return Err(format!(
                 "meeting '{}' already owns a transcription worker",
                 request.meeting_id
@@ -288,6 +290,8 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let (finalize_tx, finalize_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let worker_request = request.clone();
+        let end_sequence = Arc::new(AtomicU64::new(u64::MAX));
+        let worker_end_sequence = Arc::clone(&end_sequence);
         let store = Arc::clone(&self.store);
         let data_dir = self.data_dir.clone();
         let credentials = Arc::clone(&self.credential_resolver);
@@ -322,6 +326,7 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     finalize_rx,
                     ready_tx,
                     worker_status,
+                    worker_end_sequence,
                 );
                 if let Err(message) = &result {
                     // This succeeds only while the caller is still waiting for
@@ -374,8 +379,10 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             })?;
 
         sessions.insert(
-            request.meeting_id.clone(),
+            request.run_id.clone(),
             TranscriptionSession {
+                meeting_id: request.meeting_id.clone(),
+                end_sequence,
                 finalize: finalize_tx,
                 worker,
                 readiness,
@@ -385,14 +392,21 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         Ok(())
     }
 
+    fn seal(&self, meeting_id: &str, run_id: &str, end_sequence: u64) -> Result<(), String> {
+        if let Some(session) = self.sessions()?.get(run_id) {
+            if session.meeting_id != meeting_id {
+                return Err("transcription run belongs to another meeting".into());
+            }
+            session.end_sequence.store(end_sequence, Ordering::Release);
+        }
+        Ok(())
+    }
+
     fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
-        let session = self
-            .sessions()?
-            .remove(&request.meeting_id)
-            .ok_or_else(|| {
-                "Transcription is not active. Stored audio remains available for delayed repair."
-                    .to_string()
-            })?;
+        let session = self.sessions()?.remove(&request.run_id).ok_or_else(|| {
+            "Transcription is not active. Stored audio remains available for delayed repair."
+                .to_string()
+        })?;
         let finalize_sent = session
             .finalize
             .send(FinalizeCommand {
@@ -448,7 +462,22 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let Ok(sessions) = self.sessions() else {
             return TranscriptionWorkerStatus::Delayed;
         };
-        let Some(session) = sessions.get(meeting_id) else {
+        let current_run = self.store.get_meeting(meeting_id).ok().and_then(|meeting| {
+            meeting
+                .metadata
+                .get("runId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+        let Some(session) = current_run
+            .as_ref()
+            .and_then(|run| sessions.get(run))
+            .or_else(|| {
+                sessions
+                    .values()
+                    .find(|session| session.meeting_id == meeting_id)
+            })
+        else {
             return TranscriptionWorkerStatus::Delayed;
         };
         let status = match session.state.lock() {
@@ -478,9 +507,11 @@ fn run_worker(
     finalize: Receiver<FinalizeCommand>,
     ready: SyncSender<Result<(), String>>,
     status: WorkerStatusReporter,
+    end_sequence: Arc<AtomicU64>,
 ) -> Result<WorkerCompletion, String> {
-    let audio =
+    let mut audio =
         PersistedAudioSource::authoritative(Arc::clone(&store), &data_dir, &request.meeting_id)?;
+    audio.end_sequence = end_sequence;
     let source = match &provider {
         ResolvedTranscriptionProvider::Local { .. } => "local",
         ResolvedTranscriptionProvider::Custom { .. } => "custom",

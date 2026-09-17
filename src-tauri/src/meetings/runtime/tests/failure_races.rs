@@ -450,3 +450,36 @@ fn native_capture_failure_sink_does_not_keep_runtime_alive() {
     assert!(weak_inner.upgrade().is_none());
     sink.capture_failed("ended-meeting", "ended-run", "late worker completion");
 }
+
+#[test]
+fn accepted_deletion_stays_hidden_when_file_cleanup_needs_retry() {
+    let fixture = make_fixture();
+    let id = fixture
+        .runtime
+        .start(start_request(&fixture.runtime, "delete-cleanup-failure"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    fixture.runtime.stop(&id).unwrap();
+    fixture.platform.state.lock().unwrap().fail_delete =
+        Some("filesystem temporarily unavailable".into());
+    let deleted = fixture.runtime.delete(&id, MeetingDeleteMode::All).unwrap();
+    assert!(deleted.meetings.is_empty());
+    let deletion = fixture.store.deletion(&id).unwrap().unwrap();
+    assert_eq!(
+        deletion.last_error.as_deref(),
+        Some("filesystem temporarily unavailable")
+    );
+    assert!(fixture.runtime.snapshot().unwrap().meetings.is_empty());
+    fixture.platform.state.lock().unwrap().fail_delete = None;
+    assert!(fixture
+        .runtime
+        .delete(&id, MeetingDeleteMode::All)
+        .unwrap()
+        .meetings
+        .is_empty());
+    assert_eq!(
+        fixture.platform.state.lock().unwrap().deleted,
+        [(id, MeetingDeleteMode::All)]
+    );
+}

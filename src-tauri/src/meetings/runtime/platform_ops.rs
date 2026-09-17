@@ -13,7 +13,36 @@ impl MeetingRuntime {
             .platform
             .update_content(meeting_id, &patch)
             .map_err(|message| port_error("meeting content update", message))?;
+        if patch.summary.is_some() {
+            self.inner.store.mark_summary_reviewed(meeting_id)?;
+        }
         self.publish_unlocked("meeting-updated", Some(meeting_id.into()), None)
+    }
+
+    pub(crate) fn apply_generated_summary(
+        &self,
+        meeting_id: &str,
+        transcript_revision: u64,
+        patch: MeetingUpdatePatch,
+    ) -> Result<(), MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let meeting = self.inner.store.get_meeting(meeting_id)?;
+        if meeting.status != MeetingStatus::Completed
+            || meeting.transcript_revision != transcript_revision
+            || !self.transcript_is_final(&meeting)?
+        {
+            return Err(MeetingRuntimeError::Validation(
+                "Recording changed while the summary was being created".into(),
+            ));
+        }
+        validate_update_patch(&patch)?;
+        self.inner
+            .platform
+            .update_content(meeting_id, &patch)
+            .map_err(|message| port_error("meeting summary update", message))?;
+        self.inner.store.mark_summary_reviewed(meeting_id)?;
+        self.publish_unlocked("meeting-updated", Some(meeting_id.into()), None)?;
+        Ok(())
     }
 
     pub(crate) fn filing_source(
@@ -148,7 +177,14 @@ impl MeetingRuntime {
                 .as_ref()
                 .is_some_and(|active| active.meeting_id == meeting_id)
         };
-        if is_active {
+        let draining = self
+            .inner
+            .drains
+            .lock()
+            .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?
+            .get(meeting_id)
+            .is_some_and(|drain| !drain.runs.is_empty());
+        if is_active || (draining && mode == MeetingDeleteMode::Audio) {
             return Err(MeetingRuntimeError::Validation(
                 "stop and finalize the active meeting before deleting it".into(),
             ));
@@ -156,14 +192,21 @@ impl MeetingRuntime {
         if self.inner.store.deletion(meeting_id)?.is_none() {
             self.inner.store.get_meeting(meeting_id)?;
         }
-        let deletion = self.inner.store.begin_deletion(
+        let mut deletion = self.inner.store.begin_deletion_with_capture_hold(
             meeting_id,
             match mode {
                 MeetingDeleteMode::Audio => StoreDeletionMode::Audio,
                 MeetingDeleteMode::All => StoreDeletionMode::All,
             },
             &self.inner.clock.now(),
+            draining,
         )?;
+        if mode == MeetingDeleteMode::All && !draining {
+            deletion = self
+                .inner
+                .store
+                .release_deleted_capture(meeting_id, &self.inner.clock.now())?;
+        }
         if deletion.stage == MeetingDeletionStage::WaitingForJobs {
             // The tombstone is the user-visible deletion boundary. It already
             // hides the meeting, rejects new work, and cancels pending jobs.
@@ -175,10 +218,18 @@ impl MeetingRuntime {
                 None,
             );
         }
-        self.inner
-            .platform
-            .delete_meeting(meeting_id, mode)
-            .map_err(|message| port_error("meeting deletion", message))?;
+        if let Err(message) = self.inner.platform.delete_meeting(meeting_id, mode) {
+            if mode == MeetingDeleteMode::Audio {
+                return Err(port_error("meeting deletion", message));
+            }
+            // The deletion is already durable. Cleanup failure must not undo
+            // the user's request or restore the meeting in the renderer.
+            self.inner.store.record_deletion_error(
+                meeting_id,
+                &bounded_error(&message),
+                &self.inner.clock.now(),
+            )?;
+        }
         self.publish_unlocked("meeting-deleted", Some(meeting_id.into()), None)
     }
 
@@ -286,9 +337,15 @@ impl MeetingRuntime {
             revision,
             MeetingStatus::Interrupted,
             &self.inner.clock.now(),
-            None,
+            current.failure.as_ref(),
         )?;
-        *self.active()? = None;
+        if self
+            .active()?
+            .as_ref()
+            .is_some_and(|capture| capture.meeting_id == meeting_id && capture.run_id == run_id)
+        {
+            *self.active()? = None;
+        }
         self.set_diagnostic(format!("{code}: {}", bounded_error(message)))?;
         let _ = self.publish_unlocked(
             "meeting-interrupted",

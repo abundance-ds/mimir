@@ -26,6 +26,17 @@ impl MeetingStore {
         Ok(meeting)
     }
 
+    pub(crate) fn mark_summary_reviewed(&self, meeting_id: &str) -> Result<(), MeetingStoreError> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE meetings SET metadata_json=json_set(metadata_json,
+             '$.summaryReviewedTranscriptRevision', transcript_revision)
+             WHERE id=?1 AND status='completed'",
+            [meeting_id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_meeting(&self, meeting_id: &str) -> Result<MeetingRecord, MeetingStoreError> {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
         let connection = self.lock()?;

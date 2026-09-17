@@ -4,6 +4,7 @@ struct FakePlatformState {
     exports: Vec<(String, MeetingExportFormat)>,
     deleted: Vec<(String, MeetingDeleteMode)>,
     fail_export: Option<String>,
+    fail_delete: Option<String>,
     fail_model_install: Option<String>,
     dismissed_candidates: Vec<String>,
 }
@@ -30,6 +31,7 @@ impl Default for FakePlatform {
                 exports: Vec::new(),
                 deleted: Vec::new(),
                 fail_export: None,
+                fail_delete: None,
                 fail_model_install: None,
                 dismissed_candidates: Vec::new(),
             }),
@@ -193,6 +195,9 @@ impl MeetingPlatformPort for FakePlatform {
 
     fn delete_meeting(&self, meeting_id: &str, mode: MeetingDeleteMode) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
+        if let Some(error) = &state.fail_delete {
+            return Err(error.clone());
+        }
         state.deleted.push((meeting_id.into(), mode));
         if mode == MeetingDeleteMode::All {
             state.contents.entry(meeting_id.into()).or_default().deleted = true;
@@ -296,4 +301,3 @@ fn start_request_for_candidate(
         authorized_consent: Some(runtime.start_consent_context(candidate_id).unwrap()),
     }
 }
-

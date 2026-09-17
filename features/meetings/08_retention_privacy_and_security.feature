@@ -29,8 +29,9 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     Given a meeting has queued or running transcription, finalization, or proposal jobs
     When the user confirms Delete meeting
     Then Mimir cancels unclaimed jobs and tombstones the record before another claim
-    And the meeting disappears without waiting for an owned Activity
-    And physical cleanup waits only while that Activity holds a running lease
+    And the meeting disappears without waiting for transcription or an owned Activity
+    And physical cleanup waits while a native transcriber owns files or an Activity holds a running lease
+    And late note saves and snapshots cannot restore the deleted meeting
     And the late result only releases that wait and cannot recreate deleted content
     And managed hook transcript inputs are removed with the owned meeting directory
 

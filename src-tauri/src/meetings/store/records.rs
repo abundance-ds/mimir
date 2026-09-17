@@ -118,6 +118,16 @@ pub(super) fn running_job_count_tx(
         .map_err(|_| MeetingStoreError::Validation("running job count overflow".into()))
 }
 
+pub(super) fn deletion_capture_pending_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+) -> Result<bool, MeetingStoreError> {
+    Ok(transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM meetings WHERE id=?1 AND status IN ('recording','stopping','finalizing'))",
+        [meeting_id], |row| row.get(0),
+    )?)
+}
+
 pub(super) fn refresh_deletion_tx(
     transaction: &Transaction<'_>,
     mut deletion: MeetingDeletion,
@@ -127,7 +137,9 @@ pub(super) fn refresh_deletion_tx(
         && deletion.stage == MeetingDeletionStage::WaitingForJobs
     {
         deletion.running_jobs = running_job_count_tx(transaction, &deletion.meeting_id)?;
-        if deletion.running_jobs == 0 {
+        if deletion.running_jobs == 0
+            && !deletion_capture_pending_tx(transaction, &deletion.meeting_id)?
+        {
             transaction.execute(
                 "UPDATE meeting_deletions SET
                    stage='files-pending',updated_at=?2,last_error=NULL

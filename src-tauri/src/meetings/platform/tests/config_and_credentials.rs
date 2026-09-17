@@ -633,7 +633,7 @@ fn ignored_apps_persist_reload_and_filter_candidates_before_worker_update() {
     impl MeetingEnvironmentProbe for Environment {
         fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
             let mut projection = FakeEnvironment.projection()?;
-            projection.candidates = [("ai.shoulders.mimtts", "Mim Dictate"), ("us.zoom.xos", "Zoom")].into_iter().map(|(id, name)| MeetingCandidate {
+            projection.candidates = [("com.example.dictate", "Example Dictation"), ("us.zoom.xos", "Zoom")].into_iter().map(|(id, name)| MeetingCandidate {
                 id: format!("candidate:{id}"), app_id: id.into(), app_name: name.into(), detected_at: None, confidence: 0.95,
             }).collect();
             Ok(projection)
@@ -643,7 +643,7 @@ fn ignored_apps_persist_reload_and_filter_candidates_before_worker_update() {
     let updates = Arc::new(Mutex::new(Vec::new()));
     let environment = Arc::new(Environment { updates: updates.clone() });
     let fixture = fixture_with_environment(environment.clone());
-    let ignored = vec![MeetingIgnoredApp { app_id: "ai.shoulders.mimtts".into(), app_name: "Mim Dictate".into() }];
+    let ignored = vec![MeetingIgnoredApp { app_id: "com.example.dictate".into(), app_name: "Example Dictation".into() }];
     fixture.platform.update_config(&MeetingConfigPatch { ignored_apps: Some(ignored.clone()), ..MeetingConfigPatch::default() }).unwrap();
     assert_eq!(*updates.lock().unwrap(), vec![vec![], ignored.clone()]);
     let projection = fixture.platform.projection().unwrap();
@@ -670,7 +670,7 @@ fn legacy_config_has_no_exclusions_and_invalid_exclusions_do_not_replace_config(
     stored["config"].as_object_mut().unwrap().remove("ignoredApps");
     fs::write(&fixture.paths.config_file, serde_json::to_vec(&stored).unwrap()).unwrap();
     assert!(fixture.platform.projection().unwrap().config.ignored_apps.is_empty());
-    let app = MeetingIgnoredApp { app_id: "ai.shoulders.mimtts".into(), app_name: "Mim Dictate".into() };
+    let app = MeetingIgnoredApp { app_id: "com.example.dictate".into(), app_name: "Example Dictation".into() };
     for invalid in [
         vec![app.clone(), MeetingIgnoredApp { app_id: app.app_id.to_ascii_uppercase(), ..app.clone() }],
         vec![MeetingIgnoredApp { app_id: "pid:671".into(), ..app.clone() }],

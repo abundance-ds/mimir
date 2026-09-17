@@ -112,6 +112,11 @@ pub trait MeetingCaptureFailureSink: Send + Sync {
 pub trait MeetingTranscriptionPort: Send + Sync {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String>;
 
+    /// Freeze this run's audio boundary before another capture can start.
+    fn seal(&self, _meeting_id: &str, _run_id: &str, _end_sequence: u64) -> Result<(), String> {
+        Ok(())
+    }
+
     fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String>;
 
     /// Current best-effort state of an owned live worker. Implementations that

@@ -559,6 +559,28 @@ impl MeetingRuntime {
             notes: content.notes.clone(),
             summary_truncated,
             summary_state,
+            summary_needs_update: record
+                .metadata
+                .get("continuedTranscriptRevision")
+                .and_then(Value::as_u64)
+                .is_some_and(|continued| {
+                    record
+                        .metadata
+                        .get("summaryReviewedTranscriptRevision")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        < continued
+                        && !jobs.iter().any(|job| {
+                            job.definition.kind == FollowUpJobKind::Summary
+                                && job.state == JobState::Succeeded
+                                && job
+                                    .definition
+                                    .payload
+                                    .get("transcriptRevision")
+                                    .and_then(Value::as_u64)
+                                    .is_some_and(|revision| revision >= continued)
+                        })
+                }),
             kg_state,
             graph_node_id: content.graph_node_id.clone(),
             graph_draft: content.graph_draft.clone(),

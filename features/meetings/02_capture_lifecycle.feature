@@ -47,12 +47,14 @@ Feature: Own meeting capture as one durable native lifecycle
 
   @MTG-026 @automated @domain @native @desktop
   Scenario: A stopped meeting can continue after a break
-    Given a meeting already has a completed capture and final transcript
+    Given capture has stopped and transcription is pending, complete, or needs repair
     When the user continues that meeting
     Then Mimir records under the same meeting identifier with a new run identifier
     And committed audio and transcript history remain immutable and append-only
     And elapsed meeting time excludes the break between capture runs
-    And a late event from the ended run cannot mutate the continued run
+    And earlier transcription drains only its fixed audio range while the new run records
+    And a late event from the ended run cannot stop or finalize the continued run
+    And the transcript becomes final only after all runs finish transcription
 
   @MTG-027 @automated @native @contract
   Scenario: Events notify while snapshots recover state

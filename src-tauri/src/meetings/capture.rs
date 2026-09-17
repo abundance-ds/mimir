@@ -1706,35 +1706,48 @@ mod tests {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let (entered_tx, entered_rx) = mpsc::sync_channel(1);
         let (release_tx, release_rx) = mpsc::sync_channel(1);
-        let capture = NativeMeetingCapture::with_worker(
-            store,
-            directory.path(),
-            Arc::new(BlockingOpenWorker {
-                entered: entered_tx,
-                release: Mutex::new(release_rx),
-            }),
-        )
-        .unwrap();
+        let capture = Arc::new(
+            NativeMeetingCapture::with_worker(
+                store,
+                directory.path(),
+                Arc::new(BlockingOpenWorker {
+                    entered: entered_tx,
+                    release: Mutex::new(release_rx),
+                }),
+            )
+            .unwrap(),
+        );
         let request = capture_request("pending-open");
 
-        let started_at = Instant::now();
-        capture.start(&request).unwrap();
-        assert!(started_at.elapsed() < Duration::from_millis(100));
-        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-
-        let stopped_at = Instant::now();
-        let stopped = capture
-            .stop(&CaptureStop {
-                meeting_id: request.meeting_id.clone(),
-                run_id: request.run_id.clone(),
-            })
-            .unwrap();
-        assert!(stopped_at.elapsed() < Duration::from_millis(100));
-        assert_eq!(stopped.duration_ms, 0);
-        assert!(capture.startup_cleanup_pending.load(Ordering::Acquire));
-
+        let (completed_tx, completed_rx) = mpsc::sync_channel(1);
+        let controller_capture = Arc::clone(&capture);
+        let controller = thread::spawn(move || {
+            let result = controller_capture.start(&request).and_then(|()| {
+                entered_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|error| format!("device worker did not enter open: {error}"))?;
+                controller_capture.stop(&CaptureStop {
+                    meeting_id: request.meeting_id,
+                    run_id: request.run_id,
+                })
+            });
+            let _ = completed_tx.send(result);
+        });
+        // Opening cannot finish until this test sends release. Completion now
+        // proves both calls are nonblocking without a tight timing limit.
+        // The timeout only bounds a deadlock; release before assertions also
+        // lets a regressed blocking implementation clean up its worker.
+        let completed = completed_rx.recv_timeout(Duration::from_secs(5));
+        let cleanup_pending = capture.startup_cleanup_pending.load(Ordering::Acquire);
         release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(1);
+        controller.join().unwrap();
+        let stopped = completed
+            .expect("Start/Stop waited for device opening")
+            .unwrap();
+        assert_eq!(stopped.duration_ms, 0);
+        assert!(cleanup_pending);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
         while capture.startup_cleanup_pending.load(Ordering::Acquire) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(1));
         }

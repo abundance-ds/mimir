@@ -1,5 +1,36 @@
 use super::*;
 
+pub(super) fn release_obsolete_repair_holds_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+) -> Result<(), MeetingStoreError> {
+    // A complete replacement covers the retained audio from sequence zero.
+    // Keep newer passes and generations still owned by pending/running jobs.
+    // Missing generation metadata is treated conservatively as active.
+    transaction.execute(
+        "DELETE FROM transcript_repair_runs
+         WHERE meeting_id=?1 AND state='collecting'
+           AND EXISTS (
+             SELECT 1 FROM transcript_repair_runs completed
+             WHERE completed.meeting_id=transcript_repair_runs.meeting_id
+               AND completed.state='committed'
+               AND completed.started_at >= transcript_repair_runs.started_at
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM follow_up_jobs j
+             WHERE j.meeting_id=transcript_repair_runs.meeting_id
+               AND j.kind='custom:transcription' AND j.state IN ('pending','running')
+               AND (
+                 json_extract(j.payload_json,'$.captureGeneration') IS NULL
+                 OR json_extract(j.payload_json,'$.captureGeneration')=
+                    transcript_repair_runs.capture_generation
+               )
+           )",
+        [meeting_id],
+    )?;
+    Ok(())
+}
+
 pub(super) fn require_collecting_repair_tx(
     transaction: &Transaction<'_>,
     meeting_id: &str,

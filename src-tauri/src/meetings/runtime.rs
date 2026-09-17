@@ -56,6 +56,12 @@ struct ActiveCapture {
     recording_started_at: String,
 }
 
+#[derive(Default)]
+struct TranscriptDrain {
+    runs: HashSet<String>,
+    error: Option<String>,
+}
+
 struct MeetingRuntimeInner {
     store: Arc<MeetingStore>,
     capture: Arc<dyn MeetingCapturePort>,
@@ -65,6 +71,7 @@ struct MeetingRuntimeInner {
     events: Arc<dyn MeetingEventSink>,
     operation: Mutex<()>,
     active: Mutex<Option<ActiveCapture>>,
+    drains: Mutex<HashMap<String, TranscriptDrain>>,
     revision: AtomicU64,
     diagnostic: Mutex<Option<String>>,
 }

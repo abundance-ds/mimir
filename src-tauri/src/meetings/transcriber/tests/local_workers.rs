@@ -345,10 +345,53 @@ fn durable_channels_are_interleaved_only_at_the_provider_boundary() {
     let chunks = source.paired_chunks_from(0).unwrap();
     let values = chunks[0]
         .bytes
-        .as_chunks::<4>().0.iter()
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 3.0, 2.0, 4.0]);
     assert_eq!(chunks[0].sequence, 0);
 }
 
+#[test]
+fn simultaneous_runs_in_one_meeting_own_separate_transcription_workers() {
+    let temporary = TempDir::new().unwrap();
+    let store = recording_store();
+    let transcriber = NativeMeetingTranscriber::new(
+        store,
+        temporary.path(),
+        Arc::new(RuntimeRouteResolver),
+        Arc::new(NoMeetingCredential),
+        Arc::new(SilentLocal),
+        Arc::new(NoopTranscriptionChangeSink),
+    )
+    .unwrap();
+    for run_id in ["first-run", "second-run"] {
+        transcriber
+            .start(&TranscriptionStart {
+                meeting_id: "meeting-1".into(),
+                run_id: run_id.into(),
+                route: "local".into(),
+                model: "whisper-small".into(),
+                first_sequence: 0,
+                repair_generation: None,
+                repair_intent: None,
+            })
+            .unwrap();
+        transcriber.seal("meeting-1", run_id, 0).unwrap();
+    }
+    for run_id in ["second-run", "first-run"] {
+        assert!(
+            transcriber
+                .finalize(&TranscriptionFinalize {
+                    meeting_id: "meeting-1".into(),
+                    run_id: run_id.into(),
+                    base_revision: 0,
+                    observed_at: "2026-07-30T10:05:00Z".into(),
+                })
+                .unwrap()
+                .marks_final
+        );
+    }
+}

@@ -345,3 +345,42 @@ fn deletion_journal_survives_every_database_boundary_and_meeting_cascade() {
     }
 }
 
+#[test]
+fn deletion_of_finalizing_record_survives_restart_without_reviving_transcription() {
+    let store = store();
+    let recording = start_recording(&store);
+    let stopping = store
+        .transition_meeting(
+            &recording.id,
+            recording.revision,
+            MeetingStatus::Stopping,
+            T2,
+            None,
+        )
+        .unwrap();
+    store
+        .transition_meeting(
+            &recording.id,
+            stopping.revision,
+            MeetingStatus::Finalizing,
+            T2,
+            None,
+        )
+        .unwrap();
+    let deletion = store
+        .begin_deletion(&recording.id, MeetingDeletionMode::All, T2)
+        .unwrap();
+    assert_eq!(deletion.stage, MeetingDeletionStage::WaitingForJobs);
+    assert!(store.list_meetings(10).unwrap().is_empty());
+    assert_eq!(
+        store.refresh_deletion(&recording.id, T2).unwrap().stage,
+        MeetingDeletionStage::WaitingForJobs
+    );
+    store.recover_after_restart(T3).unwrap();
+    assert!(store.interrupted_meeting_ids().unwrap().is_empty());
+    assert!(store.list_meetings(10).unwrap().is_empty());
+    assert_eq!(
+        store.refresh_deletion(&recording.id, T3).unwrap().stage,
+        MeetingDeletionStage::FilesPending
+    );
+}

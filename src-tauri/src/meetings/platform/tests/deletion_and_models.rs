@@ -367,3 +367,147 @@ fn retention_skips_active_work_and_removes_only_expired_source_audio() {
         1
     );
 }
+
+#[test]
+fn retention_deletes_expired_audio_after_retranscription_replaces_a_failed_repair() {
+    use crate::meetings::{AudioChunkDraft, MeetingFailure, MeetingStatus};
+    let fixture = fixture();
+    create_meeting(&fixture, "meeting-1");
+    let created = fixture.store.get_meeting("meeting-1").unwrap();
+    let recording = fixture
+        .store
+        .transition_meeting(
+            "meeting-1",
+            created.revision,
+            MeetingStatus::Recording,
+            NOW,
+            None,
+        )
+        .unwrap();
+    let audio_path = fixture
+        .paths
+        .meetings_root
+        .join("meeting-1/audio/0001.f32le");
+    fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
+    let bytes = b"retained source audio";
+    fs::write(&audio_path, bytes).unwrap();
+    let chunk = AudioChunkDraft {
+        id: "retention-repair-chunk".into(),
+        meeting_id: "meeting-1".into(),
+        channel_id: "microphone".into(),
+        sequence: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        sample_count: 16_000,
+        byte_len: bytes.len() as u64,
+        sha256: Sha256Digest::calculate(Cursor::new(bytes))
+            .unwrap()
+            .to_string(),
+        relative_path: "meeting-1/audio/0001.f32le".into(),
+    };
+    fixture.store.stage_audio_chunk(&chunk, NOW).unwrap();
+    fixture.store.commit_audio_chunk(&chunk.id, NOW).unwrap();
+    let interrupted = fixture
+        .store
+        .transition_meeting(
+            "meeting-1",
+            recording.revision,
+            MeetingStatus::Interrupted,
+            NOW,
+            None,
+        )
+        .unwrap();
+    fixture
+        .store
+        .begin_transcript_repair("meeting-1", "failed", "failed-provider", NOW)
+        .unwrap();
+    fixture
+        .store
+        .transition_meeting(
+            "meeting-1",
+            interrupted.revision,
+            MeetingStatus::Failed,
+            NOW,
+            Some(&MeetingFailure {
+                code: "provider-failure".into(),
+                message: "Unavailable".into(),
+                retryable: false,
+            }),
+        )
+        .unwrap();
+    let expired = DateTime::parse_from_rfc3339("2026-09-30T10:00:00Z")
+        .unwrap()
+        .into();
+    assert!(fixture
+        .platform
+        .enforce_retention(expired)
+        .unwrap()
+        .is_empty());
+    assert!(audio_path.exists());
+
+    fixture
+        .store
+        .begin_transcript_retranscription("meeting-1", "replacement", "replacement-provider", NOW)
+        .unwrap();
+    fixture
+        .store
+        .stage_transcript_repair_batch(
+            "replacement",
+            "replacement-provider",
+            &TranscriptBatch {
+                meeting_id: "meeting-1".into(),
+                batch_id: "replacement-segments".into(),
+                base_revision: 0,
+                source: "test".into(),
+                observed_at: NOW.into(),
+                marks_final: false,
+                changes: vec![TranscriptChange::UpsertSegment {
+                    segment: TranscriptSegmentInput {
+                        id: "replacement-text".into(),
+                        start_ms: 0,
+                        end_ms: 1_000,
+                        text: "Recovered transcript".into(),
+                        channel_id: Some("microphone".into()),
+                        speaker: None,
+                        confidence: Some(1.0),
+                        is_final: true,
+                        metadata: json!({}),
+                    },
+                }],
+            },
+        )
+        .unwrap();
+    fixture
+        .store
+        .commit_transcript_repair(
+            "replacement",
+            "replacement-provider",
+            &TranscriptBatch {
+                meeting_id: "meeting-1".into(),
+                batch_id: "replacement-terminal".into(),
+                base_revision: 0,
+                source: "test".into(),
+                observed_at: NOW.into(),
+                marks_final: true,
+                changes: vec![],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.platform.enforce_retention(expired).unwrap(),
+        ["meeting-1"]
+    );
+    assert!(!audio_path.exists());
+    assert!(!fixture.store.has_committed_audio("meeting-1").unwrap());
+    assert_eq!(
+        fixture
+            .store
+            .transcript_snapshot("meeting-1", None)
+            .unwrap()
+            .segments[0]
+            .segment
+            .text,
+        "Recovered transcript"
+    );
+    assert!(!fixture.platform.content("meeting-1").unwrap().deleted);
+}

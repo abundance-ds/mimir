@@ -165,7 +165,7 @@ impl NormalizedBatchSink for StoreBatchSink {
                 .map_err(|error| error.to_string())?;
         } else {
             self.store
-                .apply_transcript_batch(&durable)
+                .append_provider_transcript_batch(&durable)
                 .map_err(|error| {
                     let error = error.to_string();
                     self.diagnostics.record(

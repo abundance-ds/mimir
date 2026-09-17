@@ -42,7 +42,9 @@ fn a_shorter_channel_is_padded_without_mutating_its_durable_file() {
     let source = PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
     let values = source.paired_chunks_from(0).unwrap()[0]
         .bytes
-        .as_chunks::<4>().0.iter()
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 3.0, 2.0, 0.0]);
@@ -75,7 +77,9 @@ fn an_unpaired_chunk_is_not_disclosed_to_the_provider() {
     let final_chunk = source.final_chunks_from(0).unwrap().pop().unwrap();
     let values = final_chunk
         .bytes
-        .as_chunks::<4>().0.iter()
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 0.0]);
@@ -193,7 +197,9 @@ fn unregistered_staged_and_corrupt_files_are_silence_not_stt_input() {
         .flat_map(|chunk| {
             chunk
                 .bytes
-                .as_chunks::<BYTES_PER_SAMPLE>().0.iter()
+                .as_chunks::<BYTES_PER_SAMPLE>()
+                .0
+                .iter()
                 .map(|sample| f32::from_le_bytes(*sample))
                 .collect::<Vec<_>>()
         })
@@ -368,3 +374,24 @@ fn diagnostics_omit_credentials_provider_details_transcript_and_audio() {
     assert!(!transcript_debug.contains(SECRET));
 }
 
+#[test]
+fn sealed_audio_reader_excludes_later_recordings_from_live_and_final_reads() {
+    let temporary = TempDir::new().unwrap();
+    let store = recording_store();
+    for channel in ["microphone", "system"] {
+        commit_chunk(&store, temporary.path(), "meeting-1", channel, 0, &[1.0]);
+    }
+    let source =
+        PersistedAudioSource::authoritative(store.clone(), temporary.path(), "meeting-1").unwrap();
+    let worker_source = source.clone();
+    source.end_sequence.store(1, Ordering::Release);
+    for channel in ["microphone", "system"] {
+        commit_chunk(&store, temporary.path(), "meeting-1", channel, 1, &[2.0]);
+    }
+    assert_eq!(worker_source.paired_chunks_from(0).unwrap().len(), 1);
+    assert_eq!(worker_source.final_chunks_from(0).unwrap().len(), 1);
+    assert!(worker_source.final_chunks_from(1).unwrap().is_empty());
+    let continued =
+        PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
+    assert_eq!(continued.final_chunks_from(1).unwrap()[0].sequence, 1);
+}

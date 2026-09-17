@@ -625,3 +625,463 @@ fn stop_accepts_a_terminal_marker_after_the_provider_durably_drains_its_tail() {
         "The acknowledged provider tail is durable."
     );
 }
+
+struct ControlledDrainTranscription {
+    fake: FakeTranscription,
+    waiting: std::sync::mpsc::Sender<(String, std::sync::mpsc::Sender<Result<(), String>>)>,
+}
+
+impl MeetingTranscriptionPort for ControlledDrainTranscription {
+    fn start(&self, request: &TranscriptionStart) -> Result<(), String> {
+        self.fake.start(request)
+    }
+
+    fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+        let (release, wait) = std::sync::mpsc::channel();
+        self.waiting
+            .send((request.run_id.clone(), release))
+            .unwrap();
+        wait.recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| error.to_string())??;
+        self.fake.finalize(request)
+    }
+}
+
+fn continue_request(
+    runtime: &MeetingRuntime,
+    meeting_id: &str,
+    request_id: &str,
+) -> StartMeetingRequest {
+    let mut request = start_request(runtime, request_id);
+    request.continue_meeting_id = Some(meeting_id.into());
+    request.authorized_consent = Some(
+        runtime
+            .start_consent_context_for(None, Some(meeting_id))
+            .unwrap(),
+    );
+    request
+}
+
+#[test]
+fn repeated_continue_records_while_earlier_runs_drain_out_of_order() {
+    for fail_earlier in [false, true] {
+        let fixture = make_fixture();
+        let (waiting, notifications) = std::sync::mpsc::channel();
+        let transcription = Arc::new(ControlledDrainTranscription {
+            fake: FakeTranscription::default(),
+            waiting,
+        });
+        let runtime = MeetingRuntime::new(
+            fixture.store.clone(),
+            fixture.capture.clone(),
+            transcription,
+            fixture.platform.clone(),
+            Arc::new(FakeClock),
+            fixture.events.clone(),
+        )
+        .unwrap();
+        let meeting_id = runtime
+            .start(start_request(&runtime, "drain-first"))
+            .unwrap()
+            .active_meeting_id
+            .unwrap();
+        let spawn_stop = || {
+            let runtime = runtime.clone();
+            let id = meeting_id.clone();
+            std::thread::spawn(move || runtime.stop(&id))
+        };
+        let first = spawn_stop();
+        let (_, release_first) = notifications
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert!(runtime.snapshot().unwrap().active_meeting_id.is_none());
+        runtime
+            .start(continue_request(&runtime, &meeting_id, "drain-second"))
+            .unwrap();
+        let second = spawn_stop();
+        let (_, release_second) = notifications
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        runtime
+            .start(continue_request(&runtime, &meeting_id, "drain-third"))
+            .unwrap();
+        release_second.send(Ok(())).unwrap();
+        second.join().unwrap().unwrap();
+        release_first
+            .send(if fail_earlier {
+                Err("earlier provider failed".into())
+            } else {
+                Ok(())
+            })
+            .unwrap();
+        first.join().unwrap().unwrap();
+        // Neither a late success nor a late failure may stop the new capture.
+        assert_eq!(
+            runtime.snapshot().unwrap().active_meeting_id.as_deref(),
+            Some(meeting_id.as_str())
+        );
+        assert_eq!(
+            fixture.store.get_meeting(&meeting_id).unwrap().status,
+            MeetingStatus::Recording
+        );
+        assert!(
+            !fixture
+                .store
+                .transcript_overview(&meeting_id, 0)
+                .unwrap()
+                .is_final
+        );
+        assert!(fixture.store.list_jobs(&meeting_id).unwrap().is_empty());
+        let third = spawn_stop();
+        let (_, release_third) = notifications
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        release_third.send(Ok(())).unwrap();
+        let stopped = third.join().unwrap().unwrap();
+        let view = stopped
+            .meetings
+            .iter()
+            .find(|meeting| meeting.id == meeting_id)
+            .unwrap();
+        if fail_earlier {
+            assert!(!view.transcript_final);
+            assert_eq!(
+                fixture.store.get_meeting(&meeting_id).unwrap().status,
+                MeetingStatus::Interrupted
+            );
+            assert_eq!(
+                fixture.store.list_jobs(&meeting_id).unwrap()[0]
+                    .definition
+                    .kind,
+                FollowUpJobKind::Custom("transcription".into())
+            );
+        } else {
+            assert!(view.transcript_final);
+            assert_eq!(view.segment_count, 3);
+            assert_eq!(fixture.store.list_jobs(&meeting_id).unwrap().len(), 1);
+        }
+    }
+}
+
+#[test]
+fn last_tail_completes_only_after_all_stopped_runs_and_preserves_another_recording() {
+    let fixture = make_fixture();
+    let (waiting, notifications) = std::sync::mpsc::channel();
+    let transcription = Arc::new(ControlledDrainTranscription {
+        fake: FakeTranscription::default(),
+        waiting,
+    });
+    let runtime = MeetingRuntime::new(
+        fixture.store.clone(),
+        fixture.capture.clone(),
+        transcription,
+        fixture.platform.clone(),
+        Arc::new(FakeClock),
+        fixture.events.clone(),
+    )
+    .unwrap();
+    let id = runtime
+        .start(start_request(&runtime, "older-recording"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    let old_runtime = runtime.clone();
+    let old_id = id.clone();
+    let old_stop = std::thread::spawn(move || old_runtime.stop(&old_id));
+    let (_, release_old) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    runtime
+        .start(continue_request(&runtime, &id, "newer-recording"))
+        .unwrap();
+    let new_runtime = runtime.clone();
+    let new_id = id.clone();
+    let new_stop = std::thread::spawn(move || new_runtime.stop(&new_id));
+    let (_, release_new) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    release_new.send(Ok(())).unwrap();
+    new_stop.join().unwrap().unwrap();
+    assert_eq!(
+        fixture.store.get_meeting(&id).unwrap().status,
+        MeetingStatus::Finalizing
+    );
+    assert!(!fixture.store.transcript_overview(&id, 0).unwrap().is_final);
+    let other_id = runtime
+        .start(start_request(&runtime, "another-meeting"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    release_old.send(Ok(())).unwrap();
+    let finished = old_stop.join().unwrap().unwrap();
+    assert_eq!(finished.active_meeting_id, Some(other_id));
+    assert!(fixture.store.transcript_overview(&id, 0).unwrap().is_final);
+    assert_eq!(fixture.store.list_jobs(&id).unwrap().len(), 1);
+}
+
+#[test]
+fn continue_during_summary_rejects_its_late_save_and_keeps_the_previous_summary() {
+    let fixture = make_fixture();
+    let id = fixture
+        .runtime
+        .start(start_request(&fixture.runtime, "summary-first"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    fixture.runtime.stop(&id).unwrap();
+    fixture
+        .runtime
+        .update_meeting(
+            &id,
+            MeetingUpdatePatch {
+                summary: Some("Reviewed earlier summary".into()),
+                ..MeetingUpdatePatch::default()
+            },
+        )
+        .unwrap();
+    let previous_revision = fixture.store.get_meeting(&id).unwrap().transcript_revision;
+    let job = fixture
+        .runtime
+        .claim_next_job("summary-worker", LEASE_END)
+        .unwrap()
+        .unwrap();
+    let continued = fixture
+        .runtime
+        .start(continue_request(&fixture.runtime, &id, "summary-continued"))
+        .unwrap();
+    assert!(continued.meetings[0].summary_needs_update);
+    assert!(fixture
+        .runtime
+        .apply_generated_summary(
+            &id,
+            previous_revision,
+            MeetingUpdatePatch {
+                summary: Some("Old generated output".into()),
+                ..MeetingUpdatePatch::default()
+            }
+        )
+        .is_err());
+    fixture
+        .runtime
+        .finish_job(
+            &job.definition.id,
+            job.lease_token.as_deref().unwrap(),
+            JobFinish::Succeeded {
+                result: json!({"summary": "Old generated output"}),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.store.list_jobs(&id).unwrap()[0].state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        fixture.platform.content(&id).unwrap().summary.as_deref(),
+        Some("Reviewed earlier summary")
+    );
+    fixture.runtime.stop(&id).unwrap();
+    let reviewed = fixture
+        .runtime
+        .update_meeting(
+            &id,
+            MeetingUpdatePatch {
+                summary: Some("Updated summary".into()),
+                ..MeetingUpdatePatch::default()
+            },
+        )
+        .unwrap();
+    assert!(!reviewed.meetings[0].summary_needs_update);
+}
+
+#[test]
+fn continue_after_transcription_failure_records_and_defers_repair_until_stop() {
+    let fixture = make_fixture();
+    let runtime = MeetingRuntime::new(
+        fixture.store.clone(),
+        fixture.capture.clone(),
+        Arc::new(AlwaysFailTranscription::default()),
+        fixture.platform.clone(),
+        Arc::new(FakeClock),
+        fixture.events.clone(),
+    )
+    .unwrap();
+    let id = runtime
+        .start(start_request(&runtime, "failed-first"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    runtime.stop(&id).unwrap();
+    assert_eq!(
+        fixture.store.get_meeting(&id).unwrap().status,
+        MeetingStatus::Interrupted
+    );
+    *fixture.capture.fail_start.lock().unwrap() = Some("device unavailable".into());
+    assert!(runtime
+        .start(continue_request(&runtime, &id, "failed-open"))
+        .is_err());
+    assert_eq!(
+        fixture.store.get_meeting(&id).unwrap().status,
+        MeetingStatus::Interrupted
+    );
+    assert!(fixture
+        .store
+        .list_jobs(&id)
+        .unwrap()
+        .iter()
+        .any(|job| job.state == JobState::Pending));
+    *fixture.capture.fail_start.lock().unwrap() = None;
+    let resumed = runtime
+        .start(continue_request(&runtime, &id, "failed-continued"))
+        .unwrap();
+    assert_eq!(resumed.active_meeting_id.as_deref(), Some(id.as_str()));
+    assert_eq!(fixture.capture.starts.lock().unwrap().len(), 2);
+    assert!(fixture
+        .store
+        .list_jobs(&id)
+        .unwrap()
+        .iter()
+        .all(|job| job.state == JobState::Cancelled));
+    runtime.stop(&id).unwrap();
+    assert!(fixture
+        .store
+        .list_jobs(&id)
+        .unwrap()
+        .iter()
+        .any(|job| job.state == JobState::Pending));
+}
+
+#[test]
+fn capture_failure_waits_for_earlier_transcription_before_queuing_repair() {
+    let fixture = make_fixture();
+    let (waiting, notifications) = std::sync::mpsc::channel();
+    let transcription = Arc::new(ControlledDrainTranscription {
+        fake: FakeTranscription::default(),
+        waiting,
+    });
+    let runtime = MeetingRuntime::new(
+        fixture.store.clone(),
+        fixture.capture.clone(),
+        transcription,
+        fixture.platform.clone(),
+        Arc::new(FakeClock),
+        fixture.events.clone(),
+    )
+    .unwrap();
+    let id = runtime
+        .start(start_request(&runtime, "failure-old"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    let old_runtime = runtime.clone();
+    let old_id = id.clone();
+    let old_stop = std::thread::spawn(move || old_runtime.stop(&old_id));
+    let (_, release_old) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    runtime
+        .start(continue_request(&runtime, &id, "failure-new"))
+        .unwrap();
+    let run_id = fixture
+        .capture
+        .starts
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .run_id
+        .clone();
+    let failed_runtime = runtime.clone();
+    let failed_id = id.clone();
+    let failure = std::thread::spawn(move || {
+        failed_runtime.handle_capture_failure(&failed_id, &run_id, "device disconnected")
+    });
+    let (_, release_failed) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    release_failed.send(Ok(())).unwrap();
+    failure.join().unwrap().unwrap();
+    assert!(fixture.store.list_jobs(&id).unwrap().is_empty());
+    assert!(!fixture.store.transcript_overview(&id, 0).unwrap().is_final);
+    release_old.send(Ok(())).unwrap();
+    old_stop.join().unwrap().unwrap();
+    let meeting = fixture.store.get_meeting(&id).unwrap();
+    assert_eq!(meeting.status, MeetingStatus::Interrupted);
+    assert_eq!(meeting.failure.unwrap().message, "device disconnected");
+    assert_eq!(fixture.store.list_jobs(&id).unwrap().len(), 1);
+}
+
+#[test]
+fn delete_during_multiple_transcript_drains_is_immediate_and_never_reappears() {
+    let fixture = make_fixture();
+    let (waiting, notifications) = std::sync::mpsc::channel();
+    let runtime = MeetingRuntime::new(
+        fixture.store.clone(),
+        fixture.capture.clone(),
+        Arc::new(ControlledDrainTranscription {
+            fake: FakeTranscription::default(),
+            waiting,
+        }),
+        fixture.platform.clone(),
+        Arc::new(FakeClock),
+        fixture.events.clone(),
+    )
+    .unwrap();
+    let id = runtime
+        .start(start_request(&runtime, "delete-drain-first"))
+        .unwrap()
+        .active_meeting_id
+        .unwrap();
+    let spawn_stop = || {
+        let runtime = runtime.clone();
+        let id = id.clone();
+        std::thread::spawn(move || runtime.stop(&id))
+    };
+    let first = spawn_stop();
+    let (_, release_first) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    runtime
+        .start(continue_request(&runtime, &id, "delete-drain-second"))
+        .unwrap();
+    let second = spawn_stop();
+    let (_, release_second) = notifications
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    let deleted = runtime.delete(&id, MeetingDeleteMode::All).unwrap();
+    assert!(deleted.meetings.is_empty());
+    assert!(runtime.meeting(&id).is_err());
+    assert!(runtime
+        .update_meeting(
+            &id,
+            MeetingUpdatePatch {
+                notes: Some("late save".into()),
+                ..MeetingUpdatePatch::default()
+            }
+        )
+        .is_err());
+    assert_eq!(
+        fixture.store.refresh_deletion(&id, NOW).unwrap().stage,
+        MeetingDeletionStage::WaitingForJobs
+    );
+    assert!(fixture.platform.state.lock().unwrap().deleted.is_empty());
+    release_second.send(Ok(())).unwrap();
+    assert!(second.join().unwrap().unwrap().meetings.is_empty());
+    assert_eq!(
+        fixture.store.refresh_deletion(&id, NOW).unwrap().stage,
+        MeetingDeletionStage::WaitingForJobs
+    );
+    release_first
+        .send(Err("provider stopped after deletion".into()))
+        .unwrap();
+    assert!(first.join().unwrap().unwrap().meetings.is_empty());
+    assert_eq!(
+        fixture.store.deletion(&id).unwrap().unwrap().stage,
+        MeetingDeletionStage::FilesPending
+    );
+    assert_eq!(
+        fixture.platform.state.lock().unwrap().deleted,
+        [(id.clone(), MeetingDeleteMode::All)]
+    );
+    assert!(fixture.store.list_jobs(&id).unwrap().is_empty());
+    assert!(runtime.snapshot().unwrap().meetings.is_empty());
+}

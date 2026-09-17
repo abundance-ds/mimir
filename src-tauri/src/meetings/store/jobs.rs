@@ -156,6 +156,25 @@ impl MeetingStore {
             transaction.commit()?;
             return Ok(job);
         }
+        let meeting = load_meeting_tx(&transaction, &current.definition.meeting_id)?;
+        if current.definition.kind == FollowUpJobKind::Summary
+            && current
+                .definition
+                .payload
+                .get("transcriptRevision")
+                .and_then(Value::as_u64)
+                .is_some_and(|revision| revision != meeting.transcript_revision)
+        {
+            transaction.execute(
+                "UPDATE follow_up_jobs SET state='cancelled',result_json=NULL,
+                 last_error='recording changed while summary was running',
+                 lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?2 WHERE id=?1",
+                params![job_id, observed_at],
+            )?;
+            let job = load_job_tx(&transaction, job_id)?;
+            transaction.commit()?;
+            return Ok(job);
+        }
         match outcome {
             JobFinish::Succeeded { result } => {
                 validate_job_result(result).map_err(MeetingStoreError::Validation)?;

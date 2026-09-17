@@ -271,13 +271,13 @@ impl MeetingStore {
         })
     }
 
-    /// Reopen one completed meeting for an append-only continuation run.
+    /// Reopen one stopped meeting for an append-only continuation run.
     ///
     /// Lifecycle, transcript-finality invalidation, run metadata, and pending
     /// follow-up cancellation share one SQLite transaction. Earlier audio,
     /// transcript revisions, reviewed content, and the original start time
     /// remain immutable.
-    pub fn reopen_completed_meeting(
+    pub fn reopen_stopped_meeting(
         &self,
         meeting_id: &str,
         expected_revision: u64,
@@ -288,7 +288,7 @@ impl MeetingStore {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
         validate_id(run_id, "capture run id").map_err(MeetingStoreError::Validation)?;
         let observed_at = timestamp(observed_at)?;
-        let metadata = json(metadata.clone())?;
+        let mut metadata = metadata.clone();
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = load_meeting_tx(&transaction, meeting_id)?;
@@ -299,7 +299,13 @@ impl MeetingStore {
                 actual: current.revision,
             });
         }
-        if current.status != MeetingStatus::Completed {
+        if !matches!(
+            current.status,
+            MeetingStatus::Completed
+                | MeetingStatus::Finalizing
+                | MeetingStatus::Interrupted
+                | MeetingStatus::Failed
+        ) {
             return Err(MeetingStoreError::Validation(format!(
                 "meeting '{meeting_id}' is {} and cannot be continued",
                 current.status
@@ -313,7 +319,7 @@ impl MeetingStore {
                 |row| row.get(0),
             )
             .optional()?;
-        if final_revision != Some(true) {
+        if current.status == MeetingStatus::Completed && final_revision != Some(true) {
             return Err(MeetingStoreError::Validation(format!(
                 "meeting '{meeting_id}' does not have a final transcript and cannot be continued"
             )));
@@ -323,6 +329,8 @@ impl MeetingStore {
             .transcript_revision
             .checked_add(1)
             .ok_or_else(|| MeetingStoreError::Validation("transcript revision overflow".into()))?;
+        metadata["continuedTranscriptRevision"] = Value::from(revision);
+        let metadata = json(metadata)?;
         let batch = TranscriptBatch {
             meeting_id: meeting_id.into(),
             batch_id: format!("continue-{run_id}"),
@@ -363,19 +371,19 @@ impl MeetingStore {
         )?;
         transaction.execute(
             "UPDATE follow_up_jobs SET
-               state='cancelled',last_error='meeting continued before follow-up completed',
+               state='cancelled',last_error=?3,
                lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?2
              WHERE meeting_id=?1 AND state='pending'",
-            params![meeting_id, observed_at],
+            params![meeting_id, observed_at, format!("continued:{run_id}")],
         )?;
         let meeting = load_meeting_tx(&transaction, meeting_id)?;
         transaction.commit()?;
         Ok(meeting)
     }
 
-    /// Restore the exact completed authority when a continuation worker could
+    /// Restore the prior stopped state when a continuation worker could
     /// not be opened. This is the synchronous-start rollback paired with
-    /// `reopen_completed_meeting`; no earlier content is deleted or rewritten.
+    /// `reopen_stopped_meeting`; no earlier content is deleted or rewritten.
     pub fn rollback_meeting_continuation(
         &self,
         meeting_id: &str,
@@ -389,6 +397,78 @@ impl MeetingStore {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = load_meeting_tx(&transaction, meeting_id)?;
+        let restore_jobs = || {
+            transaction.execute(
+            "UPDATE follow_up_jobs SET state='pending',last_error=NULL,not_before=?2,updated_at=?2
+             WHERE meeting_id=?1 AND state='cancelled' AND last_error=?3",
+            params![meeting_id, observed_at, format!("continued:{run_id}")],
+        )
+        };
+        if current.status == MeetingStatus::Recording
+            && current.metadata.get("runId").and_then(Value::as_str) == Some(run_id)
+            && matches!(
+                current
+                    .metadata
+                    .get("continuationPreviousStatus")
+                    .and_then(Value::as_str),
+                Some("finalizing" | "interrupted" | "failed")
+            )
+        {
+            let previous_metadata = current
+                .metadata
+                .get("continuationPreviousMetadata")
+                .filter(|value| value.is_object())
+                .ok_or_else(|| {
+                    MeetingStoreError::Validation("missing continuation metadata".into())
+                })?;
+            transaction.execute(
+                "UPDATE meetings SET status=?5,revision=revision+1,updated_at=?2,
+                 stopped_at=?3,finalized_at=?6,metadata_json=?4,
+                 interrupted_at=?7,interruption_reason=?8,
+                 failure_code=?9,failure_message=?10,failure_retryable=?11 WHERE id=?1",
+                params![
+                    meeting_id,
+                    observed_at,
+                    current
+                        .metadata
+                        .get("continuationPreviousStoppedAt")
+                        .and_then(Value::as_str),
+                    json(previous_metadata.clone())?,
+                    current
+                        .metadata
+                        .get("continuationPreviousStatus")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .get("continuationPreviousFinalizedAt")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .get("continuationPreviousInterruptedAt")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .get("continuationPreviousInterruptionReason")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .pointer("/continuationPreviousFailure/code")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .pointer("/continuationPreviousFailure/message")
+                        .and_then(Value::as_str),
+                    current
+                        .metadata
+                        .pointer("/continuationPreviousFailure/retryable")
+                        .and_then(Value::as_bool)
+                ],
+            )?;
+            restore_jobs()?;
+            let meeting = load_meeting_tx(&transaction, meeting_id)?;
+            transaction.commit()?;
+            return Ok(meeting);
+        }
         if current.revision != expected_revision {
             return Err(MeetingStoreError::RevisionConflict {
                 meeting_id: meeting_id.into(),
@@ -452,7 +532,7 @@ impl MeetingStore {
         let previous_metadata = json(previous_metadata.clone())?;
         transaction.execute(
             "UPDATE meetings SET
-               status='completed',updated_at=?2,revision=revision+1,
+               status=?7,updated_at=?2,revision=revision+1,
                transcript_revision=?3,stopped_at=?4,finalized_at=?5,
                metadata_json=?6
              WHERE id=?1",
@@ -462,16 +542,15 @@ impl MeetingStore {
                 to_i64(base_revision)?,
                 previous_stopped_at,
                 previous_finalized_at,
-                previous_metadata
+                previous_metadata,
+                current
+                    .metadata
+                    .get("continuationPreviousStatus")
+                    .and_then(Value::as_str)
+                    .unwrap_or("completed")
             ],
         )?;
-        transaction.execute(
-            "UPDATE follow_up_jobs SET
-               state='pending',last_error=NULL,not_before=?2,updated_at=?2
-             WHERE meeting_id=?1 AND state='cancelled'
-               AND last_error='meeting continued before follow-up completed'",
-            params![meeting_id, observed_at],
-        )?;
+        restore_jobs()?;
         let meeting = load_meeting_tx(&transaction, meeting_id)?;
         transaction.commit()?;
         Ok(meeting)

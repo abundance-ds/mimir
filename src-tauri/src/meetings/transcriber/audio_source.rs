@@ -45,6 +45,7 @@ pub struct PersistedAudioSource {
     root: PathBuf,
     meeting_id: String,
     authority: AudioAuthority,
+    pub(super) end_sequence: Arc<AtomicU64>,
 }
 
 impl PersistedAudioSource {
@@ -56,6 +57,7 @@ impl PersistedAudioSource {
         validate_path_component(meeting_id, "meeting id")?;
         Ok(Self {
             root: data_dir.into(),
+            end_sequence: Arc::new(AtomicU64::new(u64::MAX)),
             meeting_id: meeting_id.into(),
             authority: AudioAuthority::CommittedStore(store),
         })
@@ -69,6 +71,7 @@ impl PersistedAudioSource {
         validate_path_component(meeting_id, "meeting id")?;
         Ok(Self {
             root: data_dir.into(),
+            end_sequence: Arc::new(AtomicU64::new(u64::MAX)),
             meeting_id: meeting_id.into(),
             authority: AudioAuthority::FixtureDirectory,
         })
@@ -123,7 +126,8 @@ impl PersistedAudioSource {
         let system = self.authorized_channel_chunks("system", first_sequence, maximum_chunks)?;
         let mut result = Vec::new();
         let mut sequence = first_sequence;
-        while result.len() < maximum_chunks {
+        while result.len() < maximum_chunks && sequence < self.end_sequence.load(Ordering::Acquire)
+        {
             let microphone_chunk = microphone.get(&sequence);
             let system_chunk = system.get(&sequence);
             match (microphone_chunk, system_chunk) {

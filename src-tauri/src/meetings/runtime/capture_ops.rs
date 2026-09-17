@@ -33,7 +33,7 @@ impl MeetingRuntime {
             let meeting = self.inner.store.get_meeting(meeting_id)?;
             if !matches!(
                 meeting.status,
-                MeetingStatus::Recording | MeetingStatus::Stopping | MeetingStatus::Finalizing
+                MeetingStatus::Recording | MeetingStatus::Stopping
             ) {
                 return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
             }
@@ -110,6 +110,9 @@ impl MeetingRuntime {
                     base_revision: interrupted.transcript_revision,
                     observed_at: self.inner.clock.now(),
                 });
+                if self.defer_failed_capture_repair(meeting_id, &message)? {
+                    return Err(port_error("meeting capture stop", message));
+                }
                 let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
                 let terminal_applied = match finalize {
                     Ok(batch)
@@ -158,105 +161,170 @@ impl MeetingRuntime {
             &self.inner.clock.now(),
             None,
         )?;
-        let _ = self.publish_unlocked(
+        // Freeze the old audio range while capture is still serialized. Each
+        // provider then drains only its own run, even after Continue starts.
+        self.inner
+            .transcription
+            .seal(
+                meeting_id,
+                &active.run_id,
+                self.inner.store.next_audio_sequence(meeting_id)?,
+            )
+            .map_err(|message| port_error("seal transcription audio", message))?;
+        *self.active()? = None;
+        self.inner
+            .drains
+            .lock()
+            .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?
+            .entry(meeting_id.into())
+            .or_default()
+            .runs
+            .insert(active.run_id.clone());
+        self.publish_unlocked(
             "transcript-finalizing",
             Some(meeting_id.into()),
             Some(active.run_id.clone()),
         )?;
-
         let transcript_request = TranscriptionFinalize {
             meeting_id: meeting_id.into(),
             run_id: active.run_id.clone(),
             base_revision: finalizing.transcript_revision,
             observed_at: self.inner.clock.now(),
         };
+        // Device teardown is complete. Slow provider work must not own the
+        // recording lock, so Start, Continue and another Stop remain usable.
+        drop(_operation);
         let finalize_result = self.inner.transcription.finalize(&transcript_request);
-        // A provider can durably commit acknowledged tail segments before
-        // either completing or reporting a terminal failure.
-        let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
-        let batch = match finalize_result {
-            Ok(batch) => batch,
-            Err(message) => {
-                self.enqueue_transcription_retry(
-                    meeting_id,
-                    after_provider_drain.transcript_revision,
-                    &message,
-                )?;
-                self.interrupt_after_stop_failure(
-                    meeting_id,
-                    &active.run_id,
-                    after_provider_drain.revision,
-                    "transcript-finalize-failed",
-                    &message,
-                )?;
-                return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
-            }
-        };
-        if !batch.marks_final {
-            let message = "transcription finalizer returned a non-terminal batch";
-            self.enqueue_transcription_retry(
-                meeting_id,
-                after_provider_drain.transcript_revision,
-                message,
-            )?;
-            self.interrupt_after_stop_failure(
-                meeting_id,
-                &active.run_id,
-                after_provider_drain.revision,
-                "transcript-not-final",
-                message,
-            )?;
-            return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
-        }
-        // The transcription port may durably commit final live-provider
-        // segments while draining its acknowledged tail. Refresh after the
-        // worker joins and require the terminal marker to extend that exact
-        // durable revision, not the pre-join snapshot.
-        if batch.meeting_id != meeting_id
-            || batch.base_revision != after_provider_drain.transcript_revision
+        let _operation = self.operation()?;
+        if self
+            .inner
+            .store
+            .deletion(meeting_id)?
+            .is_some_and(|deletion| deletion.mode == StoreDeletionMode::All)
         {
-            let message =
-                "transcription finalizer returned a batch for another meeting or revision";
-            self.enqueue_transcription_retry(
-                meeting_id,
-                after_provider_drain.transcript_revision,
-                message,
-            )?;
+            let mut drains = self
+                .inner
+                .drains
+                .lock()
+                .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?;
+            let last = drains.get_mut(meeting_id).is_none_or(|drain| {
+                drain.runs.remove(&active.run_id);
+                drain.runs.is_empty()
+            });
+            if last {
+                drains.remove(meeting_id);
+            }
+            drop(drains);
+            if last {
+                let deletion = self
+                    .inner
+                    .store
+                    .release_deleted_capture(meeting_id, &self.inner.clock.now())?;
+                if deletion.stage != MeetingDeletionStage::WaitingForJobs {
+                    if let Err(message) = self
+                        .inner
+                        .platform
+                        .delete_meeting(meeting_id, MeetingDeleteMode::All)
+                    {
+                        self.inner.store.record_deletion_error(
+                            meeting_id,
+                            &bounded_error(&message),
+                            &self.inner.clock.now(),
+                        )?;
+                    }
+                }
+            }
+            return self.publish_unlocked(
+                "meeting-deletion-pending",
+                Some(meeting_id.into()),
+                None,
+            );
+        }
+        let current = self.inner.store.get_meeting(meeting_id)?;
+        let recording = self
+            .active()?
+            .as_ref()
+            .is_some_and(|capture| capture.meeting_id == meeting_id);
+        let mut drains = self
+            .inner
+            .drains
+            .lock()
+            .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?;
+        let drain = drains.entry(meeting_id.into()).or_default();
+        drain.runs.remove(&active.run_id);
+        let last = drain.runs.is_empty() && !recording;
+        let continued = current.metadata.get("runId").and_then(Value::as_str)
+            != Some(active.run_id.as_str())
+            || current
+                .metadata
+                .get("captureRunCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                > 1;
+        let result = finalize_result.and_then(|mut batch| {
+            if !batch.marks_final {
+                return Err("transcription finalizer returned a non-terminal batch".into());
+            }
+            if batch.meeting_id != meeting_id
+                || batch.base_revision > current.transcript_revision
+                || (!continued && batch.base_revision != current.transcript_revision)
+            {
+                return Err(
+                    "transcription finalizer returned a batch for another meeting or revision"
+                        .into(),
+                );
+            }
+            batch.base_revision = current.transcript_revision;
+            batch.marks_final = last && drain.error.is_none();
+            // The native finalizer has already persisted its segments. Its
+            // terminal marker can be deferred until every run has drained.
+            if !batch.marks_final && batch.changes.is_empty() {
+                return Ok(current.transcript_revision);
+            }
+            let applied = if batch.marks_final {
+                self.inner.store.apply_transcript_batch(&batch)
+            } else {
+                self.inner.store.append_provider_transcript_batch(&batch)
+            };
+            applied
+                .map(|applied| applied.revision)
+                .map_err(|error| error.to_string())
+        });
+        if let Err(message) = &result {
+            drain.error = Some(message.clone());
+        }
+        if !last {
+            drop(drains);
+            return self.publish_unlocked(
+                "transcript-run-drained",
+                Some(meeting_id.into()),
+                Some(active.run_id),
+            );
+        }
+        let error = drain.error.clone();
+        drains.remove(meeting_id);
+        drop(drains);
+        if let Some(message) = error {
+            let current = self.inner.store.get_meeting(meeting_id)?;
+            self.enqueue_transcription_retry(meeting_id, current.transcript_revision, &message)?;
             self.interrupt_after_stop_failure(
                 meeting_id,
                 &active.run_id,
-                after_provider_drain.revision,
-                "transcript-invalid-batch",
-                message,
+                current.revision,
+                "transcript-finalize-failed",
+                &message,
             )?;
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
         }
-        let applied = match self.inner.store.apply_transcript_batch(&batch) {
-            Ok(applied) => applied,
-            Err(error) => {
-                let message = error.to_string();
-                self.enqueue_transcription_retry(
-                    meeting_id,
-                    after_provider_drain.transcript_revision,
-                    &message,
-                )?;
-                self.interrupt_after_stop_failure(
-                    meeting_id,
-                    &active.run_id,
-                    after_provider_drain.revision,
-                    "transcript-persist-failed",
-                    &message,
-                )?;
-                return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
-            }
-        };
+        let applied_revision =
+            result.map_err(|message| port_error("transcript finalization", message))?;
         let after_transcript = self.inner.store.get_meeting(meeting_id)?;
         let overview = self.inner.store.transcript_overview(meeting_id, 1)?;
         let completed_at = self.inner.clock.now();
         let summary_job = (hook_config.summary_enabled && overview.segment_count > 0).then(|| {
             self.summary_job_draft(
                 meeting_id,
-                applied.revision,
+                applied_revision,
                 &hook_config.summary_template,
                 &hook_config.summary_prompt,
                 &hook_config.summary_preset,
@@ -269,14 +337,38 @@ impl MeetingRuntime {
             &completed_at,
             summary_job.as_ref(),
         )?;
-        *self.active()? = None;
-
         debug_assert_eq!(completed.status, MeetingStatus::Completed);
         self.publish_unlocked(
             "meeting-finalized",
             Some(meeting_id.into()),
             Some(active.run_id),
         )
+    }
+
+    fn defer_failed_capture_repair(
+        &self,
+        meeting_id: &str,
+        message: &str,
+    ) -> Result<bool, MeetingRuntimeError> {
+        let mut drains = self
+            .inner
+            .drains
+            .lock()
+            .map_err(|_| port_error("transcript drains", "mutex poisoned".into()))?;
+        let Some(drain) = drains.get_mut(meeting_id) else {
+            return Ok(false);
+        };
+        drain.error = Some(message.into());
+        let pending = !drain.runs.is_empty();
+        if !pending {
+            drains.remove(meeting_id);
+        }
+        drop(drains);
+        if !pending {
+            let meeting = self.inner.store.get_meeting(meeting_id)?;
+            self.enqueue_transcription_retry(meeting_id, meeting.transcript_revision, message)?;
+        }
+        Ok(true)
     }
 
     pub fn set_microphone_muted(
@@ -373,6 +465,13 @@ impl MeetingRuntime {
             observed_at: self.inner.clock.now(),
         });
 
+        if self.defer_failed_capture_repair(meeting_id, message)? {
+            return self.publish_unlocked(
+                "meeting-interrupted",
+                Some(meeting_id.into()),
+                Some(run_id.into()),
+            );
+        }
         let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
         let transcript_final = match finalize {
             Ok(batch)

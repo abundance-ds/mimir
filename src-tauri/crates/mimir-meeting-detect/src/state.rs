@@ -312,8 +312,8 @@ mod tests {
         .unwrap();
         let dictate = AppEvidence {
             process_id: 8,
-            bundle_id: Some("ai.shoulders.mimtts".into()),
-            app_name: "Mim Dictate".into(),
+            bundle_id: Some("com.example.dictate".into()),
+            app_name: "Example Dictation".into(),
         };
         let zoom = AppEvidence {
             process_id: 9,
@@ -326,14 +326,14 @@ mod tests {
         let before = policy.candidates();
         let ignored = before
             .iter()
-            .find(|app| app.app_id == "ai.shoulders.mimtts")
+            .find(|app| app.app_id == "com.example.dictate")
             .unwrap();
         let retained = before
             .iter()
             .find(|app| app.app_id == "us.zoom.xos")
             .unwrap();
         assert_eq!(
-            policy.set_ignored_bundle_ids(BTreeSet::from(["AI.SHOULDERS.MIMTTS".into()])),
+            policy.set_ignored_bundle_ids(BTreeSet::from(["COM.EXAMPLE.DICTATE".into()])),
             vec![DetectionEvent::CandidateEnded {
                 candidate_id: ignored.id.clone(),
                 reason: CandidateEndReason::Ignored,
