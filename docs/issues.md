@@ -5,10 +5,10 @@ task scope.
 
 ## Open
 
-- Scribe audio retention: failed repair attempts can remain `collecting` after
-  a later retranscription succeeds. These old records keep the retention hold
-  active and prevent expired audio from being deleted. Release obsolete holds
-  after successful replacement while preserving holds for active transcription.
+- CLI entry path: running `bin/mimir.mjs` through a symlink path can exit with
+  status 0 and no output. The script-entry check compares the raw argument URL
+  with the resolved module URL. On macOS, `/tmp` versus `/private/tmp` reproduces
+  this. Resolve both paths before comparison and test a symlink entry point.
 
 - Scribe tests: the reviewed-summary case in `ScribeApp.test.js` failed in a
   full-suite run but passed when that file ran alone; investigate its
@@ -19,12 +19,6 @@ task scope.
   transitions and signed installed-app verification remain open. Automated
   lifecycle tests do not establish these results; behavior belongs in
   [meetings.md](meetings.md).
-
-- Dependency audit: `bun run check:advisories` reports the existing
-  `@ai-sdk/provider-utils` low-severity resource-consumption advisory
-  [GHSA-866g-f22w-33x8](https://github.com/advisories/GHSA-866g-f22w-33x8).
-  The Graph inline-link change does not change this JavaScript dependency.
-  Update the affected AI SDK dependency under its own checks.
 
 - Files sidebar: native file-drop and workspace-switch-during-search checks
   remain open. The current development build has native evidence for search

@@ -231,10 +231,9 @@ native costs, not input-to-display guarantees.
 ## Product surface
 
 Work and Graph are the two primary projections. Work is the default issue
-projection with Board and List views. Graph is the complete node surface; its
-List and Timeline views can filter by kind. Startup and selecting Graph reset
-the kind filter to All kinds, including for old saved projections.
-Changes shows the event stream. [Scribe](meetings.md) owns meeting preparation
+projection with Board and List views. Graph has one entry table. Its column
+headers sort and filter entries. Changes is a secondary action that opens
+the event stream. [Scribe](meetings.md) owns meeting preparation
 and filing. Entry details open in Editor tabs, leaving the Graph projection
 in Main. Preview, pinning, close, and session restore use the Editor tab
 lifecycle. Reopening an entry or its source selects the same tab and keeps
@@ -262,7 +261,7 @@ baseline and the current draft; remount checks source identity before writing.
 
 Entry-open requests pass from `BusinessGraphApp` through `AppActivity` to the
 Workbench's mounted Editor. Workbench integration tests click Board, List,
-and Timeline entries through this route, including when the Editor is a rail.
+and Groups entries through this route, including when the Editor is a rail.
 The full-component test also checks draft editing, close cancellation, and
 focus return to the Board row. Escape closes Details through the normal tab
 close check; open menus and link suggestions consume Escape first.
@@ -305,23 +304,76 @@ immediately by title, summary, tags, project, owner, and work details. Terms
 combine and ignore case and accents. Board keeps its columns, and List keeps
 its groups and sort order. Empty search columns remain visible; clearing the
 query restores the work. Graph uses debounced content search.
-Graph offers a current-project toggle beside the kind filter. Its name comes
-from the Project linked to the current workspace. The toggle includes that
-Project and entries with a direct incoming or outgoing relation or body link.
-It respects selected storage scopes and does not follow further links. Project
-and kind filters run before query and search result limits. The toggle starts
-off, stays selected across views, and follows the linked Project when the
-workspace changes. Long names truncate to the available width; the control
-exposes the full name. No linked project opens workspace setup. A missing or
-excluded Project produces no matches while the filter is active.
+Graph has one table with **Title**, **Kind**, **Project**, **Created**, and
+**Updated** columns. Rows have no separator lines and use 11.5 px type.
+Click a column label to sort; click it again to reverse
+the order. One arrow marks the active sort. The default is Updated, newest
+first. There is no separate sort menu or List/Groups switch. **Changes** above
+the table opens event history; **Entries** returns to the table. Opening
+Changes clears search. The table has no command footer. Cmd/Ctrl+F,
+Cmd/Ctrl+K, and `/` focus search. **New** creates an entry.
 
-The filters apply to List, Timeline, and Graph search results. Changes without
-a search remains an event view and does not show these controls. The Graph
-has no command footer. Cmd/Ctrl+F, Cmd/Ctrl+K, and `/` focus its search field.
+Click anywhere in a row to open that row's entry in Editor. Every cell has
+the same action. Project names in rows are plain text. A Project row shows
+its own name in the Project column. An entry assigned to more than one
+project shows the first project by name and a count of the other projects;
+the full list is available in the cell tooltip. Arrow keys move between rows;
+Enter opens the focused entry. Background updates keep the selected entry
+and anchor the first visible row. They do not open or replace a document.
+An explicit search, filter, or sort change starts at the top. Narrow panes
+scroll across the columns and keep Title visible. No column control is
+removed at small widths.
+
+Kind and Project have separate, always-visible filter buttons beside their
+sort labels. Kind lists the kinds present in the selected scopes, independently
+of active filters and paging. Project has a text search, puts
+the current workspace project first, and offers **No project**. Both use
+checkboxes. Changes apply at once, and the filter stays open for further
+selections. Clicking the filter icon again closes it without clearing selections.
+Escape closes the filter and returns focus to its button.
+Clicking outside also closes it. Filter menus render above the app panes and
+stay inside the window. A click anywhere in an option selects it. Multiple selections match any value within
+a column; filters across columns must all match. Named filter chips above
+the table clear each column. **Clear filters** clears both columns and keeps
+the search text. Filters remain available when no entries match.
+
+Project filtering includes the Project entry and entries with explicit
+`part_of` assignments to it. A resolved legacy project id is also accepted.
+Body mentions, backlinks, and other relation types do not assign a project.
+**No project** includes entries with no assignment or with no resolved project
+in the selected storage scopes. Kind and storage scope filters still apply.
+The project list is loaded independently of table filters and includes
+projects beyond the first result page. Project sorting uses project titles,
+with unassigned entries last in both directions. Multiple memberships use
+the first project by name for sorting and match any selected project.
+
+Each new search starts with **Best match**: exact title matches, then other
+titles containing all search terms, then content matches. A column click
+sorts the search results. The Best match action restores relevance.
+Clearing search restores the browse sort. Browse order and active column
+filters persist; search order is limited to the current query. Old Timeline
+and Groups selections open the table. Old single-kind category settings are
+ignored. Missing or invalid dates sort last in both directions. Dates display
+in local time, with Today and Yesterday where applicable.
+
+Native queries apply scope, project, and kind filters, then sorting, before
+pagination. Created is included in entry summaries. **Show more** loads the
+next page: 500 entries for browsing and 100 matches for search. A changed
+order or filter rejects late pages. Background refresh retains the number
+of entries already loaded.
+
+Tests cover order and filters before limits, explicit project membership,
+project title sorting, title relevance, dates, search pages, stale requests,
+refresh after loading more, saved preferences, row actions, filter keyboard
+use, and scroll anchoring. `harness/graph.html` mounts the production entry
+table with local fixtures for browser checks. `?pane=380&offset=260` places
+it in a narrow, clipped pane. It does not read or write
+Graph files. Browser checks do not establish installed native-app behavior.
+
 Entry Details offers **Work with agent** in More actions. It saves the entry,
-then prepares bounded context for an agent Activity. **New** creates entries.
-Raw ids and source revisions stay out of normal UI. Projection navigation
-stays direct at every width.
+then prepares bounded context for an agent Activity. Raw ids and source
+revisions stay out of normal UI. Projection navigation stays direct at every
+width.
 
 Work rows share one grammar (`business-graph/workRow.js`) across Board and
 List. A Board card has a fixed height and fixed slots: a two-line title with

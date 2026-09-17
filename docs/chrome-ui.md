@@ -142,7 +142,8 @@ retains the pane-bar layout above. [Files](files.md) owns their behavior.
 | Files ledger status | `FilesActivity.vue` | Mono 10 px status line |
 | Files ledger columns | `FilesActivity.vue` | Mono 10 px column labels in the tree grid |
 | Graph entry view | `business-graph/GraphEntryDetails.vue` | 36 px band with Details and Source controls at 28 px; quiet save status, Save, and More; uses the Editor tab strip |
-| Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; current-project toggle and kind filter in Graph; frequent task filters in Work; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
+| Work viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; frequent task filters; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
+| Graph table | `business-graph/GraphEntries.vue` | Sort labels and Kind/Project filter buttons in the column headings; named filters and the Changes action above the table; see [Graph](business-graph.md#product-surface) |
 
 ### Canvases
 
@@ -244,8 +245,8 @@ The 2026-09-04 repair made these changes:
    and status footer keep their 28 px document margin.
 8. Sidebar, Activity, and Editor use the same `pane-header` class. Editor file
    tabs fill that band, align to its bottom edge, and use a raised active plate.
-9. Work and Graph navigation stays direct at every width. List, Timeline,
-   Meetings, and Changes remain views within Graph.
+9. Work and Graph navigation stays direct at every width. Graph has one
+   entry table and a secondary Changes action.
 10. Tools and Activities have fixed headings above Files. Main sessions
     also remain in the horizontal tab strip.
 

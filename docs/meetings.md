@@ -36,7 +36,10 @@ Transcription follows committed audio and never blocks the capture callback.
 - Transcription uses a selected local Whisper model or one explicit hosted
   endpoint. There is no hidden provider fallback.
 - Stop ends capture at once and leaves the recording surface. Transcript tail
-  processing continues in the background and produces one terminal transcript.
+  processing continues in the background. **Meeting actions (⋯) → Resume
+  recording** becomes available as soon as capture stops. It adds audio
+  to the same meeting without waiting for transcription or summary work. The
+  transcript becomes final only after all recording runs finish processing.
   Failed or partial transcripts remain recoverable; silence completes without
   invented content.
 - Leaving a meeting never waits for note persistence or transcript finalization.
@@ -82,15 +85,20 @@ detail header. Mimir saves pending edits before filing. The button changes to
 
 Project and People menus always offer **New project…** or **New person…**.
 The action opens a small dialog with the search text in Name and the meeting's
-scope in **Save in**. **Create and add** creates the Graph record and selects it
-in the meeting. Creation errors retain the entered values for retry. Cancel
-closes the dialog without creating a record. Notes and recording stay in place.
+scope in **Save in**. New person also offers an optional **Company** selector.
+**Create and add** saves the person and its **works at** company relation directly
+to Graph, then selects the person in the meeting. Projects are also saved
+directly to Graph. These records do not wait for the meeting to be filed.
+Creation errors retain the entered values for retry. Cancel closes the dialog
+without creating a record. Notes and recording stay in place.
 
 After filing, Scribe shows the current Graph title, context, and summary.
 **In Graph · Team**, for example, shows where the record is stored. Use **View
 in Graph** to edit those saved values. Notes and transcript remain in Scribe.
-Use **Meeting actions → Continue recording** to add another recording to the
-same completed meeting.
+Use **Meeting actions (⋯) → Resume recording** to add audio to the same meeting. It also works while transcription
+is in progress or needs repair. An existing summary remains readable and is
+marked for an update after more recording. Editing it after transcription or
+generating a new summary clears that notice.
 
 Graph keeps the stable source meeting id. Its **Transcript → Open in Scribe**
 action opens that meeting's Transcript tab, including meetings outside the
@@ -112,8 +120,12 @@ save keeps the draft available for review after **Reload**.
 Use the visible **Meeting actions (⋯)** button in the overview or detail view,
 then **Delete**. Right-click on an overview row also opens this menu. Confirm
 **Delete meeting** to remove the Scribe meeting, transcript, summary, and owned
-audio. This also works for a prepared meeting when the call did not occur.
-A filed Graph record and explicit exports remain separate records.
+audio. A stopped meeting can be deleted while transcription, summary work,
+or note saving is in progress. The deletion request is saved immediately;
+late results and saves cannot restore the meeting. File cleanup waits for
+workers to release their files and resumes after restart if needed. This also
+works for a prepared meeting when the call did not occur. A filed Graph record
+and explicit exports remain separate records.
 
 ## Durability and recovery
 
@@ -131,9 +143,19 @@ honest `Interrupted` and `Failed` exits.
 - App exit explicitly stops detection and maintenance. Repeated shutdown calls
   wait for completion and return the same cleanup result. Exit logs failures.
 - Continue retains the meeting and history but creates a new capture `runId`.
+  Each stopped run has a fixed audio boundary. Its provider can drain while a
+  later run records; it cannot read that later run's audio or finish its capture.
+  Provider appends share one atomic transcript revision boundary. A failed run
+  queues repair of retained audio after capture and all earlier drains stop.
+  Restart recovery rebuilds from committed audio, including continued runs.
+- Summary saves check their source transcript under the recording lock. Work
+  from an earlier recording cannot replace the summary after Continue.
 - Repair is keyed by `runId`, uses verified committed audio from sequence zero,
   stages output privately, and replaces transcript data only after a complete
   terminal pass.
+- A successful replacement removes obsolete repair staging and its audio hold.
+  Newer repairs and pending or running transcription jobs keep their holds.
+  Retention and audio deletion also release obsolete holds left by older builds.
 - Automatic recovery keeps the recording's original route and model.
   **Transcribe again** uses the current settings when explicitly requested.
 
@@ -156,8 +178,10 @@ honest `Interrupted` and `Failed` exits.
 - Summary format, prompt, and agent are frozen into each job. Failures remain
   retryable and do not turn a completed recording into a capture failure.
 - Permanent deletion is visible at the durable tombstone boundary. The meeting
-  disappears at once. An already running follow-up can release its process
-  lease in the background before private file and database cleanup completes.
+  disappears at once. Native transcription workers and running follow-ups
+  release their files in the background before private file and database
+  cleanup completes. Renderer updates exclude pending and accepted deletions,
+  including late save responses, search results, and older library pages.
 
 ### Local models
 

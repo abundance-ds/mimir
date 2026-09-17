@@ -73,7 +73,8 @@ rules that relate them.
 
 ## Graph and rows
 
-- Projection rows use hairlines, full-width hover, and stable geometry.
+- Projection rows use full-width hover and stable geometry. The Graph entry
+  table has no row lines and uses 11.5 px type. Other projection rows use hairlines.
 - Tools and Activities rows are 24 px in the Sidebar and rail. File rows are 28 px.
 - Graph property controls are borderless at rest and gain a quiet hover wash
   and focus ring. Visible labels explain editable values.
