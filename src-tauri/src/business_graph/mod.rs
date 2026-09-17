@@ -7,6 +7,7 @@ mod context;
 mod markdown;
 mod migration;
 mod model;
+mod ordering;
 #[cfg(test)]
 mod performance;
 mod references;
@@ -28,10 +29,10 @@ pub use model::{
     canonical_kind, is_known_kind, is_valid_id, GraphActor, GraphActorKind, GraphChanged,
     GraphDeleteResult, GraphDiagnostic, GraphDiagnosticLevel, GraphEvent, GraphEventPage,
     GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode, GraphNodeCreate, GraphNodeDelete,
-    GraphNodeMove, GraphNodePatch, GraphNodeSummary, GraphOpenResult, GraphProvenance, GraphQuery,
-    GraphQueryResult, GraphRelation, GraphRelationDirection, GraphRestoreRequest,
-    GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceFormat, GraphSourceRoot,
-    ENTITY_KINDS, ISSUE_PRIORITIES, ISSUE_STATUSES,
+    GraphNodeMove, GraphNodePatch, GraphNodeSummary, GraphOpenResult, GraphOrder, GraphProvenance,
+    GraphQuery, GraphQueryResult, GraphRelation, GraphRelationDirection, GraphRestoreRequest,
+    GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSortBy, GraphSortDirection,
+    GraphSourceFormat, GraphSourceRoot, ENTITY_KINDS, ISSUE_PRIORITIES, ISSUE_STATUSES,
 };
 pub use references::{
     extract_graph_references, parse_graph_link_target, GraphBacklink, GraphBodyReference,

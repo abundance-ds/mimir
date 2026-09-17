@@ -111,7 +111,6 @@ describe('Business Graph UI contract', () => {
       'data-now-',
       'data-graph-event',
       'data-company-card',
-      'data-timeline-node',
       'v-bind="$attrs"',
       ':ref="element =>',
     ]
@@ -120,7 +119,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(24)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(25)
     expect(BUSINESS_GRAPH_SURFACES).toContain('TimesheetDetails.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')

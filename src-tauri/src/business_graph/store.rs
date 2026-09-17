@@ -1,10 +1,12 @@
 use super::markdown::{parse_graph_markdown, serialize_graph_markdown, source_revision};
 use super::model::{
     canonical_kind, is_known_kind, is_valid_id, GraphDeleteResult, GraphDiagnostic, GraphNeighbor,
-    GraphNode, GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphProvenance,
-    GraphQuery, GraphQueryResult, GraphRelation, GraphRelationDirection, GraphSearchResult,
-    GraphSourceFormat, GraphSourceRoot, ISSUE_PRIORITIES, ISSUE_STATUSES,
+    GraphNode, GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphOrder,
+    GraphProvenance, GraphQuery, GraphQueryResult, GraphRelation, GraphRelationDirection,
+    GraphSearchResult, GraphSortBy, GraphSourceFormat, GraphSourceRoot, ISSUE_PRIORITIES,
+    ISSUE_STATUSES,
 };
+use super::ordering::order_key;
 use super::references::{
     extract_graph_references, normalize_title, title_match_rank, GraphBacklink, GraphBodyReference,
     GraphLinkResolution, GraphLinkStatus, GraphLinkTarget, GraphOutgoingReference, GraphReferences,
@@ -515,14 +517,14 @@ impl GraphStore {
                 .all(|tag| node.tags.iter().any(|node_tag| node_tag == tag))
         });
 
-        ids.sort_by(|left, right| {
-            let left = &self.nodes[left];
-            let right = &self.nodes[right];
-            right
-                .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| left.title.cmp(&right.title))
-                .then_with(|| left.id.cmp(&right.id))
+        let order = query.order.clone().unwrap_or_default();
+        ids.sort_by_cached_key(|id| {
+            order_key(
+                &self.nodes[id],
+                &order,
+                0,
+                &self.project_sort_label(&self.nodes[id], query),
+            )
         });
 
         let total = ids.len();
@@ -535,7 +537,18 @@ impl GraphStore {
             .filter_map(|id| self.nodes.get(&id).map(GraphNode::compact))
             .collect();
 
+        let mut available_kinds = self
+            .by_kind
+            .iter()
+            .filter(|(_, ids)| {
+                ids.iter()
+                    .any(|id| self.visible_node(id, &query.scope_ids).is_some())
+            })
+            .map(|(kind, _)| kind.clone())
+            .collect::<Vec<_>>();
+        available_kinds.sort();
         GraphQueryResult {
+            available_kinds,
             items,
             total,
             offset,
@@ -571,22 +584,30 @@ impl GraphStore {
             .iter()
             .filter_map(|id| self.nodes.get(id))
             .filter_map(|node| {
-                let score = search_score(node, &terms);
+                let score = search_score(node, &terms, text);
                 (score > 0).then(|| GraphSearchResult {
                     node: node.compact(),
                     score,
                 })
             })
             .collect::<Vec<_>>();
-        results.sort_by(|left, right| {
-            right
-                .score
-                .cmp(&left.score)
-                .then_with(|| left.node.title.cmp(&right.node.title))
-                .then_with(|| left.node.id.cmp(&right.node.id))
+        let order = query.order.clone().unwrap_or(GraphOrder {
+            sort_by: GraphSortBy::Relevance,
+            ..GraphOrder::default()
         });
-        results.truncate(query.limit.clamp(1, MAX_SEARCH_LIMIT));
+        results.sort_by_cached_key(|result| {
+            order_key(
+                &self.nodes[&result.node.id],
+                &order,
+                result.score,
+                &self.project_sort_label(&self.nodes[&result.node.id], query),
+            )
+        });
         results
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit.clamp(1, MAX_SEARCH_LIMIT))
+            .collect()
     }
 
     pub fn neighbors(&self, id: &str, scope_ids: &BTreeSet<String>) -> Vec<GraphNeighbor> {
@@ -770,6 +791,51 @@ impl GraphStore {
         relations
     }
 
+    fn entry_projects<'a>(
+        &'a self,
+        node: &'a GraphNode,
+        scopes: &BTreeSet<String>,
+    ) -> Vec<&'a GraphNode> {
+        if node.kind == "project" {
+            return vec![node];
+        }
+        let mut targets = node
+            .relations
+            .iter()
+            .filter(|edge| edge.relation == "part_of")
+            .map(|edge| edge.target.as_str())
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            if let Some(id) = node
+                .properties
+                .get("legacyProject")
+                .and_then(|value| value.as_str())
+            {
+                targets.push(id);
+            }
+        }
+        targets
+            .into_iter()
+            .filter_map(|id| self.visible_node(id, scopes))
+            .filter(|project| project.kind == "project")
+            .collect()
+    }
+
+    fn project_sort_label(&self, node: &GraphNode, query: &GraphQuery) -> String {
+        if query
+            .order
+            .as_ref()
+            .is_none_or(|order| order.sort_by != GraphSortBy::Project)
+        {
+            return String::new();
+        }
+        self.entry_projects(node, &query.scope_ids)
+            .iter()
+            .map(|project| normalize_title(&project.title))
+            .min()
+            .unwrap_or_default()
+    }
+
     fn candidate_ids(&self, query: &GraphQuery) -> Vec<String> {
         let mut candidate: Option<BTreeSet<String>> = None;
         for scope in &query.scope_ids {
@@ -828,6 +894,22 @@ impl GraphStore {
         candidate
             .unwrap_or_else(|| self.nodes.keys().cloned().collect())
             .into_iter()
+            .filter(|id| {
+                if query.project_ids.is_empty() {
+                    return true;
+                }
+                let Some(node) = self.nodes.get(id) else {
+                    return false;
+                };
+                let projects = self.entry_projects(node, &query.scope_ids);
+                if projects.is_empty() {
+                    query.project_ids.contains("__unassigned__")
+                } else {
+                    projects
+                        .iter()
+                        .any(|project| query.project_ids.contains(&project.id))
+                }
+            })
             .collect()
     }
 
@@ -1333,7 +1415,7 @@ fn search_terms(query: &str) -> Vec<String> {
         .collect()
 }
 
-fn search_score(node: &GraphNode, terms: &[String]) -> u32 {
+fn search_score(node: &GraphNode, terms: &[String], query: &str) -> u32 {
     let id = node.id.to_lowercase();
     let title = node.title.to_lowercase();
     let summary = node.summary.to_lowercase();
@@ -1344,7 +1426,7 @@ fn search_score(node: &GraphNode, terms: &[String]) -> u32 {
         .map(|tag| tag.to_lowercase())
         .collect::<Vec<_>>();
 
-    let mut score = 0;
+    let mut score: u32 = 0;
     for term in terms {
         let mut term_score = 0;
         if title == *term {
@@ -1373,9 +1455,16 @@ fn search_score(node: &GraphNode, terms: &[String]) -> u32 {
         if term_score == 0 {
             return 0;
         }
-        score += term_score;
+        score = score.saturating_add(term_score);
     }
-    score
+    let title_tier = if normalize_title(&node.title) == normalize_title(query) {
+        2
+    } else if terms.iter().all(|term| title.contains(term)) {
+        1
+    } else {
+        0
+    };
+    (title_tier << 28) + score.min((1 << 28) - 1)
 }
 
 #[cfg(test)]
@@ -1436,6 +1525,258 @@ mod tests {
         let result = store.query(&query);
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].title, "HEOR evidence map");
+    }
+
+    #[test]
+    fn orders_complete_graph_and_search_before_paging() {
+        use super::super::model::GraphSortDirection;
+        let (_root, mut store) = fixture();
+        let template = store.nodes.values().next().unwrap().clone();
+        store.nodes.clear();
+        for index in 0..505 {
+            let mut node = template.clone();
+            node.id = format!("entry-{index:03}");
+            node.title = format!("Needle {index:03}");
+            node.kind = if index == 504 { "decision" } else { "note" }.into();
+            node.created_at = "2020-01-01".into();
+            node.updated_at = "2026-09-16T12:00:00Z".into();
+            store.nodes.insert(node.id.clone(), node);
+        }
+        let mut query = GraphQuery {
+            limit: 2,
+            order: Some(GraphOrder {
+                sort_by: GraphSortBy::Title,
+                ..GraphOrder::default()
+            }),
+            ..GraphQuery::default()
+        };
+        assert_eq!(
+            store
+                .query(&query)
+                .items
+                .iter()
+                .map(|n| n.id.as_str())
+                .collect::<Vec<_>>(),
+            ["entry-504", "entry-503"]
+        );
+        assert_eq!(store.search_query("needle", &query)[0].node.id, "entry-504");
+        query.offset = 2;
+        assert_eq!(store.query(&query).items[0].id, "entry-502");
+        assert_eq!(store.search_query("needle", &query)[0].node.id, "entry-502");
+
+        query.offset = 0;
+        query.order = Some(GraphOrder {
+            sort_by: GraphSortBy::Title,
+            direction: GraphSortDirection::Asc,
+        });
+        assert_eq!(store.query(&query).items[0].id, "entry-000");
+        assert_eq!(store.search_query("needle", &query)[0].node.id, "entry-000");
+    }
+
+    #[test]
+    fn date_sort_handles_offsets_and_missing_dates() {
+        use super::super::model::GraphSortDirection;
+        let (_root, mut store) = fixture();
+        let ids = store.nodes.keys().cloned().collect::<Vec<_>>();
+        for (id, date) in ids.iter().zip([
+            "2026-09-01T00:30:00+02:00",
+            "2026-08-31T23:00:00Z",
+            "invalid",
+        ]) {
+            let node = store.nodes.get_mut(id).unwrap();
+            node.created_at = date.into();
+            node.updated_at = date.into();
+        }
+        for sort_by in [GraphSortBy::Created, GraphSortBy::Updated] {
+            for (direction, expected) in [
+                (GraphSortDirection::Asc, vec![&ids[0], &ids[1], &ids[2]]),
+                (GraphSortDirection::Desc, vec![&ids[1], &ids[0], &ids[2]]),
+            ] {
+                let result = store.query(&GraphQuery {
+                    order: Some(GraphOrder { sort_by, direction }),
+                    limit: 10,
+                    ..GraphQuery::default()
+                });
+                assert_eq!(
+                    result.items.iter().map(|node| &node.id).collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(
+                    result.items[0].created_at,
+                    store.nodes[&result.items[0].id].created_at
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn project_filters_match_explicit_memberships_and_project_entries_before_limits() {
+        let (_root, mut store) = fixture();
+        let template = store.nodes.values().next().unwrap().clone();
+        store.nodes.clear();
+        for (id, kind, targets, scope) in [
+            ("atlas", "project", vec![], "team"),
+            ("beta", "project", vec![], "team"),
+            ("private-project", "project", vec![], "private"),
+            ("assigned", "note", vec!["atlas"], "team"),
+            ("shared", "note", vec!["atlas", "beta"], "team"),
+            ("orphan", "note", vec!["deleted-project"], "team"),
+            ("outside", "note", vec!["private-project"], "team"),
+            ("mentioned", "note", vec![], "team"),
+        ] {
+            let mut node = template.clone();
+            node.id = id.into();
+            node.title = format!("Needle {id}");
+            node.kind = kind.into();
+            node.properties.clear();
+            node.body = "[[atlas]]".into();
+            node.provenance.scope_id = scope.into();
+            node.relations = targets
+                .into_iter()
+                .map(|target| GraphRelation {
+                    relation: "part_of".into(),
+                    target: target.into(),
+                    legacy: false,
+                })
+                .collect();
+            store.nodes.insert(node.id.clone(), node);
+        }
+        // A legacy id is resolved; a legacy label is not guessed from the title.
+        store
+            .nodes
+            .get_mut("mentioned")
+            .unwrap()
+            .properties
+            .insert("legacyProject".into(), Value::String("Needle atlas".into()));
+        store.rebuild_indexes();
+        let mut query = GraphQuery {
+            scope_ids: BTreeSet::from(["team".into()]),
+            project_ids: BTreeSet::from(["atlas".into()]),
+            order: Some(GraphOrder {
+                sort_by: GraphSortBy::Title,
+                direction: super::super::model::GraphSortDirection::Asc,
+            }),
+            limit: 1,
+            ..GraphQuery::default()
+        };
+        assert_eq!(store.query(&query).total, 3);
+        assert_eq!(store.query(&query).available_kinds, ["note", "project"]);
+        assert_eq!(store.query(&query).items[0].id, "assigned");
+        query.offset = 1;
+        assert_eq!(store.query(&query).items[0].id, "atlas");
+        assert_eq!(store.search_query("needle", &query)[0].node.id, "atlas");
+        query.offset = 0;
+        query.kinds = BTreeSet::from(["note".into()]);
+        assert_eq!(store.query(&query).total, 2);
+        query.project_ids.insert("beta".into());
+        assert_eq!(store.query(&query).total, 2);
+        query.project_ids = BTreeSet::from(["__unassigned__".into()]);
+        query.limit = 100;
+        assert_eq!(
+            store
+                .query(&query)
+                .items
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["mentioned", "orphan", "outside"]
+        );
+        query.project_ids = BTreeSet::from(["private-project".into()]);
+        assert_eq!(store.query(&query).total, 0);
+    }
+
+    #[test]
+    fn project_sort_uses_project_titles_and_keeps_unassigned_last_in_both_directions() {
+        use super::super::model::GraphSortDirection;
+        let (_root, mut store) = fixture();
+        let template = store.nodes.values().next().unwrap().clone();
+        store.nodes.clear();
+        for (id, title, kind, project) in [
+            ("z-id", "Atlas", "project", ""),
+            ("a-id", "Zulu", "project", ""),
+            ("first", "A note", "note", "z-id"),
+            ("last", "Z note", "note", "a-id"),
+            ("empty", "No assignment", "note", ""),
+        ] {
+            let mut node = template.clone();
+            node.id = id.into();
+            node.title = title.into();
+            node.kind = kind.into();
+            node.properties.clear();
+            node.relations.clear();
+            if !project.is_empty() {
+                node.relations.push(GraphRelation {
+                    relation: "part_of".into(),
+                    target: project.into(),
+                    legacy: false,
+                });
+            }
+            store.nodes.insert(node.id.clone(), node);
+        }
+        store.rebuild_indexes();
+        for (direction, expected) in [
+            (GraphSortDirection::Asc, ["first", "last", "empty"]),
+            (GraphSortDirection::Desc, ["last", "first", "empty"]),
+        ] {
+            let query = GraphQuery {
+                kinds: BTreeSet::from(["note".into()]),
+                order: Some(GraphOrder {
+                    sort_by: GraphSortBy::Project,
+                    direction,
+                }),
+                limit: 100,
+                ..GraphQuery::default()
+            };
+            assert_eq!(
+                store
+                    .query(&query)
+                    .items
+                    .iter()
+                    .map(|node| node.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn exact_titles_precede_other_titles_and_content_across_search_pages() {
+        let (_root, mut store) = fixture();
+        let template = store.nodes.values().next().unwrap().clone();
+        store.nodes.clear();
+        for index in 0..505 {
+            let mut node = template.clone();
+            node.id = format!("result-{index}");
+            node.title = match index {
+                504 => "Atlas evidence",
+                503 => "Review Atlas evidence",
+                502 => "Atlas",
+                _ => "Content match",
+            }
+            .into();
+            node.body = "Atlas evidence".into();
+            node.tags = vec!["atlas".into(), "evidence".into()];
+            store.nodes.insert(node.id.clone(), node);
+        }
+        let query = GraphQuery {
+            limit: 2,
+            ..GraphQuery::default()
+        };
+        let results = store.search_query(" ATLAS evidence ", &query);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["result-504", "result-503"]
+        );
+        assert!(results[0].score > results[1].score);
+        assert_eq!(
+            store
+                .search_query("Atlas evidence", &GraphQuery { offset: 2, ..query })
+                .len(),
+            2
+        );
     }
 
     #[test]

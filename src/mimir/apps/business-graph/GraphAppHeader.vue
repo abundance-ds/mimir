@@ -23,7 +23,7 @@
         data-graph-search
         data-graph-control="global-search"
         type="search"
-        :placeholder="section === 'work' ? 'Filter work…' : 'Search the graph…'"
+        :placeholder="section === 'work' ? 'Filter work…' : 'Search entries…'"
         :aria-label="section === 'work' ? 'Filter work' : 'Search the business graph'"
         :title="section === 'work' ? 'Filter by title, project, owner, tags, or work details' : 'Search graph content'"
         autocomplete="off"

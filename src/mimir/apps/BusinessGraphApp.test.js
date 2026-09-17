@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -219,63 +219,37 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('keeps List, Timeline, and Changes inside Graph', async () => {
+  it('uses one Graph table and a secondary Changes action', async () => {
     const wrapper = render()
     await flushPromises()
-
     await wrapper.get('[data-graph-section="all"]').trigger('click')
-    expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual([
-      'List',
-      'Timeline',
-      'Changes',
-    ])
-
-    await wrapper.get('[data-graph-view="changes"]').trigger('click')
-    expect(wrapper.get('[data-graph-now]').exists()).toBe(true)
-    expect(wrapper.find('[data-graph-filters-trigger]').exists()).toBe(false)
-
+    expect(wrapper.findAll('[data-graph-view]')).toHaveLength(0)
+    expect(wrapper.find('[data-graph-entries]').exists()).toBe(true)
+    await wrapper.get('[data-graph-control="graph-changes"]').trigger('click')
+    expect(wrapper.find('[data-graph-now]').exists()).toBe(true)
+    await wrapper.get('[data-graph-control="graph-back-entries"]').trigger('click')
+    expect(wrapper.find('[data-graph-entries]').exists()).toBe(true)
     await wrapper.get('[data-graph-section="work"]').trigger('click')
     expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual(['Board', 'List'])
     wrapper.unmount()
   })
 
-  it('offers a named current-project toggle and keeps it across Graph views', async () => {
+  it('puts the current workspace first in the Project filter and keeps row navigation consistent', async () => {
     const wrapper = render()
     await flushPromises()
     const graph = useBusinessGraphStore(pinia)
     graph.setWorkspaceConfiguration({ project: 'project-alpha' })
     await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await wrapper.get('[data-graph-control="graph-filter-project"]').trigger('click')
+    expect(new DOMWrapper(document.body).get('[data-graph-column-filter]').text()).toContain('Current workspace')
+    await new DOMWrapper(document.body).get('[data-graph-control="graph-filter-option-project-project-alpha"]').trigger('click')
     await flushPromises()
-    const toggle = wrapper.get('[data-graph-control="current-project"]')
-    expect(toggle.text()).toContain('Project Alpha')
-    expect(toggle.attributes('aria-pressed')).toBe('false')
-    expect(wrapper.find('[data-graph-dispatch]').exists()).toBe(false)
-    await toggle.trigger('click')
-    await flushPromises()
-    expect(toggle.attributes('aria-pressed')).toBe('true')
-    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ relatedTo: 'project-alpha' }))
-    await wrapper.get('[data-graph-view="timeline"]').trigger('click')
-    expect(toggle.attributes('aria-pressed')).toBe('true')
-    await wrapper.get('[data-graph-view="changes"]').trigger('click')
-    expect(wrapper.find('[data-graph-control="current-project"]').exists()).toBe(false)
-    await wrapper.get('[data-graph-view="list"]').trigger('click')
-    await toggle.trigger('click')
-    expect(graph.currentProjectOnly).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('opens workspace setup when no Project is linked', async () => {
-    const wrapper = render()
-    await flushPromises()
-    await wrapper.get('[data-graph-section="all"]').trigger('click')
-    const toggle = wrapper.get('[data-graph-control="current-project"]')
-    expect(toggle.text()).toContain('No linked project')
-    await toggle.trigger('click')
-    expect(wrapper.emitted('configureWorkspace')).toHaveLength(1)
-    expect(useBusinessGraphStore(pinia).currentProjectOnly).toBe(false)
-    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'k', metaKey: true })
-    expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
-    expect(wrapper.emitted('startWork')).toBeUndefined()
+    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ projectIds: ['project-alpha'] }))
+    expect(wrapper.get('[data-graph-control="graph-clear-projectIds"]').text()).toContain('Project Alpha')
+    await wrapper.get('[data-entry-row="issue-1"] .graph-entry-project').trigger('click')
+    expect(wrapper.emitted('openGraphNode').at(-1)).toEqual([{ id: 'issue-1' }])
+    await wrapper.get('[data-entry-row="project-alpha"] .graph-entry-kind').trigger('click')
+    expect(wrapper.emitted('openGraphNode').at(-1)).toEqual([{ id: 'project-alpha' }])
     wrapper.unmount()
   })
 
@@ -293,30 +267,24 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-graph-section="all"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-graph-view="list"]').attributes('aria-pressed')).toBe('true')
-    await wrapper.get('[data-graph-filters-trigger]').trigger('click')
-    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
+    expect(wrapper.find('[data-graph-entries]').exists()).toBe(true)
+    expect(useBusinessGraphStore(pinia).graphKinds).toEqual([])
     expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
       .toEqual(expect.arrayContaining(['issue-1', 'issue-legacy', 'project-alpha']))
     wrapper.unmount()
   })
 
-  it('clears the kind filter when Graph is selected again', async () => {
+  it('keeps active Graph filters visible when returning from Work', async () => {
     const wrapper = render()
     await flushPromises()
-    const graphTab = wrapper.get('[data-graph-section="all"]')
-    await graphTab.trigger('click')
-    for (const leaveGraph of [false, true]) {
-      await wrapper.get('[data-graph-filters-trigger]').trigger('click')
-      await wrapper.get('[data-all-kind-filter]').trigger('click')
-      document.querySelector('[data-graph-select-option="knowledge"]').click()
-      await flushPromises()
-      expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Knowledge')
-      if (leaveGraph) await wrapper.get('[data-graph-section="work"]').trigger('click')
-      await graphTab.trigger('click')
-      expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
-      expect(wrapper.findAll('[data-graph-node]')).toHaveLength(3)
-    }
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await wrapper.get('[data-graph-control="graph-filter-kind"]').trigger('click')
+    await new DOMWrapper(document.body).get('[data-graph-control="graph-filter-option-kind-issue"]').trigger('click')
+    await wrapper.get('[data-graph-section="work"]').trigger('click')
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    expect(wrapper.get('[data-graph-control="graph-clear-kinds"]').text()).toContain('Task')
+    await wrapper.get('[data-graph-control="graph-clear-kinds"]').trigger('click')
+    expect(useBusinessGraphStore(pinia).graphKinds).toEqual([])
     wrapper.unmount()
   })
 
@@ -1083,6 +1051,7 @@ describe('BusinessGraphApp', () => {
     expect(searchGraph).toHaveBeenCalledWith('evidence', {
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       limit: 100,
+      order: { sortBy: 'relevance', direction: 'desc' },
     })
     expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
     expect(wrapper.get('.graph-search-count').text()).toBe('1')
@@ -1094,43 +1063,26 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('keeps search and kind filters in their controls without adding projection headers', async () => {
-    vi.mocked(searchGraph).mockResolvedValue([
-      { node: summaries[0] },
-      { node: summaries[1] },
-    ])
+  it('keeps the query when clearing column filters and restores browse sort after search', async () => {
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-graph-section="all"]').trigger('click')
-
-    const input = wrapper.get('[data-graph-search]')
-    await input.setValue('evidence')
-    await new Promise(resolve => setTimeout(resolve, 120))
+    await wrapper.get('[data-graph-control="graph-sort-created"]').trigger('click')
+    await wrapper.get('[data-graph-search]').setValue('evidence')
+    await new Promise(resolve => setTimeout(resolve, 130))
     await flushPromises()
-
-    const kindReset = wrapper.get('[data-graph-control="all-kind-filter-clear"]')
-    expect(kindReset.attributes('disabled')).toBeDefined()
-    await wrapper.get('[data-all-kind-filter]').trigger('click')
-    document.querySelector('[data-graph-select-option="project"]').click()
-    await flushPromises()
-
-    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Projects')
-    expect(kindReset.attributes('disabled')).toBeUndefined()
-    expect(useSettingsStore().businessGraphViewState.graph.kind).toBe('project')
-    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node'))).toEqual([
-      'project-alpha',
-    ])
-    expect(wrapper.text()).not.toContain('Showing:')
-    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
-
-    await kindReset.trigger('click')
-    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
-    expect(kindReset.attributes('disabled')).toBeDefined()
-    expect(useSettingsStore().businessGraphViewState.graph.kind).toBe('')
-    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(2)
-
+    expect(wrapper.get('[data-graph-control="graph-best-match"]').attributes('aria-pressed')).toBe('true')
+    await wrapper.get('[data-graph-control="graph-filter-kind"]').trigger('click')
+    await new DOMWrapper(document.body).get('[data-graph-control="graph-filter-option-kind-project"]').trigger('click')
+    expect(useBusinessGraphStore(pinia).graphKinds).toEqual(['project'])
+    await wrapper.get('[data-graph-control="graph-clear-filters"]').trigger('click')
+    expect(wrapper.get('[data-graph-search]').element.value).toBe('evidence')
+    await wrapper.get('[data-graph-control="graph-sort-title"]').trigger('click')
+    expect(useBusinessGraphStore(pinia).graphSearchOrder.sortBy).toBe('title')
+    await wrapper.get('[data-graph-control="graph-best-match"]').trigger('click')
+    expect(useBusinessGraphStore(pinia).graphSearchOrder.sortBy).toBe('relevance')
     await wrapper.get('[data-graph-control="clear-search"]').trigger('click')
-    expect(input.element.value).toBe('')
+    expect(wrapper.get('th[aria-sort]').text()).toBe('Created')
     wrapper.unmount()
   })
 
@@ -1242,6 +1194,7 @@ describe('BusinessGraphApp', () => {
     expect(searchGraph).toHaveBeenLastCalledWith('bank', {
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       limit: 100,
+      order: { sortBy: 'relevance', direction: 'desc' },
     })
     wrapper.unmount()
   })
@@ -1262,15 +1215,12 @@ describe('BusinessGraphApp', () => {
 
     await search.trigger('keydown', { key: 'ArrowDown' })
     await flushPromises()
-    const listbox = wrapper.get('[data-graph-entity-list]')
-    expect(document.activeElement).toBe(listbox.element)
-    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-issue-1')
+    expect(document.activeElement).toBe(wrapper.get('[data-graph-node="issue-1"]').element)
 
     search.element.focus()
     await search.trigger('keydown', { key: 'ArrowUp' })
     await flushPromises()
-    expect(document.activeElement).toBe(listbox.element)
-    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-project-alpha')
+    expect(document.activeElement).toBe(wrapper.get('[data-graph-node="project-alpha"]').element)
     await wrapper.get('[data-graph-section="work"]').trigger('click')
     wrapper.unmount()
   })
@@ -1310,6 +1260,7 @@ describe('BusinessGraphApp', () => {
     expect(searchGraph).toHaveBeenLastCalledWith('ba', {
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       limit: 100,
+      order: { sortBy: 'relevance', direction: 'desc' },
     })
     expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
     wrapper.unmount()

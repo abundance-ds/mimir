@@ -52,6 +52,7 @@
       ref="workspaceSurface"
       :current-section="currentSection"
       :view-options="viewOptions"
+      :graph-sort="graphSort"
       :project-filter="projectFilter"
       :project-filter-options="projectFilterOptions"
       :assignee-filter="assigneeFilter"
@@ -67,8 +68,6 @@
       :priority-filter-options="priorityFilterOptions"
       :collapsed-board-statuses="collapsedBoardStatuses"
       :board-statuses="boardStatuses"
-      :all-kind-filter="allKindFilter"
-      :all-kind-options="allKindOptions"
       :composing="composing"
       :projection-nodes="projectionNodes"
       :empty-title="emptyTitle"
@@ -81,6 +80,7 @@
       :show-closed-issues="showClosedIssues"
       :show-empty-projects="showEmptyProjects"
       @set-view="setView"
+      @sort-graph="setGraphSort"
       @update:project-filter="projectFilter = $event"
       @update:assignee-filter="assigneeFilter = $event"
       @update:board-group="boardGroup = $event"
@@ -88,7 +88,6 @@
       @update:show-closed-issues="showClosedIssues = $event"
       @update:show-empty-projects="showEmptyProjects = $event"
       @update:priority-filter="priorityFilter = $event"
-      @update:all-kind-filter="allKindFilter = $event"
       @toggle-board-status-collapse="toggleBoardStatusCollapse"
       @expand-all-board-statuses="expandAllBoardStatuses"
       @expand-board-status="expandBoardStatus"
@@ -167,8 +166,8 @@ const appHeader = ref(null)
 const workspaceSurface = ref(null)
 
 const {
-  allKindFilter,
-  allKindOptions,
+  graphSort,
+  setGraphSort,
   assigneeFilter,
   assigneeFilterOptions,
   boardGroup,
@@ -239,7 +238,6 @@ const {
   toggleScope,
 } = useGraphNavigation({
   graph,
-  kindFilter: allKindFilter,
   root,
   workspaceSurface,
   appHeader,

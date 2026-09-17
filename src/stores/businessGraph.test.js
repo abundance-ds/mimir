@@ -105,17 +105,19 @@ describe('business graph store', () => {
     store.setSection('all')
     const oldNote = { id: 'old-note', kind: 'note', title: 'Old project note' }
     vi.mocked(queryGraph).mockImplementation(async query => ({
-      items: query.relatedTo ? [oldNote] : summaries, total: query.relatedTo ? 1 : 2,
+      items: query.projectIds?.length ? [oldNote] : summaries, total: query.projectIds?.length ? 1 : 2,
     }))
-    store.currentProjectOnly = true
+    store.graphProjectIds = ['project-alpha']
     store.graphKinds = ['note']
     await vi.waitFor(() => expect(store.visibleNodes).toEqual([oldNote]))
     expect(queryGraph).toHaveBeenLastCalledWith({
-      scopeIds: scopes.map(scope => scope.id), relatedTo: 'project-alpha', kinds: ['note'], limit: 500,
+      scopeIds: scopes.map(scope => scope.id), projectIds: ['project-alpha'], kinds: ['note'], limit: 500,
+      order: { sortBy: 'updated', direction: 'desc' },
     })
     await store.search('evidence')
     expect(searchGraph).toHaveBeenLastCalledWith('evidence', {
-      scopeIds: scopes.map(scope => scope.id), relatedTo: 'project-alpha', kinds: ['note'], limit: 100,
+      scopeIds: scopes.map(scope => scope.id), projectIds: ['project-alpha'], kinds: ['note'], limit: 100,
+      order: { sortBy: 'relevance', direction: 'desc' },
     })
     store.clearSearch()
     store.setSection('work')
@@ -123,30 +125,24 @@ describe('business graph store', () => {
     store.setSection('all')
     store.setView('changes')
     expect(store.visibleNodes).toEqual(summaries)
-    expect(store.currentProjectOnly).toBe(true)
+    expect(store.graphProjectIds).toEqual(['project-alpha'])
   })
 
-  it('resolves a Project beyond the first page and follows the workspace link', async () => {
+  it('loads a complete project catalog and keeps membership filters independent of the workspace link', async () => {
     const store = useBusinessGraphStore()
+    const project = { id: 'old-project', kind: 'project', title: 'Old Project' }
+    vi.mocked(queryGraph).mockImplementation(async query => query.kinds?.includes('project')
+      ? { items: [project], total: 1, graphRevision: 1 }
+      : { items: [summaries[0]], total: 900, graphRevision: 1 })
     vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'old-project' })
-    vi.mocked(getGraphNode).mockResolvedValue({ id: 'old-project', kind: 'project', title: 'Old Project' })
+    vi.mocked(getGraphNode).mockResolvedValue(project)
     await store.start('/alpha')
     expect(store.workspaceProject.title).toBe('Old Project')
-    store.setSection('all')
-    store.currentProjectOnly = true
-    vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'project-alpha' })
-    await store.start('/beta')
-    expect(store.workspaceProject.title).toBe('Project Alpha')
-    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ relatedTo: 'project-alpha' }))
-    store.setWorkspaceConfiguration({})
+    expect(store.graphProjects).toEqual([project])
+    store.graphProjectIds = ['old-project']
+    store.setWorkspaceConfiguration({ project: 'project-alpha' })
     await nextTick()
-    expect(store.workspaceProject).toBeNull()
-    expect(store.visibleNodes).toEqual([])
-    await store.search('anything')
-    expect(store.searchResults).toEqual([])
-    store.currentProjectOnly = false
-    store.clearSearch()
-    expect(store.visibleNodes).toEqual(summaries)
+    expect(store.graphProjectIds).toEqual(['old-project'])
   })
 
   it('rejects old filtered queries and searches after the Project changes', async () => {
@@ -156,16 +152,35 @@ describe('business graph store', () => {
     store.setSection('all')
     let finishQuery, finishSearch
     vi.mocked(queryGraph).mockReturnValueOnce(new Promise(resolve => { finishQuery = resolve }))
-    store.currentProjectOnly = true
+    store.graphProjectIds = ['project-alpha']
     vi.mocked(searchGraph).mockReturnValueOnce(new Promise(resolve => { finishSearch = resolve }))
     const pendingSearch = store.search('evidence')
-    store.setWorkspaceConfiguration({ project: 'another-project' })
+    store.graphProjectIds = ['another-project']
     await vi.waitFor(() => expect(store.searching).toBe(false))
     finishQuery({ items: [{ id: 'stale' }] })
     finishSearch([{ node: { id: 'stale' } }])
     await pendingSearch
     store.clearSearch()
     expect(store.visibleNodes).not.toContainEqual({ id: 'stale' })
+  })
+
+  it('starts a changed search at Best match without bypassing the input debounce', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setSection('all')
+    store.graphOrder = { sortBy: 'project', direction: 'asc' }
+    await store.search('evidence')
+    store.graphSearchOrder = { sortBy: 'created', direction: 'desc' }
+    await nextTick()
+    vi.mocked(searchGraph).mockClear()
+    store.prepareSearch('atlas')
+    expect(searchGraph).not.toHaveBeenCalled()
+    expect(store.graphSearchOrder).toEqual({ sortBy: 'relevance', direction: 'desc' })
+    await store.search('atlas')
+    expect(searchGraph).toHaveBeenCalledTimes(1)
+    expect(searchGraph).toHaveBeenCalledWith('atlas', expect.objectContaining({ order: { sortBy: 'relevance', direction: 'desc' } }))
+    store.clearSearch()
+    expect(store.graphOrder).toEqual({ sortBy: 'project', direction: 'asc' })
   })
 
   it('rejects late search results after selected scopes change', async () => {
@@ -182,16 +197,90 @@ describe('business graph store', () => {
     expect(store.visibleNodes).toEqual([])
   })
 
+  it('pages the selected Graph order and rejects a late page after the order changes', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    const firstPage = Array.from({ length: 500 }, (_, index) => ({ id: `node-${index}`, kind: 'note', title: `Note ${index}` }))
+    vi.mocked(queryGraph).mockResolvedValue({ items: firstPage, total: 501, graphRevision: 1 })
+    store.setSection('all')
+    await vi.waitFor(() => expect(store.visibleNodes).toHaveLength(500))
+    expect(store.canLoadMore).toBe(true)
+    let finishPage
+    vi.mocked(queryGraph).mockReturnValueOnce(new Promise(resolve => { finishPage = resolve }))
+    const pending = store.loadMoreGraphEntries()
+    expect(queryGraph).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 500, order: { sortBy: 'updated', direction: 'desc' } }))
+    vi.mocked(queryGraph).mockResolvedValue({ items: [{ id: 'first-by-title', kind: 'note', title: 'A' }], total: 1 })
+    store.graphOrder = { sortBy: 'title', direction: 'asc' }
+    await vi.waitFor(() => expect(store.visibleNodes[0]?.id).toBe('first-by-title'))
+    finishPage({ items: [{ id: 'stale' }], total: 501 })
+    await pending
+    expect(store.visibleNodes.map(node => node.id)).toEqual(['first-by-title'])
+    expect(store.canLoadMore).toBe(false)
+    expect(store.loadingMore).toBe(false)
+    expect(store.nodes).toEqual(summaries)
+  })
+
+  it('retrieves search matches after the first page and retains them on refresh', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setSection('all')
+    store.setView('list')
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ node: { id: `match-${index}`, kind: 'note', title: `Note ${index}` } }))
+    vi.mocked(searchGraph).mockResolvedValueOnce(firstPage)
+    await store.search('note')
+    expect(searchGraph).toHaveBeenLastCalledWith('note', expect.objectContaining({ order: { sortBy: 'relevance', direction: 'desc' } }))
+    expect(store.canLoadMore).toBe(true)
+    vi.mocked(searchGraph).mockResolvedValueOnce([{ node: { id: 'last', kind: 'note', title: 'Last note' } }])
+    await store.loadMoreGraphEntries()
+    expect(searchGraph).toHaveBeenLastCalledWith('note', expect.objectContaining({ offset: 100 }))
+    expect(store.visibleNodes).toHaveLength(101)
+    expect(store.canLoadMore).toBe(false)
+    expect(store.view).toBe('list')
+    vi.mocked(searchGraph).mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([{ node: { id: 'last', kind: 'note', title: 'Last note' } }])
+    await store.refresh({ quiet: true })
+    expect(store.visibleNodes).toHaveLength(101)
+    expect(store.canLoadMore).toBe(false)
+  })
+
+  it('retains loaded Graph pages on refresh and restarts pages if the graph revision changes', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    const entries = Array.from({ length: 501 }, (_, index) => ({ id: `entry-${index}`, kind: 'note', title: `Entry ${index}` }))
+    let revision = 1
+    vi.mocked(queryGraph).mockImplementation(async query => ({
+      items: entries.slice(query.offset || 0, (query.offset || 0) + 500), total: entries.length, graphRevision: revision,
+    }))
+    store.setSection('all')
+    await vi.waitFor(() => expect(store.visibleNodes).toHaveLength(500))
+    await store.loadMoreGraphEntries()
+    expect(store.visibleNodes).toHaveLength(501)
+    await store.refresh({ quiet: true })
+    expect(store.visibleNodes).toHaveLength(501)
+    expect(store.canLoadMore).toBe(false)
+    entries.push({ id: 'new-entry', kind: 'note', title: 'New entry' })
+    store.graphOrder = { sortBy: 'title', direction: 'asc' }
+    await vi.waitFor(() => expect(store.visibleNodes).toHaveLength(500))
+    revision = 2
+    entries.unshift({ id: 'earlier-entry', kind: 'note', title: 'Earlier entry' })
+    await store.loadMoreGraphEntries()
+    expect(store.visibleNodes[0].id).toBe('earlier-entry')
+    expect(store.visibleNodes).toHaveLength(500)
+    await store.loadMoreGraphEntries()
+    expect(store.visibleNodes).toHaveLength(503)
+    expect(new Set(store.visibleNodes.map(node => node.id)).size).toBe(503)
+  })
+
   it('does not treat a linked non-Project entry as the current Project', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
     store.setSection('all')
     store.setWorkspaceConfiguration({ project: 'project-alpha' })
-    store.currentProjectOnly = true
+    store.graphProjectIds = ['project-alpha']
     store.setWorkspaceConfiguration({ project: 'issue-1' })
     await nextTick()
     expect(store.workspaceProject).toBeNull()
-    expect(store.visibleNodes).toEqual([])
+    expect(store.graphProjectIds).toEqual(['project-alpha'])
   })
 
   it('mounts and composes all physical scopes by default', async () => {

@@ -26,22 +26,17 @@ export const PRIORITY_FILTER_OPTIONS = Object.freeze([
   { value: 'low', label: 'Low' },
 ])
 
-export const ALL_KIND_OPTIONS = Object.freeze([
-  { value: '', label: 'All kinds' },
-  { value: 'issue', label: 'Tasks' },
-  { value: 'project', label: 'Projects' },
-  { value: 'person', label: 'People' },
-  { value: 'company', label: 'Companies' },
-  { value: 'meeting', label: 'Meetings' },
-  { value: 'timesheet', label: 'Time sheets' },
-  { value: 'journal', label: 'Journal' },
-  { value: 'knowledge', label: 'Knowledge' },
+export const GRAPH_SORT_OPTIONS = Object.freeze([
+  { value: 'updated', label: 'Updated' },
+  { value: 'created', label: 'Created' },
+  { value: 'title', label: 'Title' },
+  { value: 'kind', label: 'Kind' },
+  { value: 'project', label: 'Project' },
 ])
 
 const VIEWS_BY_SECTION = Object.freeze({
   all: [
-    { id: 'list', label: 'List' },
-    { id: 'timeline', label: 'Timeline' },
+    { id: 'list', label: 'Entries' },
     { id: 'changes', label: 'Changes' },
   ],
   work: [
@@ -56,13 +51,12 @@ export function useGraphViewState({ graph, settings }) {
   const assigneeFilter = ref('')
   const boardGroup = ref('status')
   const boardSort = ref('rank')
-  const allKindFilter = ref('')
-  watch(allKindFilter, kind => {
-    graph.graphKinds = kind === 'knowledge'
-      ? ['note', 'resource', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
-        'model', 'endpoint', 'publication', 'submission', 'research-question', 'method', 'client-request']
-      : kind ? [kind] : []
-  }, { immediate: true, flush: 'sync' })
+  const graphSort = computed(() => graph.searchQuery.trim() ? graph.graphSearchOrder : graph.graphOrder)
+  function setGraphSort({ sortBy, direction }) {
+    const next = { sortBy, direction: direction || (['title', 'kind', 'project'].includes(sortBy) ? 'asc' : 'desc') }
+    if (graph.searchQuery.trim()) graph.graphSearchOrder = next
+    else graph.graphOrder = next
+  }
   const collapsedBoardStatuses = ref([])
   const showClosedIssues = ref(false)
   const showEmptyProjects = ref(false)
@@ -96,17 +90,14 @@ export function useGraphViewState({ graph, settings }) {
   ))
   /** Board and List share the group control. */
   const listGroupBy = computed(() => boardGroup.value)
-  const projectionNodes = computed(() => filterProjection(graph, {
-    ...workFilters.value,
-    kind: allKindFilter.value,
-  }))
+  const projectionNodes = computed(() => filterProjection(graph, workFilters.value))
   const boardIssues = computed(() => (
     [...projectionNodes.value].sort(issueSort(boardSort.value))
   ))
   const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
   const emptyTitle = computed(() => {
     if (graph.section === 'work') return 'No work matches this view'
-    if (graph.currentProjectOnly) return 'No entries match this project filter'
+    if (graph.graphKinds.length || graph.graphProjectIds.length) return 'No entries match these filters'
     if (graph.searchQuery) return 'No matching graph items'
     return {
       work: 'No work in these scopes',
@@ -119,7 +110,7 @@ export function useGraphViewState({ graph, settings }) {
         ? 'Clear search or filters, include another scope, or create an issue.'
         : 'Clear search or filters, or enable Show closed issues in Display.'
     }
-    if (graph.currentProjectOnly) return 'Clear the project filter, change the kind or search, or include another scope.'
+    if (graph.graphKinds.length || graph.graphProjectIds.length) return 'Clear a filter or change the search.'
     return graph.searchQuery
       ? 'Try broader terms or include another physical scope.'
       : 'Create the first item or include another physical scope.'
@@ -161,19 +152,25 @@ export function useGraphViewState({ graph, settings }) {
       projectFilter,
       boardGroup,
       boardSort,
-      allKindFilter,
       priorityFilter,
       assigneeFilter,
       collapsedBoardStatuses,
       showClosedIssues,
       showEmptyProjects,
+      () => graph.graphOrder,
+      () => graph.graphKinds,
+      () => graph.graphProjectIds,
     ],
     () => {
       if (!hydrated) return
       settings.set('businessGraphViewState', {
         section: graph.section,
         sectionViews: { ...graph.sectionViews },
-        graph: { kind: allKindFilter.value },
+        graph: {
+          order: { ...graph.graphOrder },
+          kinds: [...graph.graphKinds],
+          projectIds: [...graph.graphProjectIds],
+        },
         work: {
           project: projectFilter.value,
           groupBy: boardGroup.value,
@@ -207,8 +204,8 @@ export function useGraphViewState({ graph, settings }) {
   }
 
   return {
-    allKindFilter,
-    allKindOptions: ALL_KIND_OPTIONS,
+    graphSort,
+    setGraphSort,
     assigneeFilter,
     assigneeFilterOptions,
     boardGroup,
@@ -255,7 +252,7 @@ function hydrateViewState({
 }) {
   const saved = settings.businessGraphViewState || {}
   const savedViews = saved.sectionViews && typeof saved.sectionViews === 'object'
-    ? saved.sectionViews
+    ? Object.fromEntries(Object.entries(saved.sectionViews).map(([key, value]) => [key, ['timeline', 'groups'].includes(value) ? 'list' : value]))
     : {}
   const legacySection = ['projects', 'knowledge', 'journal', 'now'].includes(saved.section)
     ? saved.section
@@ -281,6 +278,14 @@ function hydrateViewState({
     : (legacySection ? 'all' : 'work')
   graph.section = savedSection
   graph.view = graph.sectionViews[savedSection]
+
+  const preferences = saved.graph || {}
+  const order = preferences.order
+  if (order && GRAPH_SORT_OPTIONS.some(option => option.value === order.sortBy)
+    && ['asc', 'desc'].includes(order.direction)) graph.graphOrder = { sortBy: order.sortBy, direction: order.direction }
+  for (const [key, target] of [['kinds', 'graphKinds'], ['projectIds', 'graphProjectIds']]) {
+    if (Array.isArray(preferences[key])) graph[target] = [...new Set(preferences[key].filter(value => typeof value === 'string' && value))]
+  }
 
   const work = saved.work || {}
   showClosedIssues.value = work.showClosedIssues === true
@@ -322,9 +327,6 @@ function filterProjection(graph, filters) {
   if (graph.section === 'work') {
     items = filterWorkIssues(items, graph.projects, filters)
   }
-  if (graph.section === 'all' && filters.kind) {
-    items = items.filter(item => matchesAllKind(item, filters.kind))
-  }
   return items
 }
 
@@ -338,17 +340,6 @@ function filterWorkIssues(items, projects, filters) {
   if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
   else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)
   return items
-}
-
-function matchesAllKind(item, filter) {
-  if (filter === 'knowledge') {
-    return [
-      'note', 'resource', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
-      'model', 'endpoint', 'publication', 'submission', 'research-question', 'method',
-      'client-request',
-    ].includes(item.kind)
-  }
-  return item.kind === filter
 }
 
 function issueSort(mode) {

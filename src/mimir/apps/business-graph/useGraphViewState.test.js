@@ -97,3 +97,33 @@ describe('Work closed issue visibility', () => {
     expect(restored.boardIssues.value.map(issue => issue.id)).toEqual(['active'])
   })
 })
+
+describe('Graph display preferences', () => {
+  it.each(['timeline', 'groups'])('migrates %s to the table and retains browse order and named filters', async legacyView => {
+    setActivePinia(createPinia())
+    const graph = useBusinessGraphStore()
+    const scope = effectScope()
+    const settings = reactive({ settingsReady: true, set: vi.fn(), businessGraphViewState: {
+      section: 'all', sectionViews: { all: legacyView },
+      graph: { order: { sortBy: 'project', direction: 'asc' }, kinds: ['note', 'project'], projectIds: ['atlas'],
+        searchOrder: { sortBy: 'created', direction: 'desc' }, groupBy: 'updated-month', collapsedGroups: ['kind:note'] },
+    } })
+    const state = scope.run(() => useGraphViewState({ graph, settings }))
+    expect(graph.view).toBe('list')
+    expect(state.graphSort.value).toEqual({ sortBy: 'project', direction: 'asc' })
+    expect(graph.graphKinds).toEqual(['note', 'project'])
+    expect(graph.graphProjectIds).toEqual(['atlas'])
+    graph.prepareSearch('needle')
+    expect(state.graphSort.value.sortBy).toBe('relevance')
+    state.setGraphSort({ sortBy: 'title' })
+    expect(state.graphSort.value).toEqual({ sortBy: 'title', direction: 'asc' })
+    graph.clearSearch()
+    expect(state.graphSort.value.sortBy).toBe('project')
+    graph.graphKinds = []
+    await nextTick()
+    expect(settings.set.mock.lastCall[1].graph).toEqual({
+      order: { sortBy: 'project', direction: 'asc' }, kinds: [], projectIds: ['atlas'],
+    })
+    scope.stop()
+  })
+})

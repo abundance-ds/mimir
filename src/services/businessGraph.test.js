@@ -71,6 +71,24 @@ describe('business graph service', () => {
     expect(invoke).toHaveBeenLastCalledWith('graph_search', { query: 'old note', relatedTo: 'project-a', kinds: ['note'], scopeIds: ['team:main'], limit: 100 })
   })
 
+  it('passes multiple project memberships and No project to query and search', async () => {
+    const projectIds = ['atlas', 'beta', '__unassigned__', 'atlas']
+    await queryGraph({ projectIds, kinds: ['note', 'project'], order: { sortBy: 'project', direction: 'asc' } })
+    expect(invoke).toHaveBeenLastCalledWith('graph_query', { query: expect.objectContaining({
+      projectIds: ['atlas', 'beta', '__unassigned__'], kinds: ['note', 'project'], order: { sortBy: 'project', direction: 'asc' },
+    }) })
+    await searchGraph('atlas', { projectIds })
+    expect(invoke).toHaveBeenLastCalledWith('graph_search', expect.objectContaining({ projectIds: ['atlas', 'beta', '__unassigned__'] }))
+  })
+
+  it('passes ordering and pagination to native Graph queries and search', async () => {
+    const order = { sortBy: 'created', direction: 'asc' }
+    await queryGraph({ order, offset: 500 })
+    expect(invoke).toHaveBeenLastCalledWith('graph_query', { query: expect.objectContaining({ order, offset: 500 }) })
+    await searchGraph('notes', { order, offset: 100 })
+    expect(invoke).toHaveBeenLastCalledWith('graph_search', expect.objectContaining({ order, offset: 100 }))
+  })
+
   it('normalizes bounded change-history pagination', async () => {
     await graphEvents({
       scopeIds: ['project:test', 'project:test'],

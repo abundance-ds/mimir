@@ -61,11 +61,19 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const workspaceProjectId = ref('')
   const workspaceGraphScope = ref('team')
   const workspaceProject = ref(null)
-  const currentProjectOnly = ref(false)
   const graphKinds = ref([])
+  const graphAvailableKinds = ref([])
+  const graphOrder = ref({ sortBy: 'updated', direction: 'desc' })
+  const graphSearchOrder = ref({ sortBy: 'relevance', direction: 'desc' })
+  const graphProjectIds = ref([])
+  const graphProjects = ref([])
   const graphItems = ref([])
+  const graphTotal = ref(0)
+  const searchHasMore = ref(false)
+  const loadingMore = ref(false)
   const projectionLoading = ref(false)
   let projectionGeneration = 0
+  let projectionRevision = null
   let started = false
   let unlisten = null
   let refreshTimer = null
@@ -74,6 +82,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   let deletionTimer = null
   let lifecycleGeneration = 0
   let nodeLoadGeneration = 0
+  let resettingSearchOrder = false
 
   const scopes = computed(() => status.value?.scopes || [])
   const selectedScopes = computed(() => (
@@ -83,12 +92,15 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const graphFilters = computed(() => {
     if (section.value !== 'all' || (view.value === 'changes' && !searchQuery.value.trim())) return {}
     return {
+      order: { ...graphOrder.value },
       ...(graphKinds.value.length ? { kinds: graphKinds.value } : {}),
-      // An unavailable link must produce an empty view, never all entries.
-      ...(currentProjectOnly.value ? { relatedTo: workspaceProject.value?.id || '' } : {}),
+      ...(graphProjectIds.value.length ? { projectIds: graphProjectIds.value } : {}),
     }
   })
   const hasGraphFilters = computed(() => Object.keys(graphFilters.value).length > 0)
+  const canLoadMore = computed(() => section.value === 'all' && (
+    searchQuery.value.trim() ? searchHasMore.value : hasGraphFilters.value && graphItems.value.length < graphTotal.value
+  ))
   const visibleNodes = computed(() => {
     if (section.value === 'work') {
       return filterWork(issues.value, workIndex.value, searchQuery.value)
@@ -202,12 +214,41 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const result = await queryGraph({ scopeIds: activeScopeIds.value, limit: 500 })
     if (generation !== lifecycleGeneration || request !== nodeLoadGeneration) return
     nodes.value = Array.isArray(result?.items) ? result.items : []
+    graphAvailableKinds.value = result?.availableKinds || [...new Set(nodes.value.map(node => node.kind).filter(Boolean))]
     status.value = {
       ...status.value,
       nodeCount: result?.total ?? nodes.value.length,
       graphRevision: result?.graphRevision ?? status.value?.graphRevision,
     }
-    await loadWorkspaceProject(generation, request)
+    await Promise.all([
+      loadWorkspaceProject(generation, request),
+      loadGraphProjects(result, generation, request),
+    ])
+  }
+
+  // This catalog is independent of table filters and includes projects past page one.
+  async function loadGraphProjects(initial, generation, request) {
+    if ((initial?.total ?? nodes.value.length) <= 500) {
+      graphProjects.value = nodes.value.filter(node => node.kind === 'project')
+      return
+    }
+    const items = []
+    let revision = null
+    do {
+      const result = await queryGraph({ scopeIds: activeScopeIds.value, kinds: ['project'],
+        order: { sortBy: 'title', direction: 'asc' }, offset: items.length, limit: 500 })
+      if (generation !== lifecycleGeneration || request !== nodeLoadGeneration) return
+      if (revision != null && result?.graphRevision != null && revision !== result.graphRevision) {
+        items.length = 0
+        revision = null
+        continue
+      }
+      revision = result?.graphRevision ?? null
+      const page = Array.isArray(result?.items) ? result.items : []
+      items.push(...page)
+      if (page.length < 500 || items.length >= result.total) break
+    } while (true)
+    graphProjects.value = items.filter(node => node.kind === 'project')
   }
 
   async function loadWorkspaceProject(generation = lifecycleGeneration, request = nodeLoadGeneration) {
@@ -217,22 +258,48 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     workspaceProject.value = project?.kind === 'project' ? project : null
   }
 
-  async function loadGraphProjection(generation = lifecycleGeneration) {
+  async function loadGraphProjection(generation = lifecycleGeneration, append = false) {
     const request = ++projectionGeneration
-    if (!hasGraphFilters.value || !started || (currentProjectOnly.value && !graphFilters.value.relatedTo)) {
+    if (!hasGraphFilters.value || !started) {
       graphItems.value = []
+      graphTotal.value = 0
       projectionLoading.value = false
       return
     }
-    projectionLoading.value = true
+    if (append) loadingMore.value = true
+    else projectionLoading.value = true
     try {
-      const result = await queryGraph({ scopeIds: activeScopeIds.value, ...graphFilters.value, limit: 500 })
-      if (generation !== lifecycleGeneration || request !== projectionGeneration) return
-      graphItems.value = Array.isArray(result?.items) ? result.items : []
+      const targetCount = append ? 500 : Math.max(500, graphItems.value.length)
+      const offset = append ? graphItems.value.length : 0
+      const items = []
+      let result, revision = append ? projectionRevision : null
+      do {
+        const pageOffset = offset + items.length
+        result = await queryGraph({
+          scopeIds: activeScopeIds.value, ...graphFilters.value, limit: 500,
+          ...(pageOffset ? { offset: pageOffset } : {}),
+        })
+        if (generation !== lifecycleGeneration || request !== projectionGeneration) return
+        // Restart if entries moved between pages. A quiet refresh retains the
+        // number of entries already shown, including entries opened past page one.
+        if (revision != null && result?.graphRevision != null && revision !== result.graphRevision) {
+          return await loadGraphProjection(generation)
+        }
+        revision = result?.graphRevision ?? null
+        const page = Array.isArray(result?.items) ? result.items : []
+        items.push(...page)
+        if (page.length < 500 || offset + items.length >= (result?.total ?? offset + items.length)) break
+      } while (items.length < targetCount)
+      graphItems.value = append ? [...new Map([...graphItems.value, ...items].map(node => [node.id, node])).values()] : items
+      graphTotal.value = items.length ? (result?.total ?? graphItems.value.length) : graphItems.value.length
+      projectionRevision = revision
     } catch (cause) {
       if (generation === lifecycleGeneration && request === projectionGeneration) throw cause
     } finally {
-      if (generation === lifecycleGeneration && request === projectionGeneration) projectionLoading.value = false
+      if (generation === lifecycleGeneration && request === projectionGeneration) {
+        projectionLoading.value = false
+        loadingMore.value = false
+      }
     }
   }
 
@@ -241,6 +308,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     searchGeneration += 1
     graphItems.value = []
     searchResults.value = []
+    graphTotal.value = 0
+    searchHasMore.value = false
+    loadingMore.value = false
     searching.value = false
     if (!started || loading.value) return
     void loadGraphProjection().catch(cause => { error.value = errorMessage(cause) })
@@ -251,6 +321,14 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     workspaceProject.value = null
     if (started && !loading.value) void loadWorkspaceProject().catch(cause => { error.value = errorMessage(cause) })
   }, { flush: 'sync' })
+
+  watch(graphSearchOrder, () => {
+    if (resettingSearchOrder) return
+    searchGeneration += 1
+    searchHasMore.value = false
+    loadingMore.value = false
+    if (started && searchQuery.value.trim()) void search(searchQuery.value)
+  }, { deep: true, flush: 'sync' })
 
   async function loadAuxiliary(generation = lifecycleGeneration) {
     const [nextDiagnostics] = await Promise.all([
@@ -318,34 +396,75 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
   }
 
-  async function search(value) {
+  async function search(value, { append = false } = {}) {
     const query = String(value || '')
+    const targetCount = append || query !== searchQuery.value ? 100 : Math.max(100, searchResults.value.length)
+    if (query !== searchQuery.value) resetSearchOrder()
     searchQuery.value = query
     const generation = ++searchGeneration
-    if (!query.trim() || section.value === 'work' || (hasGraphFilters.value && currentProjectOnly.value && !graphFilters.value.relatedTo)) {
+    if (!query.trim() || section.value === 'work') {
       searchResults.value = []
       searching.value = false
+      searchHasMore.value = false
+      loadingMore.value = false
       return
     }
-    searching.value = true
+    if (append) loadingMore.value = true
+    else searching.value = true
     try {
-      const results = await searchGraph(query, {
-        scopeIds: activeScopeIds.value,
-        ...graphFilters.value,
-        limit: 100,
-      })
-      if (generation !== searchGeneration) return
-      searchResults.value = (Array.isArray(results) ? results : [])
-        .map(result => result.node || result)
+      const offset = append ? searchResults.value.length : 0
+      const items = []
+      let hasMore = false
+      do {
+        const pageOffset = offset + items.length
+        const results = await searchGraph(query, {
+          scopeIds: activeScopeIds.value,
+          ...graphFilters.value,
+          order: { ...graphSearchOrder.value },
+          limit: 100,
+          ...(pageOffset ? { offset: pageOffset } : {}),
+        })
+        if (generation !== searchGeneration) return
+        const page = (Array.isArray(results) ? results : []).map(result => result.node || result)
+        items.push(...page)
+        hasMore = page.length === 100
+      } while (hasMore && items.length < targetCount)
+      searchHasMore.value = hasMore
+      searchResults.value = append ? [...new Map([...searchResults.value, ...items].map(node => [node.id, node])).values()] : items
     } catch (cause) {
       if (generation === searchGeneration) error.value = errorMessage(cause)
     } finally {
-      if (generation === searchGeneration) searching.value = false
+      if (generation === searchGeneration) {
+        searching.value = false
+        loadingMore.value = false
+      }
+    }
+  }
+
+  async function loadMoreGraphEntries() {
+    if (!canLoadMore.value || loadingMore.value || searching.value || projectionLoading.value) return
+    try {
+      if (searchQuery.value.trim()) await search(searchQuery.value, { append: true })
+      else await loadGraphProjection(lifecycleGeneration, true)
+    } catch (cause) {
+      error.value = errorMessage(cause)
+    }
+  }
+
+  function resetSearchOrder() {
+    // Set before the query, so changing the query never starts a stale request.
+    if (graphSearchOrder.value.sortBy !== 'relevance' || graphSearchOrder.value.direction !== 'desc') {
+      resettingSearchOrder = true
+      graphSearchOrder.value = { sortBy: 'relevance', direction: 'desc' }
+      resettingSearchOrder = false
     }
   }
 
   function prepareSearch(value) {
+    if (String(value || '') !== searchQuery.value) resetSearchOrder()
     searchGeneration += 1
+    searchHasMore.value = false
+    loadingMore.value = false
     searchQuery.value = String(value || '')
     searchResults.value = []
     searching.value = false
@@ -353,6 +472,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
 
   function clearSearch() {
     searchGeneration += 1
+    searchHasMore.value = false
+    loadingMore.value = false
     searchQuery.value = ''
     searchResults.value = []
     searching.value = false
@@ -539,8 +660,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     projectionGeneration += 1
     projectionLoading.value = false
     graphItems.value = []
+    graphTotal.value = 0
+    searchHasMore.value = false
+    loadingMore.value = false
     searchResults.value = []
     workspaceProject.value = null
+    graphProjects.value = []
+    graphAvailableKinds.value = []
     lifecycleGeneration += 1
     nodeLoadGeneration += 1
     changedSources.value = null
@@ -578,7 +704,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     projectRoot.value = ''
     teamRoot.value = ''
     workspaceProjectId.value = ''
-    currentProjectOnly.value = false
+    graphProjectIds.value = []
     graphKinds.value = []
     workspaceGraphScope.value = 'team'
   }
@@ -632,6 +758,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
         .map(item => (typeof item === 'string' ? item : item?.path || ''))
         .filter(Boolean),
       relations: node.relations || [],
+      createdAt: node.createdAt || '',
       updatedAt: node.updatedAt || '',
       scopeId: node.provenance?.scopeId,
       sourceRevision: node.provenance?.sourceRevision,
@@ -671,8 +798,15 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     workspaceProjectId,
     workspaceGraphScope,
     workspaceProject,
-    currentProjectOnly,
     graphKinds,
+    graphAvailableKinds,
+    graphOrder,
+    graphSearchOrder,
+    graphProjectIds,
+    graphProjects,
+    canLoadMore,
+    loadingMore,
+    loadMoreGraphEntries,
     projectionLoading,
     scopes,
     selectedScopes,

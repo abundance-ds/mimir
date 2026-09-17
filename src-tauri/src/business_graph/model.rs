@@ -222,6 +222,7 @@ impl GraphNode {
                 })
                 .unwrap_or_default(),
             relations: self.relations.clone(),
+            created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             scope_id: self.provenance.scope_id.clone(),
             source_revision: self.provenance.source_revision.clone(),
@@ -265,6 +266,8 @@ pub struct GraphNodeSummary {
     pub deliverables: Vec<String>,
     #[serde(default)]
     pub relations: Vec<GraphRelation>,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
     pub scope_id: String,
     pub source_revision: String,
@@ -425,9 +428,40 @@ impl GraphDiagnostic {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GraphSortBy {
+    #[default]
+    Updated,
+    Created,
+    Title,
+    Kind,
+    Project,
+    Relevance,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GraphSortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphOrder {
+    #[serde(default)]
+    pub sort_by: GraphSortBy,
+    #[serde(default)]
+    pub direction: GraphSortDirection,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<GraphOrder>,
     /// The entry itself and its direct incoming/outgoing links, within scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_to: Option<String>,
@@ -435,6 +469,9 @@ pub struct GraphQuery {
     pub scope_ids: BTreeSet<String>,
     #[serde(default)]
     pub kinds: BTreeSet<String>,
+    /// Explicit project memberships, or __unassigned__ for no resolved project.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub project_ids: BTreeSet<String>,
     #[serde(default)]
     pub tags: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -452,6 +489,9 @@ fn default_query_limit() -> usize {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQueryResult {
+    /// Kinds in the selected scopes, independent of row filters and paging.
+    #[serde(default)]
+    pub available_kinds: Vec<String>,
     pub items: Vec<GraphNodeSummary>,
     pub total: usize,
     pub offset: usize,

@@ -13,14 +13,14 @@ function setup() {
     toggleScope: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
   })
-  const openGraphNode = vi.fn(), diagnostic = vi.fn(), kindFilter = ref('person')
+  const openGraphNode = vi.fn(), diagnostic = vi.fn()
   const scope = effectScope()
   scopes.push(scope)
   const navigation = scope.run(() => useGraphNavigation({
-    graph, kindFilter, root: ref(null), workspaceSurface: ref(null), appHeader: ref(null),
+    graph, root: ref(null), workspaceSurface: ref(null), appHeader: ref(null),
     diagnostic, openGraphNode,
   }))
-  return { graph, openGraphNode, diagnostic, kindFilter, navigation }
+  return { graph, openGraphNode, diagnostic, navigation }
 }
 
 describe('Graph projection navigation', () => {
@@ -52,14 +52,12 @@ describe('Graph projection navigation', () => {
   })
 
   it('keeps section, view, and scope controls in the projection', async () => {
-    const { navigation, graph, diagnostic, kindFilter } = setup()
+    const { navigation, graph, diagnostic } = setup()
     navigation.setSection('work')
-    expect(kindFilter.value).toBe('person')
     navigation.setSection('all')
-    expect(kindFilter.value).toBe('')
     expect(graph.setSection).toHaveBeenLastCalledWith('all')
-    navigation.setView('timeline')
-    expect(graph.setView).toHaveBeenCalledWith('timeline')
+    navigation.setView('list')
+    expect(graph.setView).toHaveBeenCalledWith('list')
     graph.toggleScope.mockRejectedValueOnce(new Error('Scope unavailable'))
     navigation.toggleScope('team:main')
     await Promise.resolve()

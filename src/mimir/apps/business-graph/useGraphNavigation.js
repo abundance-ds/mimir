@@ -2,7 +2,7 @@ import { nextTick, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
 
 // Graph owns its projections. The workbench opens entries as Editor documents.
-export function useGraphNavigation({ graph, kindFilter, root, workspaceSurface, appHeader, diagnostic, openGraphNode }) {
+export function useGraphNavigation({ graph, root, workspaceSurface, appHeader, diagnostic, openGraphNode }) {
   let lastOpenedId = ''
   let entryFocusPending = false
 
@@ -16,11 +16,10 @@ export function useGraphNavigation({ graph, kindFilter, root, workspaceSurface, 
   function restoreGraphFocus(preferredNodeId = lastOpenedId, { allowFirst = true } = {}) {
     if (preferredNodeId && workspaceSurface.value?.focusNode?.(preferredNodeId)) return
     const candidates = [...(root.value?.querySelectorAll(
-      '[data-board-card], [data-timeline-node], [data-graph-node]',
+      '[data-board-card], [data-graph-node]',
     ) || [])]
     const target = candidates.find(candidate => (
       candidate.dataset.boardCard === preferredNodeId
-      || candidate.dataset.timelineNode === preferredNodeId
       || candidate.dataset.graphNode === preferredNodeId
     ))
     if (target instanceof HTMLElement) {
@@ -50,7 +49,6 @@ export function useGraphNavigation({ graph, kindFilter, root, workspaceSurface, 
   })
 
   function setSection(section) {
-    if (section === 'all') kindFilter.value = ''
     graph.setSection(section)
   }
 

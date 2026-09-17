@@ -2,9 +2,9 @@ use super::markdown::source_revision;
 use super::model::{
     canonical_kind, GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic,
     GraphEvent, GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode,
-    GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphOpenResult, GraphQuery,
-    GraphQueryResult, GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult,
-    GraphSourceRoot,
+    GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphOpenResult, GraphOrder,
+    GraphQuery, GraphQueryResult, GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind,
+    GraphSearchResult, GraphSourceRoot,
 };
 use super::source_sync::{
     graph_markdown_path, reconcile_sources, source_id, source_stamp, source_stamps, SourceStamp,
@@ -1189,13 +1189,17 @@ pub fn graph_query(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn graph_search(
     runtime: tauri::State<'_, GraphRuntime>,
     query: String,
     scope_ids: BTreeSet<String>,
     limit: Option<usize>,
     kinds: Option<BTreeSet<String>>,
+    project_ids: Option<BTreeSet<String>>,
     related_to: Option<String>,
+    order: Option<GraphOrder>,
+    offset: Option<usize>,
 ) -> Result<Vec<GraphSearchResult>, String> {
     Ok(runtime
         .store
@@ -1206,7 +1210,10 @@ pub fn graph_search(
             &GraphQuery {
                 scope_ids,
                 kinds: kinds.unwrap_or_default(),
+                project_ids: project_ids.unwrap_or_default(),
                 related_to,
+                order,
+                offset: offset.unwrap_or_default(),
                 limit: limit.unwrap_or(25),
                 ..GraphQuery::default()
             },

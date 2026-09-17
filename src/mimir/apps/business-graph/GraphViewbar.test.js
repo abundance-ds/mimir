@@ -133,4 +133,10 @@ describe('responsive Graph view controls', () => {
     expect(document.activeElement).toBe(trigger.element)
     expect(wrapper.get('[data-graph-display-popover]').isVisible()).toBe(false)
   })
+
+  it('keeps Work display controls out of Graph', async () => {
+    await wrapper.setProps({ section: 'all', view: 'list' })
+    expect(wrapper.find('[data-graph-display-trigger]').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-filters-trigger]').exists()).toBe(false)
+  })
 })

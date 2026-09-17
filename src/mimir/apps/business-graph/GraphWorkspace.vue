@@ -2,6 +2,7 @@
   <div class="graph-workspace relative flex min-h-0 flex-1">
     <main class="flex min-w-0 flex-1 flex-col">
       <GraphViewbar
+        v-if="graph.section === 'work'"
         ref="viewbar"
         :section="graph.section"
         :section-label="currentSection?.label"
@@ -21,14 +22,6 @@
         :priority-options="priorityFilterOptions"
         :collapsed-statuses="collapsedBoardStatuses"
         :statuses="boardStatuses"
-        :kind-filter="allKindFilter"
-        :kind-options="allKindOptions"
-        :search-active="Boolean(graph.searchQuery.trim())"
-        :current-project-only="graph.currentProjectOnly"
-        :current-project-title="graph.workspaceProject?.title || ''"
-        :project-unavailable="Boolean(graph.workspaceProjectId) && !graph.workspaceProject"
-        :project-loading="graph.loading"
-        @update:current-project-only="graph.currentProjectOnly = $event"
         @configure-workspace="$emit('configureWorkspace')"
         @set-view="$emit('setView', $event)"
         @update:project-filter="$emit('update:projectFilter', $event)"
@@ -38,31 +31,45 @@
         @update:show-closed-issues="$emit('update:showClosedIssues', $event)"
         @update:show-empty-projects="$emit('update:showEmptyProjects', $event)"
         @update:priority-filter="$emit('update:priorityFilter', $event)"
-        @update:kind-filter="$emit('update:allKindFilter', $event)"
         @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
         @expand-all="$emit('expandAllBoardStatuses')"
       />
-      <div v-if="composing || (graph.projectionLoading && !graph.searchQuery.trim())" data-graph-loading class="graph-state" role="status">
+      <div v-if="composing" data-graph-loading class="graph-state" role="status">
         <span class="graph-loading-mark" aria-hidden="true" />
         <h2>Loading graph entries</h2>
       </div>
-      <EntityList
-        v-else-if="graph.searchQuery && graph.section !== 'work'"
+      <GraphEntries
+        v-else-if="graph.section === 'all' && (graph.view !== 'changes' || graph.searchQuery.trim())"
         ref="entityList"
         :nodes="projectionNodes"
-        :lookup="graph.nodes"
-        :projects="graph.projects"
-        :scopes="graph.scopes"
-        :mode="graph.section === 'work' ? 'work' : 'generic'"
-        :self-id="selfPersonId"
-        :hide-project="projectScoped"
+        :projects="graph.graphProjects"
+        :current-project-id="graph.workspaceProjectId"
+        :kinds="graph.graphKinds"
+        :available-kinds="graph.graphAvailableKinds"
+        :project-ids="graph.graphProjectIds"
+        :search-active="Boolean(graph.searchQuery.trim())"
+        :context-key="entryContext"
+        @update:kinds="graph.graphKinds = $event"
+        @update:project-ids="graph.graphProjectIds = $event"
+        @changes="graph.clearSearch(); $emit('setView', 'changes')"
+        :sort-by="graphSort.sortBy"
+        :direction="graphSort.direction"
+        :loading="graph.projectionLoading || graph.searching"
+        :loading-more="graph.loadingMore"
+        :can-load-more="graph.canLoadMore"
         :empty-title="emptyTitle"
         :empty-copy="emptyCopy"
         @open="$emit('openNode', $event)"
         @create="$emit('openCreate')"
+        @sort="$emit('sortGraph', $event)"
+        @load-more="graph.loadMoreGraphEntries()"
       />
+      <div v-if="graph.section === 'all' && graph.view === 'changes' && !graph.searchQuery.trim()" class="graph-changes-nav">
+        <button type="button" data-graph-control="graph-back-entries" @click="$emit('setView', 'list')">← Entries</button>
+        <span>Changes</span>
+      </div>
       <NowView
-        v-else-if="graph.section === 'all' && graph.view === 'changes'"
+        v-if="!composing && graph.section === 'all' && graph.view === 'changes' && !graph.searchQuery.trim()"
         :events="graph.events"
         :waiting="waitingOnYouIssues"
         :nodes="graph.nodes"
@@ -78,7 +85,7 @@
         @summarise="$emit('openSummary')"
       />
       <WorkBoard
-        v-else-if="graph.section === 'work' && graph.view === 'board'"
+        v-if="!composing && graph.section === 'work' && graph.view === 'board'"
         ref="workBoard"
         :search-query="graph.searchQuery.trim()"
         :empty-copy="emptyCopy"
@@ -101,14 +108,8 @@
         @create="$emit('createFromBoard', $event)"
         @expand-column="$emit('expandBoardStatus', $event)"
       />
-      <TimelineView
-        v-else-if="graph.view === 'timeline'"
-        :nodes="projectionNodes"
-        @open="$emit('openNode', $event)"
-        @create="$emit('openCreate')"
-      />
       <EntityList
-        v-else
+        v-else-if="!composing && graph.section === 'work' && graph.view === 'list'"
         ref="entityList"
         :nodes="graph.section === 'work' ? boardIssues : projectionNodes"
         :lookup="graph.nodes"
@@ -128,15 +129,16 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import EntityList from './EntityList.vue'
 import GraphViewbar from './GraphViewbar.vue'
 import NowView from './NowView.vue'
-import TimelineView from './TimelineView.vue'
+import GraphEntries from './GraphEntries.vue'
 import WorkBoard from './WorkBoard.vue'
 
 defineProps({
+  graphSort: { type: Object, default: () => ({ sortBy: 'updated', direction: 'desc' }) },
   currentSection: { type: Object, default: null },
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
@@ -154,8 +156,6 @@ defineProps({
   priorityFilterOptions: { type: Array, default: () => [] },
   collapsedBoardStatuses: { type: Array, default: () => [] },
   boardStatuses: { type: Array, default: () => [] },
-  allKindFilter: { type: String, default: '' },
-  allKindOptions: { type: Array, default: () => [] },
   composing: { type: Boolean, default: false },
   projectionNodes: { type: Array, default: () => [] },
   emptyTitle: { type: String, default: '' },
@@ -170,23 +170,25 @@ defineProps({
 })
 
 defineEmits([
+  'sortGraph',
   'configureWorkspace',
   'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard',
   'expandAllBoardStatuses', 'expandBoardStatus',
   'loadNowPage', 'markNowSeen', 'moveIssue', 'openCreate',
   'openNode', 'openSummary', 'patchIssue', 'reorderIssue',
-  'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:assigneeFilter',
+  'setView', 'toggleBoardStatusCollapse', 'update:assigneeFilter',
   'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
   'update:showClosedIssues', 'update:showEmptyProjects',
 ])
 
 const graph = useBusinessGraphStore()
+const entryContext = computed(() => JSON.stringify([graph.activeScopeIds, graph.searchQuery, graph.graphKinds, graph.graphProjectIds, graph.searchQuery.trim() ? graph.graphSearchOrder : graph.graphOrder]))
 const entityList = ref(null)
 const workBoard = ref(null)
 const viewbar = ref(null)
 
 defineExpose({
-  closeMenus: options => viewbar.value?.closeMenus(options) || false,
+  closeMenus: options => entityList.value?.closeMenus?.(options) || viewbar.value?.closeMenus(options) || false,
   focusListEdge(edge) {
     if (workBoard.value) return workBoard.value.focusEdge(edge)
     if (!entityList.value) return false
@@ -198,6 +200,9 @@ defineExpose({
 </script>
 
 <style scoped>
+.graph-changes-nav { display: flex; min-height: 28px; flex-shrink: 0; align-items: center; gap: 16px; padding: 0 12px; border-bottom: 1px solid var(--color-rule); color: var(--color-ink-3); font-size: 11px; }
+.graph-changes-nav button { min-height: 28px; color: var(--color-ink); }
+.graph-changes-nav button:focus-visible { outline: 2px solid var(--color-accent); }
 .graph-workspace {
   gap: 1px;
   background: var(--color-rule);

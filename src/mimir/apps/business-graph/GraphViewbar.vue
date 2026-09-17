@@ -1,5 +1,5 @@
 <template>
-  <div ref="viewbarRoot" data-graph-viewbar class="graph-viewbar pane-subbar" :class="{ 'graph-viewbar-inline': inlineControls, 'graph-entry-viewbar': graphEntryView }">
+  <div ref="viewbarRoot" data-graph-viewbar class="graph-viewbar pane-subbar" :class="{ 'graph-viewbar-inline': inlineControls }">
     <nav class="graph-views" :aria-label="`${sectionLabel} views`">
       <button
         v-for="option in viewOptions"
@@ -16,7 +16,7 @@
       </button>
     </nav>
 
-    <div v-if="activeFilters.length && !inlineControls && !compactFilters && section !== 'all'" class="graph-active-filters" aria-label="Active filters">
+    <div v-if="activeFilters.length && !inlineControls && !compactFilters" class="graph-active-filters" aria-label="Active filters">
       <button
         v-for="filter in activeFilters"
         :key="filter.id"
@@ -34,7 +34,7 @@
     </div>
 
     <div
-      v-if="section === 'work' || graphEntryView"
+      v-if="section === 'work'"
       ref="filtersRoot"
       class="graph-filters-root"
     >
@@ -53,7 +53,7 @@
         @keydown.down.prevent="openFiltersMenu"
       >
         <IconFilter :size="13" />
-        <span>{{ section === 'all' && kindFilter ? optionLabel(kindOptions, kindFilter) : 'Filter' }}</span>
+        <span>Filter</span>
         <span v-if="activeFilters.length" class="graph-filter-count">{{ activeFilters.length }}</span>
       </button>
 
@@ -180,53 +180,8 @@
 
         </template>
 
-        <div v-else class="graph-filter-row">
-          <span>Kind</span>
-          <div class="graph-filter-control">
-            <GraphSelect
-              :model-value="kindFilter"
-              data-all-kind-filter
-              data-graph-control="all-kind"
-              class="min-w-0 flex-1"
-              :class="{ 'graph-filter-active': kindFilter }"
-              variant="bar"
-              aria-label="Filter by kind"
-              :options="kindOptions"
-              @update:model-value="$emit('update:kindFilter', $event)"
-            />
-            <button
-              type="button"
-              data-graph-control="all-kind-filter-clear"
-              class="graph-filter-reset"
-              :disabled="!kindFilter"
-              :title="kindFilter ? `Clear kind filter: ${human(kindFilter)}` : undefined"
-              :aria-label="kindFilter ? `Clear kind filter: ${human(kindFilter)}` : 'No kind filter to clear'"
-              @click="$emit('update:kindFilter', '')"
-            >
-              <IconX :size="12" />
-            </button>
-          </div>
-        </div>
       </div>
     </div>
-    <button
-      v-if="graphEntryView"
-      type="button"
-      data-graph-control="current-project"
-      class="graph-current-project"
-      :class="{ 'graph-current-project-active': currentProjectOnly }"
-      :aria-pressed="currentProjectOnly"
-      :disabled="projectLoading"
-      :aria-label="currentProjectLabel"
-      :title="currentProjectLabel"
-      @click="currentProjectTitle || currentProjectOnly ? $emit('update:currentProjectOnly', !currentProjectOnly) : $emit('configureWorkspace')"
-    >
-      <IconCheck v-if="currentProjectOnly" :size="12" aria-hidden="true" />
-      <IconFolder v-else :size="12" aria-hidden="true" />
-      <span v-if="currentProjectTitle" class="graph-current-project-prefix">Project:</span>
-      <span class="graph-current-project-name">{{ currentProjectTitle || (projectLoading ? 'Loading project…' : projectUnavailable ? 'Project unavailable' : 'No linked project') }}</span>
-      <span v-if="currentProjectTitle" class="graph-project-tooltip" aria-hidden="true">{{ currentProjectTitle }}</span>
-    </button>
     <div v-if="section === 'work'" ref="displayRoot" class="graph-display-root">
       <button
         ref="displayTrigger"
@@ -240,7 +195,7 @@
         @click="toggleDisplayMenu"
         @keydown.down.prevent="openDisplayMenu"
       >
-        Display
+        <span>Display</span>
         <IconChevronDown :size="11" />
       </button>
       <div
@@ -371,16 +326,11 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { IconCheck, IconChevronDown, IconFilter, IconFolder, IconUser, IconX } from '@tabler/icons-vue'
+import { IconCheck, IconChevronDown, IconFilter, IconUser, IconX } from '@tabler/icons-vue'
 import GraphSelect from './GraphSelect.vue'
 import GraphCheckbox from './GraphCheckbox.vue'
 
 const props = defineProps({
-  currentProjectOnly: { type: Boolean, default: false },
-  currentProjectTitle: { type: String, default: '' },
-  projectUnavailable: { type: Boolean, default: false },
-  projectLoading: { type: Boolean, default: false },
-  searchActive: { type: Boolean, default: false },
   section: { type: String, required: true },
   sectionLabel: { type: String, default: '' },
   view: { type: String, required: true },
@@ -399,13 +349,9 @@ const props = defineProps({
   priorityOptions: { type: Array, default: () => [] },
   collapsedStatuses: { type: Array, default: () => [] },
   statuses: { type: Array, default: () => [] },
-  kindFilter: { type: String, default: '' },
-  kindOptions: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
-  'update:currentProjectOnly',
-  'configureWorkspace',
   'setView',
   'update:projectFilter',
   'update:assigneeFilter',
@@ -414,16 +360,11 @@ const emit = defineEmits([
   'update:showClosedIssues',
   'update:showEmptyProjects',
   'update:priorityFilter',
-  'update:kindFilter',
   'toggleStatus',
   'expandAll',
 ])
 
 const filtersRoot = ref(null)
-const graphEntryView = computed(() => props.section === 'all' && (props.searchActive || ['list', 'timeline'].includes(props.view)))
-const currentProjectLabel = computed(() => props.currentProjectTitle
-  ? `${props.currentProjectOnly ? 'Clear project filter' : 'Filter by current project'}: ${props.currentProjectTitle}. Includes direct links in both directions.`
-  : `${props.projectUnavailable ? 'Project unavailable' : 'No linked project'}. ${props.currentProjectOnly ? 'Clear project filter.' : 'Open workspace setup.'}`)
 const viewbarRoot = ref(null)
 const availableWidth = ref(0)
 // Budget for bounded selectors, view tabs, clear buttons, and pane insets.
@@ -466,11 +407,6 @@ const displaySummary = computed(() => [
     ? `${collapsedLabels.value.length} columns collapsed` : '',
 ].filter(Boolean).join('. '))
 const activeFilters = computed(() => {
-  if (props.section === 'all') {
-    return ['list', 'timeline'].includes(props.view) && props.kindFilter
-      ? [{ id: 'kind', label: `Kind: ${optionLabel(props.kindOptions, props.kindFilter)}` }]
-      : []
-  }
   if (props.section !== 'work') return []
   return [
     props.projectFilter && {
@@ -618,7 +554,6 @@ function clearActiveFilter(id) {
   if (id === 'project') emit('update:projectFilter', '')
   else if (id === 'owner') emit('update:assigneeFilter', '')
   else if (id === 'priority') emit('update:priorityFilter', '')
-  else if (id === 'kind') emit('update:kindFilter', '')
 }
 
 function optionLabel(options, value) {
@@ -675,15 +610,6 @@ defineExpose({ closeMenus })
 
 <style scoped>
 .graph-viewbar { position: relative; min-width: 0; gap: 8px; }
-.graph-current-project { position: relative; display: inline-flex; height: 22px; min-width: 50px; flex: 0 1 auto; align-items: center; gap: 4px; padding: 0 5px; color: var(--color-ink-3); font-size: 10px; }
-.graph-current-project svg, .graph-current-project-prefix { flex: 0 0 auto; }
-.graph-current-project-name { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.graph-current-project:hover { background: var(--color-chrome-mid); color: var(--color-ink); }
-.graph-current-project:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
-.graph-current-project-active { background: var(--color-accent-soft); color: var(--color-ink); }
-.graph-current-project:disabled { opacity: 0.5; }
-.graph-project-tooltip { display: none; position: absolute; z-index: 260; top: 26px; right: 0; width: max-content; max-width: min(260px, calc(100cqw - 24px)); border: 1px solid var(--color-rule); background: var(--color-surface); padding: 5px 7px; color: var(--color-ink); text-align: left; overflow-wrap: anywhere; pointer-events: none; }
-.graph-current-project:hover .graph-project-tooltip, .graph-current-project:focus-visible .graph-project-tooltip { display: block; }
 .graph-views { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 .graph-view { height: 22px; border-radius: 3px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
 .graph-view:hover { background: var(--graph-hover); color: var(--color-ink); }
@@ -746,9 +672,5 @@ defineExpose({ closeMenus })
   .graph-filter-chip { max-width: 108px; }
 }
 @container business-graph (max-width: 419px) {
-  .graph-entry-viewbar { gap: 5px; }
-  .graph-entry-viewbar .graph-view { padding-inline: 4px; }
-  .graph-entry-viewbar .graph-filters-trigger > span:first-of-type,
-  .graph-current-project-prefix { display: none; }
 }
 </style>

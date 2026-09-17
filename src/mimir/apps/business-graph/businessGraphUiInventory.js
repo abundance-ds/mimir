@@ -21,7 +21,8 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   emptyStates: [
     'board-empty-create',
     'list-empty-create',
-    'timeline-empty-create',
+    'graph-empty-create',
+    'graph-load-more',
   ],
   create: [
     'create-close',
@@ -87,9 +88,10 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-assignee-filter-clear',
     'board-priority-filter-clear',
     'board-columns-expand-all',
-    'current-project',
-    'all-kind',
-    'all-kind-filter-clear',
+    'graph-clear-filters',
+    'graph-best-match',
+    'graph-changes',
+    'graph-back-entries',
   ],
   summary: [
     'changes-summarise',
@@ -114,7 +116,9 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'card-status-',
   'card-due-',
   'list-open-',
-  'timeline-open-',
+  'graph-sort-',
+  'graph-filter-',
+  'graph-clear-',
   'relationship-',
   'note-link-',
   'note-backlink-',
@@ -150,6 +154,7 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphWorkspace.vue',
   'NowView.vue',
   'ProjectStanding.vue',
-  'TimelineView.vue',
+  'GraphEntries.vue',
+  'GraphColumnFilter.vue',
   'WorkBoard.vue',
 ])

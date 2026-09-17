@@ -20,7 +20,7 @@ is not a status.
 
 ## Ontology
 
-Primary kinds:
+Kinds:
 
 ```text
 project company person issue meeting note resource journal decision record timesheet

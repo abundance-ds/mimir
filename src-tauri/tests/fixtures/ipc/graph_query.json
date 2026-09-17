@@ -1,4 +1,8 @@
 {
+  "availableKinds": [
+    "issue",
+    "person"
+  ],
   "items": [
     {
       "id": "issue-sidebar-ordering",
@@ -30,6 +34,7 @@
           "legacy": false
         }
       ],
+      "createdAt": "2026-07-20T08:00:00Z",
       "updatedAt": "2026-07-26T09:15:00Z",
       "scopeId": "project:mimir",
       "sourceRevision": "4f6a2c88"
@@ -43,6 +48,7 @@
       "needsDetail": true,
       "teamMember": true,
       "relations": [],
+      "createdAt": "2026-07-01T08:00:00Z",
       "updatedAt": "2026-07-20T08:00:00Z",
       "scopeId": "private",
       "sourceRevision": "1a2b3c4d"

@@ -407,6 +407,7 @@ fn graph_open() -> GraphOpenResult {
 /// projection fields populated, one minimal person summary.
 fn graph_query() -> GraphQueryResult {
     GraphQueryResult {
+        available_kinds: vec!["issue".into(), "person".into()],
         items: vec![
             GraphNodeSummary {
                 id: "issue-sidebar-ordering".into(),
@@ -439,6 +440,7 @@ fn graph_query() -> GraphQueryResult {
                         legacy: false,
                     },
                 ],
+                created_at: "2026-07-20T08:00:00Z".into(),
                 updated_at: "2026-07-26T09:15:00Z".into(),
                 scope_id: "project:mimir".into(),
                 source_revision: "4f6a2c88".into(),
@@ -463,6 +465,7 @@ fn graph_query() -> GraphQueryResult {
                 team_member: true,
                 deliverables: vec![],
                 relations: vec![],
+                created_at: "2026-07-01T08:00:00Z".into(),
                 updated_at: "2026-07-20T08:00:00Z".into(),
                 scope_id: "private".into(),
                 source_revision: "1a2b3c4d".into(),
@@ -660,6 +663,7 @@ fn live_meeting() -> MeetingView {
         segments: vec![],
         summary: None,
         summary_truncated: false,
+        summary_needs_update: false,
         summary_state: "not-started".into(),
         kg_state: "not-offered".into(),
         jobs: vec![],
@@ -700,6 +704,7 @@ fn finalized_meeting() -> MeetingView {
         segments: vec![],
         summary: Some("Release readiness is confirmed; prepare the deployment checklist.".into()),
         summary_truncated: false,
+        summary_needs_update: false,
         summary_state: "succeeded".into(),
         kg_state: "awaiting-decision".into(),
         jobs: vec![
