@@ -8,12 +8,15 @@
         :data-graph-section="item.id"
         :data-graph-control="`section-${item.id}`"
         class="graph-section"
-        :class="{ 'graph-section-active': section === item.id }"
-        :aria-current="section === item.id ? 'page' : undefined"
+        :class="{ 'graph-section-active': !changesActive && section === item.id }"
+        :aria-current="!changesActive && section === item.id ? 'page' : undefined"
         @click="$emit('setSection', item.id)"
       >
         <span>{{ item.label }}</span>
       </button>
+      <button type="button" data-graph-control="graph-changes" class="graph-section"
+        :class="{ 'graph-section-active': changesActive }" :aria-current="changesActive ? 'page' : undefined"
+        @click="$emit('showChanges')">Changes</button>
     </nav>
     <div class="graph-search">
       <IconSearch :size="14" aria-hidden="true" />
@@ -158,6 +161,7 @@ import {
 const props = defineProps({
   sections: { type: Array, required: true },
   section: { type: String, required: true },
+  changesActive: { type: Boolean, default: false },
   sectionLabel: { type: String, default: '' },
   searchValue: { type: String, default: '' },
   searchQuery: { type: String, default: '' },
@@ -172,6 +176,7 @@ const props = defineProps({
 
 defineEmits([
   'setSection',
+  'showChanges',
   'update:searchValue',
   'focusSearchResults',
   'flushSearch',
@@ -266,7 +271,7 @@ defineExpose({ closeMenus, focusSearch })
 .graph-topbar {
   display: grid;
   z-index: 20;
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 320px) auto;
+  grid-template-columns: minmax(max-content, 1fr) minmax(190px, 320px) auto;
   gap: 10px;
 }
 
@@ -315,19 +320,25 @@ defineExpose({ closeMenus, focusSearch })
 
 @keyframes graph-pulse { to { opacity: 0.35; transform: scale(0.8); } }
 @container business-graph (max-width: 1050px) {
-  .graph-topbar { grid-template-columns: minmax(140px, 1fr) minmax(150px, 240px) auto; }
+  .graph-topbar { grid-template-columns: minmax(max-content, 1fr) minmax(150px, 240px) auto; }
 }
 @container business-graph (max-width: 680px) {
-  .graph-topbar { grid-template-columns: minmax(140px, 1fr) minmax(96px, 180px) auto; gap: 7px; }
+  .graph-topbar { grid-template-columns: minmax(max-content, 1fr) minmax(0, 180px) auto; gap: 7px; }
   .graph-search kbd { display: none; }
   .graph-primary-button { width: 28px; padding: 0; }
   .graph-primary-button span { display: none; }
 }
-@container business-graph (max-width: 419px) {
-  .graph-topbar { grid-template-columns: auto minmax(80px, 1fr) auto; gap: 5px; }
-  .graph-section { padding-inline: 8px; }
+@container business-graph (max-width: 560px) {
+  .graph-topbar { grid-template-columns: max-content minmax(0, 1fr) auto; gap: 5px; }
+  .graph-section { padding-inline: 5px; }
   .graph-scope-trigger { width: 28px; justify-content: center; padding: 0; }
   .graph-scope-trigger span, .graph-scope-trigger > svg:last-child { display: none; }
   .graph-scope-icon { display: block; }
+}
+@container business-graph (max-width: 419px) {
+  .graph-actions { gap: 3px; }
+  .graph-search { gap: 3px; padding-inline: 5px; }
+  .graph-search > svg, .graph-search-count { display: none; }
+  .graph-search-clear { width: 18px; }
 }
 </style>

@@ -50,6 +50,7 @@ export function useGraphNavigation({ graph, root, workspaceSurface, appHeader, d
 
   function setSection(section) {
     graph.setSection(section)
+    if (section === 'all') graph.setView('list')
   }
 
   function setView(view) {

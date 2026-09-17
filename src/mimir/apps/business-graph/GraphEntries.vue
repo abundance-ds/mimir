@@ -1,21 +1,5 @@
 <template>
   <div class="graph-entries" :aria-busy="loading" data-graph-entries>
-    <div class="graph-entries-tools">
-      <div class="graph-entry-filters" aria-label="Active entry filters">
-        <button v-for="filter in activeFilters" :key="filter.id" type="button"
-          :data-graph-control="`graph-clear-${filter.id}`" class="graph-entry-filter-chip"
-          :title="`Clear ${filter.label}`" :aria-label="`Clear ${filter.label}`" @click="$emit(`update:${filter.id}`, [])">
-          <span>{{ filter.label }}</span><IconX :size="12" aria-hidden="true" />
-        </button>
-        <button v-if="activeFilters.length" type="button" data-graph-control="graph-clear-filters" @click="clearFilters">Clear filters</button>
-        <button v-if="searchActive" type="button" data-graph-control="graph-best-match"
-          :class="{ 'graph-best-match-active': sortBy === 'relevance' }" :aria-pressed="sortBy === 'relevance'"
-          @click="$emit('sort', { sortBy: 'relevance', direction: 'desc' })">Best match</button>
-      </div>
-      <button type="button" data-graph-control="graph-changes" class="graph-entries-changes" @click="$emit('changes')">
-        <IconHistory :size="13" aria-hidden="true" />Changes
-      </button>
-    </div>
     <div ref="root" class="graph-entries-scroll">
       <table aria-label="Graph entries" @keydown="onRowKeydown">
         <thead><tr>
@@ -27,6 +11,10 @@
                 {{ column.label }}
                 <component :is="direction === 'asc' ? IconArrowUp : IconArrowDown" v-if="sortBy === column.id" :size="12" aria-hidden="true" />
               </button>
+              <button v-if="column.id === 'title' && searchActive" type="button" data-graph-control="graph-best-match"
+                class="graph-best-match" :class="{ 'graph-best-match-active': sortBy === 'relevance' }"
+                :aria-pressed="sortBy === 'relevance'" title="Sort search results by best match"
+                @click="$emit('sort', { sortBy: 'relevance', direction: 'desc' })">Best match</button>
               <GraphColumnFilter v-if="column.id === 'kind'" ref="kindMenu" column="kind" label="Kind"
                 :model-value="kinds" :options="kindOptions" @update:model-value="$emit('update:kinds', $event)" />
               <GraphColumnFilter v-if="column.id === 'project'" ref="projectMenu" column="project" label="Project" searchable
@@ -58,7 +46,8 @@
       <div v-if="loading && !nodes.length" class="graph-entries-empty" role="status">Loading graph entries</div>
       <div v-else-if="!nodes.length" class="graph-entries-empty">
         <h2>{{ emptyTitle }}</h2><p>{{ emptyCopy }}</p>
-        <button v-if="!activeFilters.length && !searchActive" type="button" data-graph-control="graph-empty-create" @click="$emit('create')">Create an item</button>
+        <button v-if="hasFilters" type="button" data-graph-control="graph-clear-filters" @click="clearFilters">Clear filters</button>
+        <button v-else-if="!searchActive" type="button" data-graph-control="graph-empty-create" @click="$emit('create')">Create an item</button>
       </div>
       <div v-if="canLoadMore" class="graph-entries-more">
         <button type="button" data-graph-control="graph-load-more" :disabled="loading || loadingMore" @click="$emit('loadMore')">
@@ -71,7 +60,7 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { IconArrowDown, IconArrowUp, IconHistory, IconX } from '@tabler/icons-vue'
+import { IconArrowDown, IconArrowUp } from '@tabler/icons-vue'
 import GraphColumnFilter from './GraphColumnFilter.vue'
 import { entryProjects, graphKindLabel as kindLabel, NO_PROJECT } from './graphEntryMetadata.js'
 const props = defineProps({
@@ -91,7 +80,7 @@ const props = defineProps({
   emptyTitle: { type: String, default: 'The graph is empty' },
   emptyCopy: { type: String, default: 'Create an item or choose another scope.' },
 })
-const emit = defineEmits(['open', 'create', 'sort', 'loadMore', 'changes', 'update:kinds', 'update:projectIds'])
+const emit = defineEmits(['open', 'create', 'sort', 'loadMore', 'update:kinds', 'update:projectIds'])
 const columns = [{ id: 'title', label: 'Title' }, { id: 'kind', label: 'Kind' }, { id: 'project', label: 'Project' }, { id: 'created', label: 'Created' }, { id: 'updated', label: 'Updated' }]
 const root = ref(null), kindMenu = ref([]), projectMenu = ref([]), selectedId = ref('')
 const kindOptions = computed(() => {
@@ -110,10 +99,7 @@ const projectOptions = computed(() => {
   }
   return [...options, { value: NO_PROJECT, label: 'No project' }]
 })
-const activeFilters = computed(() => [
-  props.kinds.length && { id: 'kinds', label: `Kind: ${props.kinds.map(kindLabel).join(', ')}` },
-  props.projectIds.length && { id: 'projectIds', label: `Project: ${props.projectIds.map(id => projectOptions.value.find(option => option.value === id)?.label || id).join(', ')}` },
-].filter(Boolean))
+const hasFilters = computed(() => props.kinds.length > 0 || props.projectIds.length > 0)
 const projectLabels = computed(() => new Map(props.nodes.map(node => [node.id, entryProjects(node, props.projects).map(project => project.title)])))
 function projectNames(node) { return projectLabels.value.get(node.id) || [] }
 function clearFilters() { emit('update:kinds', []); emit('update:projectIds', []) }
@@ -179,14 +165,8 @@ defineExpose({ focusEdge, focusNode, closeMenus })
 
 <style scoped>
 .graph-entries { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; background: var(--color-surface); }
-.graph-entries-tools { display: flex; min-height: 28px; flex-shrink: 0; gap: 8px; align-items: flex-start; padding: 0 10px; border-bottom: 1px solid var(--color-rule-light); background: var(--color-chrome-high); font-size: 11px; color: var(--color-ink-3); }
-.graph-entry-filters { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; gap: 0 8px; }
-.graph-entries-tools button { display: inline-flex; min-height: 28px; min-width: 0; align-items: center; gap: 5px; text-align: left; }
-.graph-entry-filter-chip { max-width: 100%; color: var(--color-accent); }
-.graph-entry-filter-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.graph-entry-filter-chip svg { flex-shrink: 0; }
-.graph-entries-changes { flex-shrink: 0; }
-.graph-best-match-active { color: var(--color-ink); font-weight: 600; }
+.graph-best-match { min-height: 28px; margin-inline-start: auto; padding-inline: 5px; color: var(--color-ink-3); font-size: 10px; font-weight: 400; white-space: nowrap; }
+.graph-best-match-active { color: var(--color-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .graph-entries-scroll { min-height: 0; flex: 1; overflow: auto; overflow-anchor: none; }
 .graph-entries table { width: 100%; min-width: 690px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 11.5px; color: var(--color-ink); }
 .graph-entries th, .graph-entries td { padding: 0 12px; text-align: left; }
@@ -194,7 +174,7 @@ defineExpose({ focusEdge, focusNode, closeMenus })
 .graph-entry-heading { display: flex; align-items: center; }
 .graph-entry-sort { display: flex; min-height: 28px; min-width: 0; align-items: center; gap: 5px; }
 .graph-entry-sort svg { flex-shrink: 0; }
-.graph-entry-kind { width: 122px; }
+.graph-entry-kind { width: 132px; }
 .graph-entry-project { width: 152px; }
 .graph-entry-created, .graph-entry-updated { width: 100px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .graph-entry-row { cursor: pointer; background: var(--color-surface); }

@@ -62,17 +62,20 @@ createApp({
     return () => [
       h(GraphAppHeader, {
         sections: [{ id: 'work', label: 'Work' }, { id: 'all', label: 'Graph' }], section: 'all', sectionLabel: 'Graph',
+        changesActive: changes.value && !search.value,
+        onSetSection: () => { changes.value = false },
+        onShowChanges: () => { changes.value = true; search.value = '' },
         scopes: [{ id: 'team', kind: 'team', root: '/preview' }], activeScopeIds: ['team'],
         searchValue: search.value, searchQuery: search.value, resultCount: visible.value.length,
         'onUpdate:searchValue': value => { search.value = value; searchOrder.value = { sortBy: 'relevance', direction: 'desc' } },
         onClearSearch: () => { search.value = '' },
       }),
-      changes.value && !search.value ? h('button', { onClick: () => { changes.value = false } }, '← Entries') : h(GraphEntries, {
+      changes.value && !search.value ? h('p', { style: 'padding:16px;color:var(--color-ink-3)' }, 'Changes preview') : h(GraphEntries, {
         nodes: visible.value, availableKinds: [...new Set(nodes.map(node => node.kind))], projects, currentProjectId: 'atlas', kinds: kinds.value, projectIds: projectIds.value,
         sortBy: order.value.sortBy, direction: order.value.direction, searchActive: Boolean(search.value),
         contextKey: JSON.stringify([search.value, order.value, kinds.value, projectIds.value]),
         'onUpdate:kinds': value => { kinds.value = value }, 'onUpdate:projectIds': value => { projectIds.value = value },
-        onSort: sort, onChanges: () => { changes.value = true; search.value = '' }, onOpen: id => { selected.value = id },
+        onSort: sort, onOpen: id => { selected.value = id },
       }),
       selected.value ? h('output', { style: 'padding:8px;color:var(--color-ink);' }, `Opened: ${entries.value.find(node => node.id === selected.value)?.title}`) : null,
     ]

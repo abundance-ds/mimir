@@ -1,5 +1,6 @@
 export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   shell: [
+    'graph-changes',
     'scope-trigger',
     'refresh',
     'create',
@@ -90,8 +91,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-columns-expand-all',
     'graph-clear-filters',
     'graph-best-match',
-    'graph-changes',
-    'graph-back-entries',
   ],
   summary: [
     'changes-summarise',

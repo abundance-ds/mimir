@@ -230,10 +230,10 @@ native costs, not input-to-display guarantees.
 
 ## Product surface
 
-Work and Graph are the two primary projections. Work is the default issue
+Work, Graph, and Changes share the top navigation. Work is the default issue
 projection with Board and List views. Graph has one entry table. Its column
-headers sort and filter entries. Changes is a secondary action that opens
-the event stream. [Scribe](meetings.md) owns meeting preparation
+headers sort and filter entries. Changes opens the event stream.
+[Scribe](meetings.md) owns meeting preparation
 and filing. Entry details open in Editor tabs, leaving the Graph projection
 in Main. Preview, pinning, close, and session restore use the Editor tab
 lifecycle. Reopening an entry or its source selects the same tab and keeps
@@ -308,9 +308,11 @@ Graph has one table with **Title**, **Kind**, **Project**, **Created**, and
 **Updated** columns. Rows have no separator lines and use 11.5 px type.
 Click a column label to sort; click it again to reverse
 the order. One arrow marks the active sort. The default is Updated, newest
-first. There is no separate sort menu or List/Groups switch. **Changes** above
-the table opens event history; **Entries** returns to the table. Opening
-Changes clears search. The table has no command footer. Cmd/Ctrl+F,
+first. There is no separate sort menu or List/Groups switch. **Changes** in
+the top navigation opens event history; **Graph** returns to the table.
+Opening Changes clears search, including a pending search. Work retains its
+chosen Board or List view. Graph retains its column filters. The table starts
+directly below the top navigation, with no extra toolbar or command footer. Cmd/Ctrl+F,
 Cmd/Ctrl+K, and `/` focus search. **New** creates an entry.
 
 Click anywhere in a row to open that row's entry in Editor. Every cell has
@@ -327,15 +329,21 @@ removed at small widths.
 Kind and Project have separate, always-visible filter buttons beside their
 sort labels. Kind lists the kinds present in the selected scopes, independently
 of active filters and paging. Project has a text search, puts
-the current workspace project first, and offers **No project**. Both use
+the current workspace project first when nothing is selected, and offers
+**No project**. Both use
 checkboxes. Changes apply at once, and the filter stays open for further
 selections. Clicking the filter icon again closes it without clearing selections.
+Selected options appear first when the menu reopens. Their order stays fixed
+while the menu is open, so a click does not move the next option.
 Escape closes the filter and returns focus to its button.
 Clicking outside also closes it. Filter menus render above the app panes and
 stay inside the window. A click anywhere in an option selects it. Multiple selections match any value within
-a column; filters across columns must all match. Named filter chips above
-the table clear each column. **Clear filters** clears both columns and keeps
-the search text. Filters remain available when no entries match.
+a column; filters across columns must all match. Active filter buttons show
+the selected count, with the names in their tooltip and accessible label.
+The adjacent × clears that column in one click and keeps the search text.
+No filter row appears or disappears, so the table stays in place. Filters
+remain available when no entries match; the empty state also offers
+**Clear filters** to clear both columns.
 
 Project filtering includes the Project entry and entries with explicit
 `part_of` assignments to it. A resolved legacy project id is also accepted.
@@ -349,7 +357,8 @@ the first project by name for sorting and match any selected project.
 
 Each new search starts with **Best match**: exact title matches, then other
 titles containing all search terms, then content matches. A column click
-sorts the search results. The Best match action restores relevance.
+sorts the search results. **Best match**, beside Title in the table heading,
+restores relevance.
 Clearing search restores the browse sort. Browse order and active column
 filters persist; search order is limited to the current query. Old Timeline
 and Groups selections open the table. Old single-kind category settings are

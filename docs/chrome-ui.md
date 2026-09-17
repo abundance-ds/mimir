@@ -113,7 +113,7 @@ Heights include the rule. Layer is the background token.
 |---|---|---|---|
 | Editor toolbar | `editor/components/workspace/EditorToolbar.vue` | Format buttons 22 px, 12 px inset | 30 px, `chrome-mid`, `rule-light` |
 | Files view tabs (wide manager) | `FilesActivity.vue` | Project, Changes, Recent, Favorites with 2 px accent underline; three 28 px icon buttons | 40 px |
-| Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Work and Graph tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
+| Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Work, Graph, and Changes tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
 | Tracker range | `TrackerApp.vue` | Range tabs, previous, range label, next | 36 px wrapping strip under a 40 px identity header |
 | Scribe transport | `ScribeApp.vue` | Recording dot, timer, status, save state, Mute, Stop 28 px | 42 px `chrome` |
 | Scribe overview | `ScribeApp.vue` | Search, Prepare, Record, Settings; 28 px controls | In-content title, action row, and status lines |
@@ -143,7 +143,7 @@ retains the pane-bar layout above. [Files](files.md) owns their behavior.
 | Files ledger columns | `FilesActivity.vue` | Mono 10 px column labels in the tree grid |
 | Graph entry view | `business-graph/GraphEntryDetails.vue` | 36 px band with Details and Source controls at 28 px; quiet save status, Save, and More; uses the Editor tab strip |
 | Work viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; frequent task filters; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
-| Graph table | `business-graph/GraphEntries.vue` | Sort labels and Kind/Project filter buttons in the column headings; named filters and the Changes action above the table; see [Graph](business-graph.md#product-surface) |
+| Graph table | `business-graph/GraphEntries.vue` | Sort labels and Kind/Project filter counts and clear actions in the column headings; no extra toolbar; see [Graph](business-graph.md#product-surface) |
 
 ### Canvases
 
@@ -233,7 +233,7 @@ counted as a row.
 The 2026-09-04 repair made these changes:
 
 1. The full top band uses `chrome` with a `rule` below it.
-2. Graph row 2 keeps Work and Graph navigation, search, scope, refresh, and New.
+2. Graph row 2 keeps Work, Graph, and Changes navigation, search, scope, refresh, and New.
    Row 3 keeps frequent task filters beside the views and Display at the right.
    Narrow panes collect task filters under Filter with named, clearable chips.
    Layout settings stay in Display. The row does not scroll sideways.
@@ -245,8 +245,8 @@ The 2026-09-04 repair made these changes:
    and status footer keep their 28 px document margin.
 8. Sidebar, Activity, and Editor use the same `pane-header` class. Editor file
    tabs fill that band, align to its bottom edge, and use a raised active plate.
-9. Work and Graph navigation stays direct at every width. Graph has one
-   entry table and a secondary Changes action.
+9. Work, Graph, and Changes navigation stays direct at every width. Graph has
+   one entry table; its column headings hold sort and filter controls.
 10. Tools and Activities have fixed headings above Files. Main sessions
     also remain in the horizontal tab strip.
 

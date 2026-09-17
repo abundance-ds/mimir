@@ -2,12 +2,18 @@
   <div ref="root" class="graph-column-filter">
     <button ref="trigger" type="button" :data-graph-control="`graph-filter-${column}`"
       class="graph-column-filter-trigger" :class="{ active: modelValue.length }"
-      :aria-label="`Filter by ${label.toLowerCase()}${modelValue.length ? `, ${modelValue.length} selected` : ''}`"
-      :title="`Filter by ${label.toLowerCase()}`" :aria-expanded="opened" aria-haspopup="dialog"
+      :aria-label="`Filter by ${label.toLowerCase()}${modelValue.length ? `, ${modelValue.length} selected: ${selectionLabel}` : ''}`"
+      :title="modelValue.length ? `${label}: ${selectionLabel}` : `Filter by ${label.toLowerCase()}`" :aria-expanded="opened" aria-haspopup="dialog"
       @pointerdown="rememberTriggerPress" @pointercancel="triggerPressWasOpen = null"
       @mousedown.prevent="trigger?.focus({ preventScroll: true })"
       @click="toggle" @keydown.down.prevent="open">
       <IconFilter :size="13" aria-hidden="true" />
+      <span v-if="modelValue.length" class="graph-column-filter-count" aria-hidden="true">{{ modelValue.length }}</span>
+    </button>
+    <button v-if="modelValue.length" type="button" :data-graph-control="`graph-filter-clear-${column}`"
+      class="graph-column-filter-clear" :aria-label="`Clear ${label.toLowerCase()} filter: ${selectionLabel}`"
+      :title="`Clear ${label.toLowerCase()} filter: ${selectionLabel}`" @click="clear">
+      <IconX :size="12" aria-hidden="true" />
     </button>
     <Teleport to="body">
     <div v-if="opened" ref="popup" class="graph-column-filter-popup" :style="position"
@@ -37,7 +43,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { IconFilter } from '@tabler/icons-vue'
+import { IconFilter, IconX } from '@tabler/icons-vue'
 import GraphCheckbox from './GraphCheckbox.vue'
 const props = defineProps({
   column: { type: String, required: true },
@@ -49,10 +55,15 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 const root = ref(null), trigger = ref(null), popup = ref(null), searchInput = ref(null)
 const opened = ref(false), query = ref(''), position = ref({})
+const selectedOnOpen = ref([])
 let triggerPressWasOpen = null
+const selectionLabel = computed(() => props.modelValue.map(value => props.options.find(option => option.value === value)?.label || value).join(', '))
 const filteredOptions = computed(() => props.options.filter(option =>
-  `${option.label} ${option.hint || ''}`.toLowerCase().includes(query.value.trim().toLowerCase())))
+  `${option.label} ${option.hint || ''}`.toLowerCase().includes(query.value.trim().toLowerCase()))
+  .sort((a, b) => Number(selectedOnOpen.value.includes(b.value)) - Number(selectedOnOpen.value.includes(a.value))))
 async function open() {
+  // Pin the existing selection on open; do not move rows beneath a click.
+  selectedOnOpen.value = [...props.modelValue]
   opened.value = true
   query.value = ''
   await nextTick()
@@ -88,6 +99,11 @@ function closeMenus({ restoreFocus = false } = {}) {
 function select(value) {
   emit('update:modelValue', props.modelValue.includes(value)
     ? props.modelValue.filter(item => item !== value) : [...props.modelValue, value])
+}
+function clear() {
+  closeMenus()
+  emit('update:modelValue', [])
+  trigger.value?.focus({ preventScroll: true })
 }
 function onKeydown(event) {
   if (event.key === 'Escape') {
@@ -133,8 +149,11 @@ defineExpose({ closeMenus })
 </script>
 
 <style scoped>
-.graph-column-filter { flex: 0 0 auto; }
-.graph-column-filter-trigger { display: grid; width: 26px; height: 28px; place-items: center; color: var(--color-ink-3); }
+.graph-column-filter { display: flex; flex: 0 0 auto; align-items: center; margin-inline-start: auto; }
+.graph-column-filter-trigger { display: flex; min-width: 24px; height: 28px; align-items: center; justify-content: center; gap: 2px; padding-inline: 4px; color: var(--color-ink-3); }
+.graph-column-filter-count { min-width: 8px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.graph-column-filter-clear { display: grid; width: 20px; height: 28px; place-items: center; color: var(--color-ink-3); }
+.graph-column-filter-clear:hover { background: var(--color-chrome-mid); color: var(--color-ink); }
 .graph-column-filter-trigger:hover { background: var(--color-chrome-mid); color: var(--color-ink); }
 .graph-column-filter-trigger.active { background: var(--color-accent-soft); color: var(--color-accent); }
 .graph-column-filter-popup { position: fixed; z-index: 260; display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--color-rule); background: var(--color-surface); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent); color: var(--color-ink); font-size: 12px; font-weight: 400; text-align: left; }

@@ -10,6 +10,7 @@
       ref="appHeader"
       :sections="sections"
       :section="graph.section"
+      :changes-active="graph.section === 'all' && graph.view === 'changes' && !graph.searchQuery.trim()"
       :section-label="currentSection?.label"
       :search-value="searchDraft"
       :search-query="graph.searchQuery"
@@ -21,6 +22,7 @@
       :scope-counts="graph.scopeCounts"
       :refreshing="graph.refreshing"
       @set-section="setSection"
+      @show-changes="showChanges"
       @update:search-value="onSearchInput"
       @focus-search-results="focusSearchResults"
       @flush-search="flushSearch"
@@ -245,6 +247,11 @@ const {
   openGraphNode: request => emit('openGraphNode', request),
 })
 defineExpose({ focusEntry })
+function showChanges() {
+  clearSearch({ focus: false })
+  graph.setSection('all')
+  graph.setView('changes')
+}
 watch(
   [() => graph.requestedNodeId, () => props.active, () => graph.loading, () => graph.projectRoot],
   ([id, active, loading, workspace]) => {

@@ -51,7 +51,6 @@
         :context-key="entryContext"
         @update:kinds="graph.graphKinds = $event"
         @update:project-ids="graph.graphProjectIds = $event"
-        @changes="graph.clearSearch(); $emit('setView', 'changes')"
         :sort-by="graphSort.sortBy"
         :direction="graphSort.direction"
         :loading="graph.projectionLoading || graph.searching"
@@ -64,10 +63,6 @@
         @sort="$emit('sortGraph', $event)"
         @load-more="graph.loadMoreGraphEntries()"
       />
-      <div v-if="graph.section === 'all' && graph.view === 'changes' && !graph.searchQuery.trim()" class="graph-changes-nav">
-        <button type="button" data-graph-control="graph-back-entries" @click="$emit('setView', 'list')">← Entries</button>
-        <span>Changes</span>
-      </div>
       <NowView
         v-if="!composing && graph.section === 'all' && graph.view === 'changes' && !graph.searchQuery.trim()"
         :events="graph.events"
@@ -200,9 +195,6 @@ defineExpose({
 </script>
 
 <style scoped>
-.graph-changes-nav { display: flex; min-height: 28px; flex-shrink: 0; align-items: center; gap: 16px; padding: 0 12px; border-bottom: 1px solid var(--color-rule); color: var(--color-ink-3); font-size: 11px; }
-.graph-changes-nav button { min-height: 28px; color: var(--color-ink); }
-.graph-changes-nav button:focus-visible { outline: 2px solid var(--color-accent); }
 .graph-workspace {
   gap: 1px;
   background: var(--color-rule);

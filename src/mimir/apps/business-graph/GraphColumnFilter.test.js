@@ -14,6 +14,34 @@ function render(props = {}) {
 }
 
 describe('Graph column filter in a clipped pane', () => {
+  it('shows the active count and names, clears in one click, and restores focus', async () => {
+    render({ modelValue: ['note', 'project'] })
+    const trigger = wrapper.get('[aria-haspopup="dialog"]')
+    expect(trigger.text()).toBe('2')
+    expect(trigger.attributes('title')).toBe('Kind: Note, Project')
+    const clear = wrapper.get('[data-graph-control="graph-filter-clear-kind"]')
+    clear.element.focus()
+    await clear.trigger('click')
+    expect(wrapper.props('modelValue')).toEqual([])
+    expect(document.activeElement).toBe(trigger.element)
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[data-graph-control="graph-filter-clear-kind"]').exists()).toBe(false)
+  })
+
+  it('puts selected options first on open without moving rows during selection', async () => {
+    render({ modelValue: ['project'] })
+    const trigger = wrapper.get('[aria-haspopup="dialog"]')
+    const labels = () => body().findAll('[role="checkbox"]').map(item => item.text())
+    await trigger.trigger('click')
+    expect(labels()).toEqual(['Project', 'Note'])
+    await option('project').trigger('click')
+    await option('note').trigger('click')
+    expect(labels()).toEqual(['Project', 'Note'])
+    await trigger.trigger('click')
+    await trigger.trigger('click')
+    expect(labels()).toEqual(['Note', 'Project'])
+  })
+
   it('renders outside the pane and keeps option clicks inside the open filter', async () => {
     render()
     const trigger = wrapper.get('[aria-haspopup="dialog"]')

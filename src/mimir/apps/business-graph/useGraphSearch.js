@@ -86,7 +86,7 @@ export function useGraphSearch({ graph, projectionNodes, focusResults, focusInpu
     void graph.search(value)
   }
 
-  function clearSearch() {
+  function clearSearch({ focus = true } = {}) {
     clearTimeout(timer)
     timer = null
     generation += 1
@@ -94,7 +94,7 @@ export function useGraphSearch({ graph, projectionNodes, focusResults, focusInpu
     searchResultFocusIntent.value = ''
     searchDraft.value = ''
     graph.clearSearch()
-    focusInput()
+    if (focus) focusInput()
   }
 
   function onSearchEscape(event) {
