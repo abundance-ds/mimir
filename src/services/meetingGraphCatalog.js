@@ -9,7 +9,7 @@ export async function loadMeetingGraphCatalog(workspacePath) {
   const scopes = Array.isArray(status?.scopes) ? status.scopes : []
   const page = await queryGraph({
     scopeIds: scopes.map(scope => scope.id),
-    kinds: ['project', 'person'],
+    kinds: ['project', 'person', 'company'],
     limit: 500,
   })
   const nodes = Array.isArray(page?.items) ? page.items : []
@@ -17,10 +17,11 @@ export async function loadMeetingGraphCatalog(workspacePath) {
     scopes,
     projects: nodes.filter(node => node.kind === 'project'),
     people: nodes.filter(node => node.kind === 'person'),
+    companies: nodes.filter(node => node.kind === 'company'),
   }
 }
 
-export async function createMeetingGraphEntity({ kind, title, scopeId }) {
+export async function createMeetingGraphEntity({ kind, title, scopeId, companyId = '' }) {
   const normalizedKind = String(kind || '').trim()
   const normalizedTitle = String(title || '').trim()
   if (!['project', 'person'].includes(normalizedKind)) {
@@ -34,7 +35,9 @@ export async function createMeetingGraphEntity({ kind, title, scopeId }) {
     summary: '',
     body: '',
     tags: [],
-    relations: [],
+    relations: normalizedKind === 'person' && String(companyId || '').trim()
+      ? [{ relation: 'works_at', target: String(companyId).trim(), legacy: false }]
+      : [],
     properties: normalizedKind === 'project'
       ? { projectStatus: 'planned' }
       : { status: 'active', teamMember: false },

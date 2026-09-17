@@ -505,6 +505,7 @@ function normalizeMeeting(value) {
     summary: optionalString(meeting.summary),
     notes: String(meeting.notes || ''),
     summaryTruncated: Boolean(meeting.summaryTruncated ?? meeting.summary_truncated),
+    summaryNeedsUpdate: Boolean(meeting.summaryNeedsUpdate ?? meeting.summary_needs_update),
     summaryState: String(meeting.summaryState ?? meeting.summary_state ?? 'not-started'),
     kgState: String(meeting.kgState ?? meeting.kg_state ?? 'not-offered'),
     graphNodeId: optionalString(meeting.graphNodeId ?? meeting.graph_node_id),

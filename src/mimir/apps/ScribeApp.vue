@@ -2,6 +2,8 @@
   <section
     ref="scribeRoot"
     data-scribe-app
+    tabindex="-1"
+    @click="retainMeetingFocus"
     @keydown="onDetailKeydown"
     class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
   >
@@ -203,8 +205,8 @@
           v-if="detailMeeting.lifecycle === 'arming' && meetingCanContinue(detailMeeting)"
           type="button"
           data-scribe-continue
-          class="scribe-primary-button"
-          :disabled="Boolean(meetings.pending.start) || filingPending"
+          :class="detailMeeting.lifecycle === 'arming' ? 'scribe-primary-button' : 'scribe-quiet-button'"
+          :disabled="Boolean(meetings.pending.start || meetings.pending.stop) || filingPending"
           @click="continueMeeting(detailMeeting)"
         >
           <IconMicrophone :size="13" />
@@ -439,6 +441,7 @@
                 </p>
                 <template v-else>
                   <div class="scribe-filed-summary-bar">
+                    <span v-if="detailMeeting.summaryNeedsUpdate" data-scribe-summary-stale role="status">More audio was recorded. The saved summary needs an update.</span>
                     <span>{{ reviewingDraft && !summaryRunPending ? 'Replacement draft' : 'Current Graph summary' }}</span>
                     <template v-if="summaryRunPending"><span role="status">{{ summaryActionLabel }}</span></template>
                     <template v-else-if="hasFiledDraft">
@@ -482,6 +485,7 @@
                 </button>
               </div>
               <div v-else data-scribe-summary-content class="scribe-summary-document">
+                <p v-if="detailMeeting.summaryNeedsUpdate" data-scribe-summary-stale role="status" class="text-[11px] text-ink-3">{{ detailMeeting.transcriptFinal ? 'More audio was recorded. Update this summary.' : 'More audio was recorded. Update this summary after transcription finishes.' }}</p>
                 <ScribeMarkdownEditor
                   v-model="summaryDraft"
                   aria-label="Meeting summary in Markdown"
@@ -767,7 +771,8 @@
       :retranscribe-pending="meetingRecoveryPending(menuMeeting)"
       :retranscribe-label="meetingRecoveryActionLabel(menuMeeting)"
       :can-continue="meetingCanContinue(menuMeeting) && (menuMeeting.lifecycle !== 'arming' || detailMeetingId !== menuMeeting.id)"
-      :continue-label="menuMeeting.lifecycle === 'arming' ? 'Record' : 'Continue recording'"
+      :continue-pending="Boolean(meetings.pending.start || meetings.pending.stop)"
+      :continue-label="menuMeeting.lifecycle === 'arming' ? 'Record' : 'Resume recording'"
       :can-rename="!menuMeeting.graphNodeId"
       :files-pending="meetingActionPending(menuMeeting.id, 'export:files')"
       :markdown-pending="meetingActionPending(menuMeeting.id, 'export:markdown')"
@@ -787,6 +792,7 @@
     <ScribeCreateEntityDialog
       :request="graphEntityRequest"
       :scopes="graphCatalog.scopes"
+      :companies="graphCatalog.companies"
       :busy="graphEntityCreating"
       :error="graphEntityError"
       @close="graphEntityRequest = null"
@@ -898,7 +904,7 @@ const notesSaving = ref(false)
 const titleDraft = ref('')
 const summaryDraft = ref('')
 const graphDraft = ref(emptyGraphDraft())
-const graphCatalog = ref({ scopes: [], projects: [], people: [] })
+const graphCatalog = ref({ scopes: [], projects: [], people: [], companies: [] })
 const graphCatalogLoading = ref(false)
 const graphCatalogError = ref('')
 const graphEntityCreating = ref(false)
@@ -1401,7 +1407,7 @@ async function loadGraphContextCatalog() {
   const workspace = String(props.workspacePath || '').trim()
   const generation = ++graphCatalogGeneration
   if (!workspace) {
-    graphCatalog.value = { scopes: [], projects: [], people: [] }
+    graphCatalog.value = { scopes: [], projects: [], people: [], companies: [] }
     graphCatalogError.value = ''
     graphCatalogLoading.value = false
     return
@@ -1465,6 +1471,7 @@ async function createGraphContextEntity(meetingId, request) {
       kind,
       title: requestedTitle,
       scopeId: request.scopeId,
+      ...(kind === 'person' && request.companyId ? { companyId: request.companyId } : {}),
     })
     const key = kind === 'project' ? 'projects' : 'people'
     graphCatalog.value = {
@@ -1490,6 +1497,15 @@ async function createGraphContextEntity(meetingId, request) {
     graphEntityError.value = message(error)
   } finally {
     graphEntityCreating.value = false
+  }
+}
+
+function retainMeetingFocus() {
+  if (!props.active || !detailMeeting.value || meetings.activeMeeting) return
+  // WebKit can leave focus on body after clicking non-editable meeting content.
+  // Keep Escape local to Scribe without intercepting keys from other panes.
+  if (document.activeElement === document.body) {
+    scribeRoot.value?.focus({ preventScroll: true })
   }
 }
 
@@ -1706,7 +1722,7 @@ async function deleteMeetingById(id) {
   )
   if (!accepted) return
   try {
-    await meetings.remove(id, 'all')
+    const deleting = meetings.remove(id, 'all')
     if (notesMeetingId.value === id) {
       if (notesSaveTimer) window.clearTimeout(notesSaveTimer)
       notesSaveTimer = null
@@ -1714,6 +1730,7 @@ async function deleteMeetingById(id) {
       notesDirty.value = false
     }
     if (detailMeetingId.value === id) leaveMeetingDetail()
+    await deleting
   } catch (error) {
     actionError.value = message(error)
   }
@@ -1870,12 +1887,13 @@ function meetingRecoveryActionLabel(meeting) {
 function meetingCanContinue(meeting) {
   return !meetings.activeMeeting && (
     meeting?.lifecycle === 'arming'
+    || ['finalizing', 'interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle)
     || (meeting?.lifecycle === 'ready' && meeting?.transcriptFinal)
   )
 }
 
 function meetingRecordActionLabel(meeting) {
-  return meeting?.lifecycle === 'arming' ? 'Record' : 'Continue'
+  return meeting?.lifecycle === 'arming' ? 'Record' : 'Resume recording'
 }
 
 function meetingBackgroundStatus(meeting) {
@@ -2388,12 +2406,17 @@ button:disabled {
 
 .scribe-row-meta {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: 5px;
   margin-top: 1px;
   color: var(--color-ink-3);
   font-size: 9px;
+}
+
+.scribe-row-meta [data-scribe-row-progress] {
+  white-space: nowrap;
 }
 
 .scribe-row-time {

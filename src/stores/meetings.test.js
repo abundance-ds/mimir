@@ -183,7 +183,7 @@ describe('meetings store', () => {
     expect(store.requestedMeetingId).toBe('')
   })
 
-  it('flushes the latest staged meeting document before a sidebar Stop', async () => {
+  it('starts Stop without waiting for the latest staged meeting document', async () => {
     const active = {
       id: 'live', title: 'Live', lifecycle: 'capturing', notes: '',
       jobs: [], gaps: [], channels: ['microphone', 'system'],
@@ -228,7 +228,7 @@ describe('meetings store', () => {
 
     await store.stop()
 
-    expect(order).toEqual(['signal-stop', 'update:Final question.', 'stop'])
+    expect(order).toEqual(['signal-stop', 'stop', 'update:Final question.'])
     expect(updateMeeting).toHaveBeenCalledWith('live', {
       notes: 'Final question.',
       title: 'Client planning',
@@ -753,6 +753,34 @@ describe('meetings store', () => {
     expect(store.selectedMeeting.lifecycle).toBe('ready')
   })
 
+  it('can continue and stop again while an earlier Stop still drains', async () => {
+    const store = useMeetingsStore()
+    const meeting = { id: 'm1', title: 'Planning', lifecycle: 'capturing',
+      durationMs: 1000, segments: [], jobs: [], gaps: [], channels: [] }
+    store.applySnapshot({ ...emptySnapshot, revision: 2, activeMeetingId: 'm1', meetings: [meeting] })
+    const finish = []
+    vi.mocked(stopMeeting).mockImplementation(() => new Promise(resolve => finish.push(resolve)))
+    const firstStop = store.stop()
+    await vi.waitFor(() => expect(finish).toHaveLength(1))
+    store.applySnapshot({ ...emptySnapshot, revision: 3,
+      meetings: [{ ...meeting, lifecycle: 'finalizing' }] })
+    expect(store.pending.stop).toBeUndefined()
+    vi.mocked(startMeeting).mockResolvedValue({ ...emptySnapshot, revision: 4,
+      activeMeetingId: 'm1', meetings: [meeting] })
+    await store.start({ continueMeetingId: 'm1' })
+    expect(store.recording).toBe(true)
+    const secondStop = store.stop()
+    await vi.waitFor(() => expect(finish).toHaveLength(2))
+    // An old response must not clear the new Stop or restore its recording.
+    finish[0]({ ...emptySnapshot, revision: 3, meetings: [{ ...meeting, lifecycle: 'finalizing' }] })
+    await firstStop
+    expect(store.pending.stop).toBe(true)
+    expect(store.activeMeeting).toBeNull()
+    finish[1]({ ...emptySnapshot, revision: 5, meetings: [{ ...meeting, lifecycle: 'ready' }] })
+    await secondStop
+    expect(store.pending.stop).toBeUndefined()
+  })
+
   it('hides a meeting while native deletion waits for cleanup', async () => {
     const meeting = {
       id: 'm1', title: 'Planning', lifecycle: 'ready', durationMs: 1200,
@@ -776,6 +804,35 @@ describe('meetings store', () => {
     finishDelete({ ...emptySnapshot, revision: 3 })
     await deleting
     expect(store.meetings).toEqual([])
+  })
+
+  it('keeps a deleted recording hidden from late saves, snapshots, and search', async () => {
+    const meeting = { id: 'm1', title: 'Planning', lifecycle: 'finalizing', durationMs: 1000,
+      segments: [], jobs: [], gaps: [], channels: [] }
+    const store = useMeetingsStore()
+    store.applySnapshot({ ...emptySnapshot, revision: 2, meetings: [meeting] })
+    let finishSave
+    vi.mocked(updateMeeting).mockImplementation(() => new Promise(resolve => { finishSave = resolve }))
+    store.stageMeetingNotes('m1', 'Notes still saving')
+    const saving = store.flushMeetingNotes('m1')
+    await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalled())
+    let finishDelete
+    vi.mocked(deleteMeeting).mockImplementation(() => new Promise(resolve => { finishDelete = resolve }))
+    const deleting = store.remove('m1')
+    expect(store.meetings).toEqual([])
+    finishSave({ ...emptySnapshot, revision: 3, meetings: [meeting] })
+    await saving
+    expect(store.meetings).toEqual([])
+    store.applySnapshot({ ...emptySnapshot, revision: 4, meetings: [meeting] })
+    expect(store.meetings).toEqual([])
+    finishDelete({ ...emptySnapshot, revision: 5 })
+    await deleting
+    vi.mocked(searchMeetingLibrary).mockResolvedValue([{ meeting }])
+    await store.search('Planning')
+    expect(store.searchResults).toEqual([])
+    store.stageMeetingNotes('m1', 'A delayed editor event')
+    await store.flushMeetingNotes('m1')
+    expect(updateMeeting).toHaveBeenCalledTimes(1)
   })
 
   it('keeps a bounded page for a one-hundred-thousand-segment transcript', async () => {

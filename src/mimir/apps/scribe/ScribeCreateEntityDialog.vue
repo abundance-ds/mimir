@@ -10,6 +10,11 @@
           <input ref="nameInput" v-model="name" aria-label="Name" required :disabled="busy"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </label>
+        <label v-if="request.kind === 'person'">
+          <span>Company <span class="entity-optional">(optional)</span></span>
+          <GraphSelect v-model="companyId" :options="companyOptions" aria-label="Company"
+            :disabled="busy" searchable search-placeholder="Find a company" placeholder="None" />
+        </label>
         <label>
           <span>Save in</span>
           <GraphSelect v-model="scopeId" :options="scopeOptions" aria-label="Save in"
@@ -34,6 +39,7 @@ import GraphSelect from '../business-graph/GraphSelect.vue'
 const props = defineProps({
   request: { type: Object, default: null },
   scopes: { type: Array, default: () => [] },
+  companies: { type: Array, default: () => [] },
   busy: Boolean,
   error: { type: String, default: '' },
 })
@@ -42,6 +48,12 @@ const dialog = ref(null)
 const nameInput = ref(null)
 const name = ref('')
 const scopeId = ref('')
+const companyId = ref('')
+const companyOptions = computed(() => [
+  { value: '', label: 'None' },
+  ...[...props.companies].sort((a, b) => a.title.localeCompare(b.title))
+    .map(company => ({ value: company.id, label: company.title })),
+])
 let returnFocus = null
 const scopeOptions = computed(() => props.scopes.map(scope => ({
   value: scope.id,
@@ -57,6 +69,7 @@ watch(() => props.request, async request => {
   }
   returnFocus = document.activeElement
   name.value = request.title || ''
+  companyId.value = ''
   scopeId.value = request.scopeId || ''
   await nextTick()
   nameInput.value?.focus()
@@ -68,7 +81,10 @@ function close() {
 
 function submit() {
   if (props.busy || !name.value.trim() || !validScope.value) return
-  emit('submit', { kind: props.request.kind, title: name.value.trim(), scopeId: scopeId.value })
+  emit('submit', {
+    kind: props.request.kind, title: name.value.trim(), scopeId: scopeId.value,
+    ...(props.request.kind === 'person' && companyId.value ? { companyId: companyId.value } : {}),
+  })
 }
 
 function trapFocus(event) {
@@ -124,5 +140,6 @@ button:hover { background: var(--color-chrome-mid); }
 .entity-submit, .entity-submit:hover { background: var(--color-accent); color: var(--color-surface); }
 input:focus-visible, button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 button:disabled, input:disabled { opacity: 0.5; }
+.entity-optional { color: var(--color-ink-4); }
 .entity-error { color: var(--color-rem); font-size: 11px; }
 </style>

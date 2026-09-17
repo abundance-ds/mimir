@@ -76,7 +76,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
   let queuedConfigMutations = 0
   let searchGeneration = 0
   let stopRequestedMeetingId = ''
+  let stopToken = 0
   const transcriptRefreshIds = new Set()
+  const deletedMeetingIds = new Set()
   const meetingDrafts = new Map()
   const meetingDraftFlushTails = new Map()
   const meetingMutationTails = new Map()
@@ -224,7 +226,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
   async function stop() {
     const active = activeMeeting.value
     if (!active || pending.value.stop) return null
-    return runPending('stop', async () => {
+    const token = ++stopToken
+    pending.value = { ...pending.value, stop: true }
+    error.value = ''
+    return (async () => {
       stopRequestedMeetingId = active.id
       const stoppedAt = new Date().toISOString()
       const durationMs = elapsedMs.value
@@ -242,20 +247,30 @@ export const useMeetingsStore = defineStore('meetings', () => {
       selectedId.value = active.id
       try {
         await signalMeetingStop(active.id)
-        await flushMeetingDraft(active.id)
-        applySnapshot(await stopMeeting(active.id))
+        const stopped = stopMeeting(active.id)
+        void flushMeetingDraft(active.id).catch(cause => {
+          if (!deletedMeetingIds.has(active.id)) error.value = message(cause)
+        })
+        applySnapshot(await stopped)
         void refreshVisibleTranscripts()
         return selectedMeeting.value
       } catch (cause) {
+        if (deletedMeetingIds.has(active.id)) return null
         // Restore native authority if capture could not stop. The optimistic
         // projection must never conceal a recorder that is still active.
-        stopRequestedMeetingId = ''
+        if (token === stopToken) stopRequestedMeetingId = ''
+        error.value = message(cause)
         await refresh().catch(() => undefined)
         throw cause
       } finally {
-        stopRequestedMeetingId = ''
+        if (token === stopToken) {
+          stopRequestedMeetingId = ''
+          const next = { ...pending.value }
+          delete next.stop
+          pending.value = next
+        }
       }
-    })
+    })()
   }
 
   async function setMicMuted(muted) {
@@ -270,8 +285,15 @@ export const useMeetingsStore = defineStore('meetings', () => {
   async function saveMeeting(id, patch) {
     const previous = meetingMutationTails.get(id) || Promise.resolve()
     const operation = previous.catch(() => {}).then(() => (
-      runPending(`update:${id}`, async () => {
-        applySnapshot(await updateMeeting(id, patch))
+      deletedMeetingIds.has(id) ? null : runPending(`update:${id}`, async () => {
+        let snapshot
+        try {
+          snapshot = await updateMeeting(id, patch)
+        } catch (cause) {
+          if (deletedMeetingIds.has(id)) return null
+          throw cause
+        }
+        applySnapshot(snapshot)
         if (Object.hasOwn(patch, 'summary') && transcriptWindows.value[id]) {
           setTranscriptWindow(id, {
             ...transcriptWindows.value[id],
@@ -292,7 +314,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
 
   function stageMeetingPatch(id, patch = {}) {
     const meetingId = String(id || '').trim()
-    if (!meetingId) return
+    if (!meetingId || deletedMeetingIds.has(meetingId)) return
     meetingDrafts.set(meetingId, {
       ...(meetingDrafts.get(meetingId) || {}),
       ...patch,
@@ -373,20 +395,22 @@ export const useMeetingsStore = defineStore('meetings', () => {
 
   async function remove(id, mode = 'all') {
     return runPending(`delete:${id}`, async () => {
-      const previousMeetings = meetings.value
-      const previousSearchResults = searchResults.value
-      const previousSelectedId = selectedId.value
-      meetings.value = meetings.value.filter(meeting => meeting.id !== id)
-      searchResults.value = searchResults.value.filter(hit => hit.meeting?.id !== id)
-      if (selectedId.value === id) selectedId.value = meetings.value[0]?.id || ''
+      if (mode === 'all') {
+        deletedMeetingIds.add(id)
+        meetingDrafts.delete(id)
+        meetings.value = meetings.value.filter(meeting => meeting.id !== id)
+        searchResults.value = searchResults.value.filter(hit => hit.meeting?.id !== id)
+        if (selectedId.value === id) selectedId.value = meetings.value[0]?.id || ''
+        pruneTranscriptWindows()
+      }
       try {
         applySnapshot(await deleteMeeting(id, mode))
-        meetingDrafts.delete(id)
         return true
       } catch (cause) {
-        meetings.value = previousMeetings
-        searchResults.value = previousSearchResults
-        selectedId.value = previousSelectedId
+        // Re-read authority on a rejected request. Restoring a saved array
+        // could also resurrect other meetings deleted in the meantime.
+        if (mode === 'all') deletedMeetingIds.delete(id)
+        await refresh().catch(() => undefined)
         throw cause
       }
     })
@@ -507,7 +531,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     try {
       const results = await searchMeetingLibrary(normalized)
       if (generation === searchGeneration && searchQuery.value === normalized) {
-        searchResults.value = results
+        searchResults.value = results.filter(hit => !deletedMeetingIds.has(hit.meeting?.id))
       }
       return results
     } catch (cause) {
@@ -571,6 +595,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!meetingId) throw new Error('Meeting id is required.')
     return runPending(`detail:${meetingId}`, async () => {
       const meeting = await loadMeeting(meetingId)
+      if (deletedMeetingIds.has(meetingId)) return null
       meetings.value = [meeting, ...meetings.value.filter(candidate => candidate.id !== meetingId)]
       selectedId.value = meetingId
       pruneTranscriptWindows()
@@ -596,14 +621,23 @@ export const useMeetingsStore = defineStore('meetings', () => {
   function applySnapshot(snapshot) {
     if (!snapshot || snapshot.revision < revision.value) return false
     revision.value = snapshot.revision
+    if (stopRequestedMeetingId && snapshot.activeMeetingId !== stopRequestedMeetingId
+      && snapshot.meetings.some(meeting => meeting.id === stopRequestedMeetingId
+        && !['capturing', 'stopping'].includes(meeting.lifecycle))) {
+      stopRequestedMeetingId = ''
+      const next = { ...pending.value }
+      delete next.stop
+      pending.value = next
+    }
     const stoppingId = stopRequestedMeetingId
+    const visibleMeetings = snapshot.meetings.filter(meeting => !deletedMeetingIds.has(meeting.id))
     const projectedMeetings = stoppingId
-      ? snapshot.meetings.map(meeting => (
+      ? visibleMeetings.map(meeting => (
           meeting.id === stoppingId && meeting.lifecycle === 'capturing'
             ? { ...meeting, lifecycle: 'finalizing' }
             : meeting
         ))
-      : snapshot.meetings
+      : visibleMeetings
     if (snapshot.startProjection) {
       const projectedIds = new Set(projectedMeetings.map(meeting => meeting.id))
       meetings.value = [
@@ -689,6 +723,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
     try {
       const page = await loadMeetingTranscriptPage(id, before)
+      if (deletedMeetingIds.has(id)) return null
       const current = transcriptWindows.value[id] || emptyTranscriptWindow()
       setTranscriptWindow(id, {
         ...current,
@@ -711,6 +746,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       pruneTranscriptWindows()
       return transcriptWindows.value[id]
     } catch (cause) {
+      if (deletedMeetingIds.has(id)) return null
       setTranscriptWindow(id, {
         ...(transcriptWindows.value[id] || emptyTranscriptWindow()),
         loading: false,
@@ -733,7 +769,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       const known = new Set(meetings.value.map(meeting => meeting.id))
       meetings.value = [
         ...meetings.value,
-        ...page.meetings.filter(meeting => !known.has(meeting.id)),
+        ...page.meetings.filter(meeting => !known.has(meeting.id) && !deletedMeetingIds.has(meeting.id)),
       ]
       meetingsTruncated.value = page.hasMore
       nextMeetingsBefore.value = page.nextBefore

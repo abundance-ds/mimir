@@ -403,7 +403,7 @@ describe('ScribeApp', () => {
 
   it('ignores an app through saved config while retaining existing exclusions', async () => {
     const existing = { appId: 'com.example.dictation', appName: 'Other dictation' }
-    const dictate = { appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }
+    const dictate = { appId: 'com.example.dictate', appName: 'Example Dictation' }
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
       config: { ...snapshot().config, ignoredApps: [existing] },
       candidates: [{ id: 'candidate-dictate', ...dictate }],
@@ -412,8 +412,8 @@ describe('ScribeApp', () => {
       revision: 2, config: { ...snapshot().config, ignoredApps: [existing, dictate] },
     }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
-    await vi.waitFor(() => expect(wrapper.find('[aria-label="Ignore Mim Dictate"]').exists()).toBe(true))
-    await wrapper.get('[aria-label="Ignore Mim Dictate"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('[aria-label="Ignore Example Dictation"]').exists()).toBe(true))
+    await wrapper.get('[aria-label="Ignore Example Dictation"]').trigger('click')
     await vi.waitFor(() => expect(updateMeetingsConfig).toHaveBeenCalledWith({ ignoredApps: [existing, dictate] }))
     await vi.waitFor(() => expect(wrapper.find('[data-scribe-candidates]').exists()).toBe(false))
     expect(startMeeting).not.toHaveBeenCalled()
@@ -589,7 +589,7 @@ describe('ScribeApp', () => {
       title: 'Last-second title',
     }))
     expect(wrapper.get('[data-scribe-home-toolbar]').exists()).toBe(true)
-    expect(stopMeeting).not.toHaveBeenCalled()
+    expect(stopMeeting).toHaveBeenCalledWith('m1')
 
     finishSave(snapshot({
       revision: 2,
@@ -635,6 +635,25 @@ describe('ScribeApp', () => {
       meetings: [{ ...savedMeeting, title: 'Edited title' }],
     }))
     await flushPromises()
+  })
+
+  it('returns to the overview with Escape after a meeting background click loses focus', async () => {
+    const savedMeeting = meeting({ notes: '' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [savedMeeting] }))
+    const wrapper = mount(ScribeApp, { props: { active: true }, attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await flushPromises()
+    document.activeElement.blur()
+    expect(document.activeElement).toBe(document.body)
+    await wrapper.get('.scribe-meeting-date').trigger('click')
+    expect(document.activeElement).toBe(wrapper.get('[data-scribe-app]').element)
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await flushPromises()
+    expect(wrapper.find('[data-scribe-home-toolbar]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('lets Escape close a menu or dialog before returning from meeting detail', async () => {
@@ -791,6 +810,36 @@ describe('ScribeApp', () => {
     await wrapper.get('[data-scribe-transcript-latest]').trigger('click')
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('Recent turn'))
     expect(loadMeetingTranscriptPage).toHaveBeenLastCalledWith('m1', null)
+  })
+
+  it.each(['finalizing', 'interrupted', 'failed'])('offers Resume recording only in the menu while %s', async lifecycle => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting({ lifecycle, transcriptFinal: false })] }))
+    vi.mocked(startMeeting).mockResolvedValue(snapshot({ revision: 2, activeMeetingId: 'm1',
+      meetings: [meeting({ lifecycle: 'capturing', transcriptFinal: false })] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-row-actions]').exists()).toBe(true))
+    expect(wrapper.find('[data-scribe-row-continue]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-row-actions]').trigger('click')
+    expect(wrapper.get('[data-scribe-continue-meeting]').text()).toBe('Resume recording')
+    expect(wrapper.get('[data-scribe-continue-meeting]').element.disabled).toBe(false)
+    await wrapper.get('[data-scribe-continue-meeting]').trigger('click')
+    await vi.waitFor(() => expect(startMeeting).toHaveBeenCalledWith(expect.objectContaining({ continueMeetingId: 'm1' })))
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
+    wrapper.unmount()
+  })
+
+  it('keeps the previous summary readable and marks it for an update after Continue', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting({
+      summary: 'Earlier decision.', summaryNeedsUpdate: true,
+    })] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: 'Earlier decision.' }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-summary-stale]').exists()).toBe(true))
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Earlier decision.')
+    expect(wrapper.find('[data-scribe-continue]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('opens a summarized meeting as one document with compact header and tab actions', async () => {
@@ -1106,6 +1155,32 @@ describe('ScribeApp', () => {
     const draft = wrapper.findComponent(ScribeMeetingContext).props('modelValue')
     if (kind === 'person') expect(draft.peopleIds).toEqual(['person-ana', 'person-new'])
     else expect(draft.projectId).toBe('project-new')
+    wrapper.unmount()
+  })
+
+  it('saves the selected company when creating a person from an unfiled meeting', async () => {
+    const wrapper = await openFilingMeeting()
+    loadGraphCatalog.mockResolvedValue({
+      scopes: [{ id: 'team:main', kind: 'team' }],
+      projects: [], people: [], companies: [{ id: 'acme', title: 'Acme' }],
+    })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    createGraphEntity.mockResolvedValue({ id: 'maya', kind: 'person', title: 'Maya' })
+    await wrapper.get('[data-scribe-meeting-person]').trigger('click')
+    await new DOMWrapper(document.querySelector('[data-graph-select-create]')).trigger('click')
+    const dialog = new DOMWrapper(document.querySelector('[data-scribe-create-dialog]'))
+    await dialog.get('input').setValue('Maya')
+    await dialog.get('[aria-label="Company"]').trigger('click')
+    await new DOMWrapper(document.querySelector('[data-graph-select-option="acme"]')).trigger('click')
+    await dialog.get('form').trigger('submit')
+    await flushPromises()
+    expect(createGraphEntity).toHaveBeenCalledExactlyOnceWith({
+      kind: 'person', title: 'Maya', scopeId: 'team:main', companyId: 'acme',
+    })
+    expect(fileMeetingToGraph).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(ScribeMeetingContext).props('modelValue').peopleIds).toContain('maya')
     wrapper.unmount()
   })
 

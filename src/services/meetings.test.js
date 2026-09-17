@@ -474,7 +474,7 @@ describe('meetings service', () => {
   })
 
   it('sends app exclusions to native config and reads them back', async () => {
-    const ignoredApps = [{ appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }]
+    const ignoredApps = [{ appId: 'com.example.dictate', appName: 'Example Dictation' }]
     vi.mocked(invoke).mockResolvedValueOnce({ config: { ignoredApps } }).mockResolvedValueOnce({})
     const saved = await updateMeetingsConfig({ ignoredApps })
     expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_update_config', { patch: { ignoredApps } })

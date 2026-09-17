@@ -1596,7 +1596,7 @@ describe('WorkbenchApp', () => {
     expect(surface.contains(document.activeElement)).toBe(true)
   })
 
-  it.each(['board', 'list', 'timeline'])('opens a clicked Graph entry from %s through its Activity wrapper', async view => {
+  it.each(['board', 'list', 'entries'])('opens a clicked Graph entry from %s through its Activity wrapper', async view => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps', diagnostics: [],
       apps: [{ id: 'business-graph', title: 'Graph', mode: 'rust-helper', helper: 'business-graph', builtin: true, tools: [] }],
@@ -1608,17 +1608,20 @@ describe('WorkbenchApp', () => {
     await flushPromises()
     const graph = useBusinessGraphStore()
     graph.nodes = [{ id: 'issue-1', title: 'Open this entry', kind: 'issue', status: 'plan', tags: [], scopeId: 'project:alpha', updatedAt: '2026-09-13T10:00:00Z' }]
+    const invokeFallback = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_query'
+      ? Promise.resolve({ items: [...graph.nodes], total: graph.nodes.length, graphRevision: 1 })
+      : invokeFallback?.(command, args))
     graph.error = ''
     await nextTick()
-    if (view !== 'board') {
-      await wrapper.get('[data-graph-section="all"]').trigger('click')
-      if (view === 'timeline') await wrapper.get('[data-graph-view="timeline"]').trigger('click')
-    }
+    if (view === 'entries') await wrapper.get('[data-graph-section="all"]').trigger('click')
+    if (view === 'list') await wrapper.get('[data-graph-view="list"]').trigger('click')
+    await flushPromises()
     const workbench = useWorkbenchStore()
     workbench.setPaneState('editor', 'rail')
     await nextTick()
 
-    const selector = view === 'board' ? '[data-board-card="issue-1"]' : view === 'timeline' ? '[data-timeline-node="issue-1"]' : '[data-graph-node="issue-1"]'
+    const selector = view === 'board' ? '[data-board-card="issue-1"]' : '[data-graph-node="issue-1"]'
     await wrapper.get(selector).trigger('click')
     await flushPromises()
 

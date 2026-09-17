@@ -4,7 +4,7 @@ import ScribeSettings from './ScribeSettings.vue'
 import { summaryPromptFor } from './summaryRecipes.js'
 
 const config = {
-  ignoredApps: [{ appId: 'ai.shoulders.mimtts', appName: 'Mim Dictate' }],
+  ignoredApps: [{ appId: 'com.example.dictate', appName: 'Example Dictation' }],
   detectionEnabled: false,
   transcriptionMode: 'local',
   customUrl: '',
@@ -96,7 +96,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.get('[aria-label="Allow detection for Mim Dictate"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="Allow detection for Example Dictation"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-scribe-config-pending]').text()).toBe('Saving…')
     expect(wrapper.get('[data-scribe-detection]').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('[role="radio"]').every(
@@ -117,9 +117,9 @@ describe('ScribeSettings', () => {
       config: { ...config, ignoredApps: [...config.ignoredApps, other] },
       permissions: { microphone: 'granted', systemAudio: 'granted' },
     } })
-    expect(wrapper.get('[data-scribe-ignored-apps]').text()).toContain('Mim Dictate')
-    expect(wrapper.get('[data-scribe-ignored-apps]').text()).not.toContain('ai.shoulders.mimtts')
-    await wrapper.get('[aria-label="Allow detection for Mim Dictate"]').trigger('click')
+    expect(wrapper.get('[data-scribe-ignored-apps]').text()).toContain('Example Dictation')
+    expect(wrapper.get('[data-scribe-ignored-apps]').text()).not.toContain('com.example.dictate')
+    await wrapper.get('[aria-label="Allow detection for Example Dictation"]').trigger('click')
     expect(wrapper.emitted('save')).toEqual([[{ ignoredApps: [other] }]])
   })
 

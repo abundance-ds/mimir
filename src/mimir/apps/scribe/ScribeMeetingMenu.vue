@@ -13,6 +13,7 @@
       type="button"
       role="menuitem"
       data-scribe-continue-meeting
+      :disabled="continuePending"
       @click="choose('continue')"
     >
       {{ continueLabel }}
@@ -77,7 +78,8 @@ const props = defineProps({
   retranscribePending: { type: Boolean, default: false },
   retranscribeLabel: { type: String, default: 'Transcribe again' },
   canContinue: { type: Boolean, default: false },
-  continueLabel: { type: String, default: 'Continue recording' },
+  continuePending: { type: Boolean, default: false },
+  continueLabel: { type: String, default: 'Resume recording' },
   canRename: { type: Boolean, default: true },
   filesPending: { type: Boolean, default: false },
   markdownPending: { type: Boolean, default: false },
