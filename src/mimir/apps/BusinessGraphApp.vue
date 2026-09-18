@@ -22,6 +22,7 @@
       :scope-counts="graph.scopeCounts"
       :refreshing="graph.refreshing"
       @set-section="setSection"
+      @search-home="homeSurface?.focusSearch()"
       @show-changes="showChanges"
       @update:search-value="onSearchInput"
       @focus-search-results="focusSearchResults"
@@ -48,15 +49,20 @@
       @undo="undoDelete"
     />
 
+    <GraphHome v-if="workspacePath && homeVisited" v-show="graph.section === 'home'" ref="homeSurface"
+      :active="active && graph.section === 'home'" @open-node="openNode" @open-file="$emit('openFile', $event)"
+      @configure-workspace="$emit('configureWorkspace')" />
+
     <GraphWorkspace
       @configure-workspace="$emit('configureWorkspace')"
-      v-if="workspacePath"
+      v-if="workspacePath && graph.section !== 'home'"
       ref="workspaceSurface"
       :current-section="currentSection"
       :view-options="viewOptions"
       :graph-sort="graphSort"
       :project-filter="projectFilter"
       :project-filter-options="projectFilterOptions"
+      :project-entry="projectEntry"
       :assignee-filter="assigneeFilter"
       :assignee-filter-options="assigneeFilterOptions"
       :self-person-id="selfPersonId"
@@ -94,6 +100,7 @@
       @expand-all-board-statuses="expandAllBoardStatuses"
       @expand-board-status="expandBoardStatus"
       @open-node="openNode"
+      @open-home="openHome"
       @open-create="openCreate"
       @load-now-page="loadNowPage"
       @mark-now-seen="markNowSeen"
@@ -141,6 +148,7 @@ import GraphAppHeader from './business-graph/GraphAppHeader.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 import GraphWorkspace from './business-graph/GraphWorkspace.vue'
+import GraphHome from './business-graph/GraphHome.vue'
 import { useGraphKeyboard } from './business-graph/useGraphKeyboard.js'
 import { useGraphMutations } from './business-graph/useGraphMutations.js'
 import { useGraphNavigation } from './business-graph/useGraphNavigation.js'
@@ -155,6 +163,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'openGraphNode',
+  'openFile',
   'startWork',
   'chooseWorkspace',
   'configureWorkspace',
@@ -166,6 +175,14 @@ const graph = useBusinessGraphStore()
 const root = ref(null)
 const appHeader = ref(null)
 const workspaceSurface = ref(null)
+const homeSurface = ref(null)
+const homeVisited = ref(false)
+watch(() => graph.section, section => { if (section === 'home') homeVisited.value = true }, { immediate: true })
+function openHome(id) {
+  graph.homeProjectId = id
+  clearSearch({ focus: false })
+  setSection('home')
+}
 
 const {
   graphSort,
@@ -192,6 +209,7 @@ const {
   priorityFilterOptions,
   projectFilter,
   projectFilterOptions,
+  projectEntry,
   projectionNodes,
   projectScoped,
   sections,
@@ -246,7 +264,7 @@ const {
   diagnostic: message => emit('diagnostic', message),
   openGraphNode: request => emit('openGraphNode', request),
 })
-defineExpose({ focusEntry })
+defineExpose({ focusEntry: () => graph.section === 'home' ? homeSurface.value?.focus() : focusEntry() })
 function showChanges() {
   clearSearch({ focus: false })
   graph.setSection('all')
@@ -298,7 +316,8 @@ const { onKeydown } = useGraphKeyboard({
   setSection,
 })
 // Keep navigation mounted while the first projection loads.
-const composing = computed(() => graph.loading && !graph.nodes.length)
+const composing = computed(() => (graph.loading && !graph.nodes.length)
+  || (graph.section === 'work' && graph.workProjectLoading && !projectionNodes.value.length))
 </script>
 
 <style scoped>

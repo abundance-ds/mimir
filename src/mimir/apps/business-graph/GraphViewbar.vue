@@ -82,7 +82,7 @@
                 :aria-label="projectViewAccessibleLabel"
                 :title="projectViewAccessibleLabel"
                 :options="projectOptions"
-                :searchable="projectOptions.length > 8"
+                searchable
                 search-placeholder="Find a project"
                 :menu-min-width="196"
                 @update:model-value="$emit('update:projectFilter', $event)"
@@ -91,6 +91,9 @@
                   {{ inlineControls && !projectFilter ? 'Project' : option?.label }}
                 </template>
               </GraphSelect>
+              <button v-if="projectEntry" type="button" data-graph-control="work-open-project" class="graph-filter-reset"
+                :title="`Open Home: ${projectEntry.title}`" :aria-label="`Open Home: ${projectEntry.title}`"
+                @click="$emit('openProject', projectEntry.id)"><IconArrowUpRight :size="14" /></button>
               <button
                 type="button"
                 data-graph-control="board-project-filter-clear"
@@ -326,7 +329,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { IconCheck, IconChevronDown, IconFilter, IconUser, IconX } from '@tabler/icons-vue'
+import { IconArrowUpRight, IconCheck, IconChevronDown, IconFilter, IconUser, IconX } from '@tabler/icons-vue'
 import GraphSelect from './GraphSelect.vue'
 import GraphCheckbox from './GraphCheckbox.vue'
 
@@ -337,6 +340,7 @@ const props = defineProps({
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
   projectOptions: { type: Array, default: () => [] },
+  projectEntry: { type: Object, default: null },
   assigneeFilter: { type: String, default: '' },
   assigneeOptions: { type: Array, default: () => [] },
   groupBy: { type: String, default: 'status' },
@@ -352,6 +356,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'openProject',
   'setView',
   'update:projectFilter',
   'update:assigneeFilter',

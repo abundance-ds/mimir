@@ -18,7 +18,7 @@
         :class="{ 'graph-section-active': changesActive }" :aria-current="changesActive ? 'page' : undefined"
         @click="$emit('showChanges')">Changes</button>
     </nav>
-    <div class="graph-search">
+    <div v-if="section !== 'home'" class="graph-search">
       <IconSearch :size="14" aria-hidden="true" />
       <input
         ref="searchInput"
@@ -65,6 +65,7 @@
       </button>
       <kbd v-else>⌘F</kbd>
     </div>
+    <div v-else class="graph-home-spacer" />
 
     <div class="graph-actions">
       <div ref="scopeRoot" class="relative" data-graph-scope-root>
@@ -174,7 +175,8 @@ const props = defineProps({
   refreshing: { type: Boolean, default: false },
 })
 
-defineEmits([
+const emit = defineEmits([
+  'searchHome',
   'setSection',
   'showChanges',
   'update:searchValue',
@@ -201,6 +203,7 @@ const scopeSummary = computed(() => {
 })
 
 function focusSearch({ select = false } = {}) {
+  if (props.section === 'home') { emit('searchHome'); return }
   searchInput.value?.focus()
   if (select) searchInput.value?.select()
 }

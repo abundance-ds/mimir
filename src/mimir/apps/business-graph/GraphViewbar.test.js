@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { DOMWrapper, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import GraphViewbar from './GraphViewbar.vue'
@@ -64,6 +64,25 @@ describe('responsive Graph view controls', () => {
     expect(document.querySelector('[data-graph-select-menu]')).toBeNull()
     expect(document.activeElement).toBe(wrapper.get('[data-graph-filters-trigger]').element)
     expect(wrapper.emitted('update:projectFilter')).toBeUndefined()
+  })
+
+  it('keeps text search available for a short project list and selects a matching project', async () => {
+    resize([{ contentRect: { width: 1100 } }])
+    await nextTick()
+    await wrapper.setProps({ projectOptions: [
+      { value: 'zeta', label: 'Zeta', hint: 'Current workspace' },
+      { value: '', label: 'All projects' },
+      { value: 'alpha', label: 'Alpha' },
+    ] })
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    const body = new DOMWrapper(document.body)
+    expect(body.findAll('[data-graph-select-option]')[0].text()).toContain('Zeta')
+    const search = body.get('[data-graph-select-search]')
+    expect(document.activeElement).toBe(search.element)
+    await search.setValue('alp')
+    expect(body.findAll('[data-graph-select-option]').map(option => option.attributes('data-graph-select-option'))).toEqual(['alpha'])
+    await search.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('update:projectFilter')).toEqual([['alpha']])
   })
 
   it('shows an icon for any owner and a clearable name for a selected owner', async () => {

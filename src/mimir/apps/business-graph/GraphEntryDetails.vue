@@ -244,18 +244,11 @@
         class="object-metadata-grid object-metadata-grid-focus"
         aria-label="Object details"
       >
-        <template v-if="node.kind === 'project'">
-          <div class="object-metadata-field">
-            <span>Status</span>
-            <GraphSelect
-              :model-value="draft.projectStatus"
-              variant="quiet"
-              aria-label="Project status"
-              :options="projectStatuses"
-              @update:model-value="updateDraft('projectStatus', $event)"
-            />
-          </div>
-        </template>
+        <div v-if="node.kind === 'project'" class="object-metadata-field">
+          <span>Status</span>
+          <GraphSelect :model-value="draft.projectStatus" variant="quiet" aria-label="Project status"
+            :options="projectStatuses" @update:model-value="updateDraft('projectStatus', $event)" />
+        </div>
         <template v-else-if="node.kind === 'meeting'">
           <div class="object-metadata-field">
             <span>Project</span>
@@ -669,12 +662,6 @@
         <span><strong>{{ displayTitle(sheet) }}</strong></span><IconChevronRight :size="14" />
       </button>
     </section>
-
-    <details v-if="node.kind === 'project'" class="entry-project-overview" :open="overviewOpen" @toggle="overviewOpen = $event.target.open">
-      <summary data-graph-control="entry-project-overview">Project overview</summary>
-      <ProjectStanding v-if="overviewOpen" :project="node" :nodes="nodes" @open-node="openRelated" @open-file="openSource" />
-    </details>
-
   </article>
 </main>
 </template>
@@ -700,7 +687,6 @@ import GraphDateTimeField from './GraphDateTimeField.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphReferences from './GraphReferences.vue'
 import GraphSelect from './GraphSelect.vue'
-import ProjectStanding from './ProjectStanding.vue'
 import TimesheetDetails from './TimesheetDetails.vue'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 
@@ -800,10 +786,8 @@ const projectTimeSheets = computed(() => {
   }
   return [...sheets.values()].sort((left, right) => displayTitle(left).localeCompare(displayTitle(right)))
 })
-const overviewOpen = ref(false)
 const waitingFocused = ref(false)
 watch(() => node.value?.id, () => {
-  overviewOpen.value = false
   waitingFocused.value = false
 })
 </script>

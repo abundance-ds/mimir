@@ -98,6 +98,31 @@ describe('business graph store', () => {
 
   afterEach(() => useBusinessGraphStore().stop())
 
+  it('loads all selected Project tasks without reducing the general catalog and keeps them through refresh', async () => {
+    const store = useBusinessGraphStore()
+    const tasks = Array.from({ length: 501 }, (_, i) => ({ id: `task-${i}`, kind: 'issue', title: `Task ${i}`, projectId: 'project-alpha' }))
+    queryGraph.mockImplementation(async query => query.projectIds?.includes('project-alpha') && query.kinds?.includes('issue')
+      ? { items: tasks.slice(query.offset, query.offset + query.limit), total: tasks.length, graphRevision: 1 }
+      : { items: summaries, total: summaries.length, graphRevision: 1 })
+    await store.start('/alpha')
+    store.workProjectId = 'project-alpha'
+    await vi.waitFor(() => expect(store.workProjectLoading).toBe(false))
+    expect(store.visibleNodes).toHaveLength(501)
+    expect(store.nodes).toHaveLength(2)
+    await store.refresh()
+    expect(store.visibleNodes).toHaveLength(501)
+    const readyQuery = queryGraph.getMockImplementation()
+    queryGraph.mockImplementation(query => query.projectIds?.length ? Promise.reject(new Error('Project query failed')) : readyQuery(query))
+    await expect(store.refresh()).rejects.toThrow('Project query failed')
+    expect(store.error).toBe('Project query failed')
+    expect(store.visibleNodes).toHaveLength(501)
+    queryGraph.mockImplementation(readyQuery)
+    await store.refresh()
+    expect(store.error).toBe('')
+    store.workProjectId = ''
+    expect(store.visibleNodes.map(node => node.id)).toEqual(['issue-1'])
+  })
+
   it('filters native queries and search without reducing the Work catalog', async () => {
     vi.mocked(cachedWorkspaceConfig).mockReturnValue({ project: 'project-alpha' })
     const store = useBusinessGraphStore()

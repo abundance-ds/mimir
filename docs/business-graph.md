@@ -230,7 +230,8 @@ native costs, not input-to-display guarantees.
 
 ## Product surface
 
-Work, Graph, and Changes share the top navigation. Work is the default issue
+Home, Work, Graph, and Changes share the top navigation. Home shows the
+Project overview directly in Main. Work is the default issue
 projection with Board and List views. Graph has one entry table. Its column
 headers sort and filter entries. Changes opens the event stream.
 [Scribe](meetings.md) owns meeting preparation
@@ -275,8 +276,56 @@ under **Links** and **Backlinks**. Those groups start collapsed, show counts
 and unavailable-link warnings, and disappear when empty. **More properties**
 holds reminders, snooze, tags, output/file path editors, and timestamps.
 Set reminders, snooze dates, and tags remain visible beside its toggle.
-Project overview also starts collapsed. These disclosures change presentation;
-the Graph schema and saved properties stay the same.
+Project entries retain their Markdown editor and property controls in Details.
+The Project overview belongs to Home in Main.
+
+### Project home
+
+**Home** is the first top-level tab beside **Work**, **Graph**, and **Changes**.
+It opens in Main, without opening or selecting an Editor document. The first
+visit uses the current workspace's linked Project. A searchable Project
+selector in the page heading switches directly to any available Project;
+the current workspace Project appears first. The selection stays while moving
+between views and resets when the workspace or its Project link changes.
+If the workspace has no linked Project, Home offers the same selector and a
+direct action to link a Project in workspace settings.
+
+The Project entry's Markdown body holds the brief and ordered resource list.
+A short brief can state the objective, deliverable, current focus, and next
+milestone. A **Key resources** or **Resources** heading marks the resource
+section. Named links open external URLs, workspace files, Team resources, or
+Graph entries. Reference links can use definitions elsewhere in the body.
+Other Markdown sections remain visible. Reading Home never changes the body.
+Raw HTML is shown as text; unsafe URL schemes cannot run.
+
+**Edit page**, **Write brief**, and **Edit links** open the Project's normal
+Markdown document in Editor. The existing document owns its draft, save queue,
+errors, and undo. Saving updates Home through the Graph revision. Home itself
+stays in Main. There is no new entry kind or separate dashboard data.
+
+**Needs attention** shows up to five open tasks that are waiting, in review,
+overdue, or due today. Each row gives the task title, reason, owner, and due
+date when set. Closed and snoozed tasks are excluded. The query reads all pages
+of explicitly assigned Project tasks in the active storage scopes. Graph table
+filters, Work filters, and the initial 500-entry catalog do not restrict it.
+The first load orders tasks by urgency. Background updates keep visible tasks
+in place and fill free places. Dates update each minute and on window focus.
+Failures show **Retry**, not an empty result. More tasks link to Work.
+
+The brief and resources sit beside Needs attention in wide panes. Narrow panes
+stack these sections. **Open Work** selects this Project in Work and clears
+search, Owner, Priority, and collapsed status columns. It keeps the Board/List
+view, grouping, sorting, and closed-task preference. Project-filtered Work
+loads all task pages and matches explicit secondary Project assignments too.
+A mounted source scope is enabled if necessary. Following a task or file opens
+it in Editor while Home stays visible in Main. Home retains its scroll when
+switching between the top-level views. The **Open Home** icon beside Work's
+Project selector returns to the selected Project's Home in Main.
+
+`harness/project-home.html` mounts the production Business Graph app with local
+fixtures. It does not read or write user Graph files. Component and Workbench
+integration tests cover direct Home access without changing Editor, Project
+switching, task/file actions, and the return from Work.
 
 Opening a listed entry uses its mounted scope to locate the source. Rust
 validates that source and its entry id; a stale path falls back to native
@@ -400,6 +449,12 @@ and a 4 px gap on a `chrome` column. The List is single-line
 rows under sticky group headers and follows the Board grouping (status or
 project). The second header keeps frequent task filters beside the views:
 Project, an Owner icon until a person is selected, and Filter for Priority.
+The Project menu puts the linked workspace Project first, marked **Current
+workspace**, then All projects, the other projects by name, and No project.
+Text search is always available. This order does not change the chosen filter.
+An **Open Home** icon beside the selector opens Home in Main for the selected
+Project, or the current workspace Project when All projects is selected. It
+does not change the Work filter.
 Selected values have adjacent clear actions. In narrow panes, these controls
 move into Filter, with named, clearable active-filter chips. The available pane
 width determines the layout. The smallest panes
@@ -425,7 +480,8 @@ active team members, and Unassigned.
 
 Work treats missing project assignments, old labels, and references without a
 matching loaded Project as No project. Board grouping, List grouping, and the
-Project filter share this rule; stored references are preserved. Old project
+No project filter share this rule; stored references are preserved. A named
+Project filter also matches explicit secondary assignments. Old project
 labels do not get their own columns or filter options. The No project column
 appears only when needed by issues that match the task filters, even with Show
 empty projects enabled. It remains in place while search filters its cards.

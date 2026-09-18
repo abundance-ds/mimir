@@ -10,6 +10,8 @@
         :view-options="viewOptions"
         :project-filter="projectFilter"
         :project-options="projectFilterOptions"
+        :project-entry="projectEntry"
+        @open-project="$emit('openHome', $event)"
         :assignee-filter="assigneeFilter"
         :assignee-options="assigneeFilterOptions"
         :group-by="boardGroup"
@@ -138,6 +140,7 @@ defineProps({
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
   projectFilterOptions: { type: Array, default: () => [] },
+  projectEntry: { type: Object, default: null },
   assigneeFilter: { type: String, default: '' },
   assigneeFilterOptions: { type: Array, default: () => [] },
   selfPersonId: { type: String, default: '' },
@@ -170,7 +173,7 @@ defineEmits([
   'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard',
   'expandAllBoardStatuses', 'expandBoardStatus',
   'loadNowPage', 'markNowSeen', 'moveIssue', 'openCreate',
-  'openNode', 'openSummary', 'patchIssue', 'reorderIssue',
+  'openNode', 'openHome', 'openSummary', 'patchIssue', 'reorderIssue',
   'setView', 'toggleBoardStatusCollapse', 'update:assigneeFilter',
   'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
   'update:showClosedIssues', 'update:showEmptyProjects',

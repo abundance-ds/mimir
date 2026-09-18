@@ -19,8 +19,10 @@ import {
 import { defaultGraphWriteScope } from './businessGraphScopes.js'
 import { cachedWorkspaceConfig } from '../services/workspaceConfig.js'
 import { filterWork, workSearchIndex } from './businessGraphWorkSearch.js'
+import { projectIssues } from '../services/businessGraphProject.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
+  { id: 'home', label: 'Home', kinds: [] },
   { id: 'work', label: 'Work', kinds: ['issue'] },
   { id: 'all', label: 'Graph', kinds: [] },
 ])
@@ -46,6 +48,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const section = ref('work')
   const view = ref('board')
   const sectionViews = ref({
+    home: 'home',
     all: 'list',
     work: 'board',
   })
@@ -54,6 +57,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const searching = ref(false)
   const selectedNode = ref(null)
   const requestedNodeId = ref('')
+  const requestedProjectWork = ref(null)
+  const homeProjectId = ref('')
+  const workProjectId = ref('')
+  const workProjectItems = ref([])
+  const workProjectLoadedId = ref('')
+  const workProjectLoading = ref(false)
+  let workProjectGeneration = 0
   const selectedNeighbors = ref([])
   const lastDeletion = ref(null)
   const projectRoot = ref('')
@@ -61,6 +71,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const workspaceProjectId = ref('')
   const workspaceGraphScope = ref('team')
   const workspaceProject = ref(null)
+  watch([projectRoot, workspaceProjectId], () => { homeProjectId.value = '' }, { flush: 'sync' })
   const graphKinds = ref([])
   const graphAvailableKinds = ref([])
   const graphOrder = ref({ sortBy: 'updated', direction: 'desc' })
@@ -88,7 +99,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const selectedScopes = computed(() => (
     scopes.value.filter(scope => activeScopeIds.value.includes(scope.id))
   ))
-  const workIndex = computed(() => workSearchIndex(nodes.value))
+  const workIndex = computed(() => workSearchIndex([...nodes.value, ...graphProjects.value, ...workProjectItems.value]))
   const graphFilters = computed(() => {
     if (section.value !== 'all' || (view.value === 'changes' && !searchQuery.value.trim())) return {}
     return {
@@ -103,7 +114,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   ))
   const visibleNodes = computed(() => {
     if (section.value === 'work') {
-      return filterWork(issues.value, workIndex.value, searchQuery.value)
+      return filterWork(workIssues.value, workIndex.value, searchQuery.value)
     }
     const definition = BUSINESS_SECTIONS.find(item => item.id === section.value)
     const kinds = new Set(definition?.kinds || [])
@@ -112,7 +123,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     return kinds.size ? items.filter(item => kinds.has(item.kind)) : items
   })
   const issues = computed(() => nodes.value.filter(node => node.kind === 'issue'))
-  const projects = computed(() => nodes.value.filter(node => node.kind === 'project'))
+  const workIssues = computed(() => workProjectId.value && workProjectId.value === workProjectLoadedId.value ? workProjectItems.value : issues.value)
+  const projects = computed(() => [...new Map([...graphProjects.value, ...nodes.value.filter(node => node.kind === 'project')].map(node => [node.id, node])).values()])
   const people = computed(() => nodes.value.filter(node => node.kind === 'person'))
   const companies = computed(() => nodes.value.filter(node => node.kind === 'company'))
   const scopeCounts = computed(() => Object.fromEntries(
@@ -223,6 +235,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     await Promise.all([
       loadWorkspaceProject(generation, request),
       loadGraphProjects(result, generation, request),
+      loadWorkProject(generation),
     ])
   }
 
@@ -257,6 +270,31 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (generation !== lifecycleGeneration || request !== nodeLoadGeneration || id !== workspaceProjectId.value) return
     workspaceProject.value = project?.kind === 'project' ? project : null
   }
+
+  async function loadWorkProject(generation = lifecycleGeneration) {
+    const request = ++workProjectGeneration
+    const id = workProjectId.value
+    const current = () => generation === lifecycleGeneration && request === workProjectGeneration && id === workProjectId.value
+    if (!id || id === '__unassigned__') {
+      workProjectItems.value = []; workProjectLoadedId.value = ''; workProjectLoading.value = false
+      return
+    }
+    workProjectLoading.value = true
+    try {
+      const result = await projectIssues(id, [...activeScopeIds.value], current)
+      if (!current() || !result) return
+      workProjectItems.value = result.items
+      workProjectLoadedId.value = id
+    } catch (cause) {
+      if (current()) throw cause
+    } finally { if (current()) workProjectLoading.value = false }
+  }
+
+  watch(workProjectId, () => {
+    workProjectLoadedId.value = ''
+    workProjectItems.value = []
+    if (started) void loadWorkProject().catch(cause => { error.value = errorMessage(cause) })
+  }, { flush: 'sync' })
 
   async function loadGraphProjection(generation = lifecycleGeneration, append = false) {
     const request = ++projectionGeneration
@@ -597,6 +635,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (!BUSINESS_SECTIONS.some(item => item.id === next)) return
     sectionViews.value[section.value] = view.value
     section.value = next
+    if (next === 'home') clearSearch()
     view.value = sectionViews.value[next] || 'list'
     if (searchQuery.value.trim()) void search(searchQuery.value)
   }
@@ -657,6 +696,10 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
 
   function stop() {
     started = false
+    workProjectGeneration += 1
+    workProjectLoading.value = false
+    workProjectItems.value = []
+    workProjectLoadedId.value = ''
     projectionGeneration += 1
     projectionLoading.value = false
     graphItems.value = []
@@ -687,6 +730,12 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     stop()
     status.value = null
     requestedNodeId.value = ''
+    requestedProjectWork.value = null
+    homeProjectId.value = ''
+    workProjectId.value = ''
+    workProjectItems.value = []
+    workProjectLoadedId.value = ''
+    workProjectLoading.value = false
     nodes.value = []
     diagnostics.value = []
     events.value = []
@@ -791,6 +840,10 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     searching,
     selectedNode,
     requestedNodeId,
+    requestedProjectWork,
+    homeProjectId,
+    workProjectId,
+    workProjectLoading,
     selectedNeighbors,
     lastDeletion,
     projectRoot,
@@ -812,6 +865,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     selectedScopes,
     visibleNodes,
     issues,
+    workIssues,
     projects,
     people,
     companies,

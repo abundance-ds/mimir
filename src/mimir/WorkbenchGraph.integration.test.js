@@ -7,6 +7,7 @@ import { EditorView } from '@codemirror/view'
 import WorkbenchApp from './WorkbenchApp.vue'
 import { useFileStore } from '../stores/files.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
+import { useBusinessGraphStore } from '../stores/businessGraph.js'
 
 // Keep the complete Graph -> Activity -> Workbench -> Editor route real.
 // These services need a desktop host but do not own that route.
@@ -93,6 +94,75 @@ describe('Graph Details through Workbench', () => {
     await flushPromises()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('opens Home in Main without touching Editor and retains it while a task opens', async () => {
+    const fallback = vi.mocked(invoke).getMockImplementation()
+    const project = {
+      ...structuredClone(source.node), id: 'project-atlas', kind: 'project', title: 'Atlas',
+      body: '**Deliverable:** Evidence review.\n\n## Key resources\n\n- [Protocol](https://example.org/protocol)',
+      properties: { projectStatus: 'active' },
+      provenance: { ...source.node.provenance, sourcePath: '/work/graph/project-atlas.md' },
+    }
+    const header = '---\ntitle: Atlas\nkind: project\n---\n'
+    const projectSource = { node: project, content: header + project.body, bodyFrom: header.length, sourceRevision: 'revision-1' }
+    const task = { ...summary, status: 'review', projectId: project.id, relations: [{ relation: 'part_of', target: project.id }] }
+    const projectSummary = { ...project, scopeId: 'project:atlas' }
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'graph_query') {
+        const items = args.query.projectIds?.length ? [task] : [projectSummary, task]
+        return { items: structuredClone(items), total: items.length, graphRevision: 1 }
+      }
+      if (command === 'graph_source' && args.path === project.provenance.sourcePath) return structuredClone(projectSource)
+      if (command === 'graph_get' && args.id === project.id) return structuredClone(project)
+      return fallback(command, args)
+    })
+    wrapper = mount(WorkbenchApp, { attachTo: document.body, global: { plugins: [pinia],
+      stubs: { EmbeddedAppHost: true, SettingsDialog: true, NewTabPage: true, InlineAI: true, GitDiffView: true },
+    } })
+    await flushPromises()
+    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    const files = useFileStore(), graph = useBusinessGraphStore()
+    graph.setWorkspaceConfiguration({ project: project.id })
+    const previousFile = files.currentFile
+    const editorState = useWorkbenchStore().paneLayout.editor.state
+    await wrapper.get('[data-graph-section="home"]').trigger('click')
+    await flushPromises()
+    const home = wrapper.get('[data-graph-home]')
+    expect(home.text()).toContain('Evidence review.')
+    expect(files.currentFile).toBe(previousFile)
+    expect(useWorkbenchStore().paneLayout.editor.state).toBe(editorState)
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
+
+    home.element.scrollTop = 180
+    await wrapper.get('[data-graph-control="project-task-issue-evidence"]').trigger('click')
+    await flushPromises()
+    expect(files.currentFile.path).toBe(path)
+    expect(graph.section).toBe('home')
+    expect(wrapper.get('[data-graph-home]').element).toBe(home.element)
+    expect(home.element.scrollTop).toBe(180)
+    const taskFile = files.currentFile
+
+    await wrapper.get('[data-graph-control="project-open-work"]').trigger('click')
+    await flushPromises()
+    expect(graph.section).toBe('work')
+    expect(graph.workProjectId).toBe(project.id)
+    expect(wrapper.find('[data-board-card="issue-evidence"]').exists()).toBe(true)
+    expect(files.currentFile).toBe(taskFile)
+    await wrapper.get('[data-graph-control="work-open-project"]').trigger('click')
+    await flushPromises()
+    expect(graph.section).toBe('home')
+    expect(wrapper.get('[data-graph-home]').element).toBe(home.element)
+    expect(home.element.scrollTop).toBe(180)
+    expect(files.currentFile).toBe(taskFile)
+    await wrapper.get('[data-graph-control="project-edit-page"]').trigger('click')
+    await flushPromises()
+    expect(files.currentFile.path).toBe(project.provenance.sourcePath)
+    expect(wrapper.get('[data-graph-inspector]').find('[data-project-home]').exists()).toBe(false)
+    expect(wrapper.get('[data-graph-markdown-editor]').text()).toContain('Deliverable')
+    expect(wrapper.find('[data-workbench-diagnostic]').exists()).toBe(false)
   })
 
   it('opens real Details from a Board row and keeps its draft until close is confirmed', async () => {

@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import { BUSINESS_SECTIONS } from '../../../stores/businessGraph.js'
 import { waitingOnHuman } from './predicates.js'
 import { UNASSIGNED, WORK_STATUSES, initials, isClosedIssue, workProjectId } from './workRow.js'
@@ -35,6 +35,7 @@ export const GRAPH_SORT_OPTIONS = Object.freeze([
 ])
 
 const VIEWS_BY_SECTION = Object.freeze({
+  home: [{ id: 'home', label: 'Home' }],
   all: [
     { id: 'list', label: 'Entries' },
     { id: 'changes', label: 'Changes' },
@@ -46,7 +47,7 @@ const VIEWS_BY_SECTION = Object.freeze({
 })
 
 export function useGraphViewState({ graph, settings }) {
-  const projectFilter = ref('')
+  const projectFilter = toRef(graph, 'workProjectId')
   const priorityFilter = ref('')
   const assigneeFilter = ref('')
   const boardGroup = ref('status')
@@ -72,7 +73,7 @@ export function useGraphViewState({ graph, settings }) {
   )))
   // Columns follow task filters, but search only filters cards within them.
   const unsearchedWorkIssues = computed(() => filterWorkIssues(
-    graph.issues, graph.projects, workFilters.value,
+    graph.workIssues, graph.projects, workFilters.value,
   ))
   let hydrated = false
 
@@ -80,6 +81,11 @@ export function useGraphViewState({ graph, settings }) {
   const currentSection = computed(() => sections.find(item => item.id === graph.section))
   const viewOptions = computed(() => VIEWS_BY_SECTION[graph.section] || VIEWS_BY_SECTION.all)
   const projectFilterOptions = computed(() => buildProjectOptions(graph))
+  const projectEntry = computed(() => {
+    const id = projectFilter.value || graph.workspaceProjectId
+    return graph.projects.find(project => project.id === id)
+      || (graph.workspaceProject?.id === id ? graph.workspaceProject : null)
+  })
   const selfPersonId = computed(() => String(settings.businessGraphSelfPersonId || '').trim())
   const assigneeFilterOptions = computed(() => (
     buildAssigneeOptions(graph, assigneeFilter.value, selfPersonId.value)
@@ -195,6 +201,18 @@ export function useGraphViewState({ graph, settings }) {
       .filter(status => collapsed.has(status))
   }
 
+  watch(() => [graph.requestedProjectWork, graph.loading, settings.settingsReady], () => {
+    const project = graph.requestedProjectWork
+    if (!hydrated || graph.loading || !project?.id) return
+    graph.requestedProjectWork = null
+    graph.clearSearch()
+    graph.setSection('work')
+    projectFilter.value = project.id
+    priorityFilter.value = ''
+    assigneeFilter.value = ''
+    collapsedBoardStatuses.value = []
+  }, { immediate: true })
+
   function expandAllBoardStatuses() {
     collapsedBoardStatuses.value = []
   }
@@ -228,6 +246,7 @@ export function useGraphViewState({ graph, settings }) {
     priorityFilterOptions: PRIORITY_FILTER_OPTIONS,
     projectFilter,
     projectFilterOptions,
+    projectEntry,
     projectionNodes,
     projectScoped,
     sections,
@@ -308,16 +327,19 @@ function hydrateViewState({
 }
 
 function buildProjectOptions(graph) {
+  const currentProjectId = graph.workspaceProjectId
   const options = [...graph.projects]
     .sort((left, right) => projectLabel(left).localeCompare(projectLabel(right)))
     .map(project => ({
       value: project.id,
       label: projectLabel(project),
-      hint: project.properties?.slug || project.slug || '',
+      hint: [project.id === currentProjectId ? 'Current workspace' : '', project.properties?.slug || project.slug || '']
+        .filter(Boolean).join(' · '),
     }))
   return [
+    ...options.filter(option => option.value === currentProjectId),
     { value: '', label: 'All projects', separatorAfter: true },
-    ...options,
+    ...options.filter(option => option.value !== currentProjectId),
     { value: '__unassigned__', label: 'No project' },
   ]
 }
@@ -334,7 +356,8 @@ function filterWorkIssues(items, projects, filters) {
   if (!filters.showClosed) items = items.filter(item => !isClosedIssue(item))
   if (filters.project) {
     const projectIds = new Set(projects.map(project => project.id))
-    items = items.filter(item => workProjectId(item, projectIds) === filters.project)
+    items = items.filter(item => workProjectId(item, projectIds) === filters.project
+      || (projectIds.has(filters.project) && item.relations?.some(edge => edge.relation === 'part_of' && edge.target === filters.project)))
   }
   if (filters.priority) items = items.filter(item => item.priority === filters.priority)
   if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)

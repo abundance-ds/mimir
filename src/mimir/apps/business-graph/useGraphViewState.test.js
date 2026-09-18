@@ -36,6 +36,25 @@ describe('Work closed issue visibility', () => {
     expect(state.emptyCopy.value).toContain('Show closed issues in Display')
   })
 
+  it('pins the current workspace project once and follows workspace changes without changing the filter', () => {
+    graph.nodes.push(
+      { id: 'alpha', kind: 'project', title: 'Alpha' },
+      { id: 'zeta', kind: 'project', title: 'Zeta', slug: 'zeta-study' },
+    )
+    graph.setWorkspaceConfiguration({ project: 'zeta' })
+    const { state } = render()
+    const values = () => state.projectFilterOptions.value.map(option => option.value)
+    expect(values()).toEqual(['zeta', '', 'alpha', 'project', '__unassigned__'])
+    expect(state.projectFilterOptions.value[0].hint).toBe('Current workspace · zeta-study')
+    state.projectFilter.value = 'project'
+    graph.setWorkspaceConfiguration({ project: 'alpha' })
+    expect(values()).toEqual(['alpha', '', 'project', 'zeta', '__unassigned__'])
+    expect(state.projectFilter.value).toBe('project')
+    graph.setWorkspaceConfiguration({ project: 'missing' })
+    expect(values()).toEqual(['', 'alpha', 'project', 'zeta', '__unassigned__'])
+    expect(state.projectFilterOptions.value.some(option => option.hint?.includes('Current workspace'))).toBe(false)
+  })
+
   it('keeps the No project baseline stable through search without including hidden closed issues', () => {
     const { state } = render()
     graph.searchQuery = 'absent'
@@ -44,6 +63,16 @@ describe('Work closed issue visibility', () => {
     state.showClosedIssues.value = true
     expect(state.unsearchedWorkIssues.value).toHaveLength(3)
     expect(state.boardIssues.value).toEqual([])
+  })
+
+  it('includes an explicit secondary Project assignment when filtering Work', () => {
+    graph.nodes.push({ id: 'other-project', kind: 'project', title: 'Other' }, {
+      id: 'shared-task', kind: 'issue', title: 'Shared task', projectId: 'other-project',
+      relations: [{ relation: 'part_of', target: 'other-project' }, { relation: 'part_of', target: 'project' }],
+    })
+    const { state } = render()
+    state.projectFilter.value = 'project'
+    expect(state.boardIssues.value.map(issue => issue.id)).toEqual(['active', 'shared-task'])
   })
 
   it('uses all task filters for the column baseline but never search', () => {

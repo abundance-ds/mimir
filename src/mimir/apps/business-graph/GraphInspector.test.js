@@ -615,10 +615,8 @@ describe('GraphInspector', () => {
       props: { ...baseProps, node: projectNode, },
     })
     expect(wrapper.findComponent({ name: 'ProjectStanding' }).exists()).toBe(false)
-    const overview = wrapper.get('details.entry-project-overview')
-    overview.element.open = true
-    await overview.trigger('toggle')
-    expect(wrapper.findComponent({ name: 'ProjectStanding' }).exists()).toBe(true)
+    expect(wrapper.find('[data-project-home]').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-markdown-editor]').exists()).toBe(true)
     expect(wrapper.props('documentFile').dirty).toBe(false)
     await wrapper.get('[data-graph-control="entry-properties"]').trigger('click')
     await flushPromises()

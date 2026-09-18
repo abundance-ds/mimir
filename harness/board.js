@@ -84,6 +84,7 @@ const app = createApp({
   setup() {
     const graph = useBusinessGraphStore()
     graph.nodes = [...projects, ...people, ...issues]
+    graph.setWorkspaceConfiguration({ project: params.get('workspace-project') || '' })
     graph.view = params.get('list') === '1' ? 'list' : 'board'
     const state = useGraphViewState({ graph, settings: { settingsReady: false, businessGraphSelfPersonId: selfId } })
     state.boardGroup.value = groupBy.value
@@ -91,6 +92,8 @@ const app = createApp({
       section: 'work', sectionLabel: 'Work', view: graph.view,
       viewOptions: state.viewOptions.value,
       projectFilter: state.projectFilter.value, projectOptions: state.projectFilterOptions.value,
+      projectEntry: state.projectEntry.value,
+      onOpenProject: id => { window.openedProject = id },
       assigneeFilter: state.assigneeFilter.value, assigneeOptions: state.assigneeFilterOptions.value,
       priorityFilter: state.priorityFilter.value, priorityOptions: state.priorityFilterOptions,
       groupBy: state.boardGroup.value, groupOptions: state.boardGroupOptions,
