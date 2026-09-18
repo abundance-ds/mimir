@@ -158,6 +158,7 @@
             ref="textSurfaceRef"
             :style="{ display: textSurfaceVisible ? undefined : 'none' }"
             :content="textSurfaceDocument.content"
+            :content-origin="textSurfaceDocument.contentOrigin"
             :path="textSurfaceDocument.path"
             :file-id="textSurfaceDocument.fileId"
             :open-file-ids="openFileIds"
@@ -608,7 +609,7 @@ const editorLineWidthMap = {
 
 // Footer word/line counts. Computed lazily on a debounce instead of a
 // computed over the reactive content string: the O(n) scans below would
-// otherwise re-run on every content sync (~150ms) while typing.
+// otherwise re-run on every editor transaction while typing.
 const DOCUMENT_STATS_DELAY = 500
 const documentStats = ref(computeDocumentStats(''))
 let documentStatsTimer = null
@@ -900,6 +901,7 @@ const textSurfaceDocument = computed(previous => {
   if (isGraphDetails.value) return previous || { content: '', path: '', fileId: '', extensions: [] }
   return {
     content: currentFile.value?.content ?? '',
+    contentOrigin: currentFile.value?.contentOrigin ?? 'reload',
     path: currentFile.value?.path ?? '',
     fileId: currentFile.value?.id ?? '',
     extensions: editorExtensions.value,
@@ -909,9 +911,7 @@ const textSurfaceDocument = computed(previous => {
 // --- Content sync + save ---
 
 const contentSync = useContentSync({
-  editorSurfaceRef,
   currentFile,
-  fileManager,
   documentBridge,
 })
 const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
@@ -973,18 +973,17 @@ async function saveCurrentFile({ source = 'manual', mode = 'save', file = null }
 }
 
 const autoSave = createAutoSaveController({
-  flush: flushEditorContent,
   save: saveCurrentFile,
   getFile: () => currentFile.value,
-  isAutoSaveEnabled: file => file?.kind !== 'graph' && !(file?.graph && closeConfirmFile.value === file) && (editorSettings.editorAutoSave || file?.meta?.scratchpad === true),
+  isAutoSaveEnabled: file => openFiles.value.includes(file) && file?.kind !== 'graph' && closeConfirmFile.value !== file && (editorSettings.editorAutoSave || file?.meta?.scratchpad === true),
   onError: () => {},
 })
 
-function onContentChange() {
-  if (isGraphDetails.value) return
-  fileManager.markDirty()
-  scheduleContentSync()
-  autoSave.schedule()
+function onContentChange({ fileId, content }) {
+  const file = openFiles.value.find(file => file.id === fileId)
+  if (!file || !fileManager.updateContent(content, file)) return
+  if (file === currentFile.value) scheduleContentSync()
+  autoSave.schedule(file)
 }
 
 // Sync derived surfaces on tab switch
@@ -2041,7 +2040,6 @@ onUnmounted(() => {
   windowCloseGuard.dispose()
   autoSave.clear()
   clearTimeout(documentStatsTimer)
-  contentSync.dispose()
   externalFileSync.dispose()
   scratchpadEditor.dispose()
   nativeLifecycle.dispose()

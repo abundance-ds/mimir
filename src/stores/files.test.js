@@ -169,7 +169,7 @@ describe('files store', () => {
     })
 
     store.updateContent('must be ignored')
-    store.markDirty()
+    store.updateContent(store.currentFile.content + " edit")
 
     expect(store.currentFile).toMatchObject({
       kind,
@@ -230,15 +230,19 @@ describe('files store', () => {
     expect(store.openFiles[0].saveState).toBe('dirty')
   })
 
-  // 10. markDirty(): sets dirty=true without changing content
-  it('markDirty sets dirty without changing content', () => {
+  it('commits to an explicit document and clears dirty when it reaches its saved text', async () => {
     const store = useFileStore()
-    store.newFile()
-    expect(store.openFiles[0].dirty).toBe(false)
-    store.markDirty()
-    expect(store.openFiles[0].dirty).toBe(true)
-    expect(store.openFiles[0].saveState).toBe('dirty')
-    expect(store.openFiles[0].content).toBe('')
+    await store.openFile('/tmp/a.md', 'Saved A')
+    const a = store.currentFile
+    await store.openFile('/tmp/b.md', 'Saved B')
+    store.updateContent('Edited A', a)
+    expect(a).toMatchObject({ content: 'Edited A', dirty: true })
+    expect(store.currentFile).toMatchObject({ content: 'Saved B', dirty: false })
+    store.updateContent('Saved A', a)
+    expect(a.dirty).toBe(false)
+    store.closeFile(store.openFiles.indexOf(a))
+    expect(store.updateContent('late edit', a)).toBeNull()
+    expect(await store.save(a)).toBe(false)
   })
 
   it('replaces clean disk-backed content but never overwrites a dirty buffer', async () => {

@@ -60,8 +60,7 @@ export function useDiffReview({
     }
     diffStore.deactivate()
     if (content != null) {
-      target.content = content
-      fileManager.markDirty(target)
+      fileManager.updateContent(content, target)
       if (currentFile.value === target) scheduleContentSync()
     }
     return { ok: true }
@@ -133,8 +132,7 @@ export function useDiffReview({
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
           if (graphFile.content !== file.modified) {
-            graphFile.content = file.modified
-            fileManager.markDirty(graphFile)
+            fileManager.updateContent(file.modified, graphFile)
           }
           if (graphFile.dirty) await fileManager.save(graphFile)
           // save() owns revision and dirty state, including edits made while
@@ -148,8 +146,7 @@ export function useDiffReview({
           if (currentFile.value.content !== file.original) {
             throw new Error('The active document changed after this review was created. Reopen the proposal against the latest text.')
           }
-          currentFile.value.content = file.modified
-          fileManager.markDirty()
+          fileManager.updateContent(file.modified, currentFile.value)
           activeEditorChanged = true
         } else {
           const currentContent = graph?.content ?? (openFile
@@ -158,15 +155,12 @@ export function useDiffReview({
           if (currentContent !== file.original && currentContent !== file.modified) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
-          if (currentContent !== file.modified) {
+          if (openFile) {
+            if (currentContent !== file.modified) fileManager.updateContent(file.modified, openFile)
+            if (openFile.dirty) await fileManager.save(openFile)
+          } else if (currentContent !== file.modified) {
             if (graph) await saveGraphSource({ path: file.path, content: file.modified, expectedRevision: file.graphSourceRevision ?? graph.sourceRevision })
             else await invoke('write_text_file', { path: file.path, content: file.modified })
-          }
-          if (openFile) {
-            openFile.content = file.modified
-            openFile.dirty = false
-            openFile.saveState = 'saved'
-            openFile.saveError = null
           }
         }
         file.applied = true

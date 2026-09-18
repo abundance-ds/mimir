@@ -127,6 +127,7 @@ export const useFileStore = defineStore('files', () => {
     path,
     content = '',
     dirty = false,
+    savedContent = dirty ? (path ? null : '') : content,
     newTab = false,
     draftId = null,
     kind = 'text',
@@ -143,6 +144,8 @@ export const useFileStore = defineStore('files', () => {
       path,
       draftId: path ? null : (draftId || createDraftId()),
       content,
+      savedContent,
+      contentOrigin: 'reload',
       dirty,
       newTab,
       kind,
@@ -219,6 +222,8 @@ export const useFileStore = defineStore('files', () => {
               version, closedUndo,
             })
             if (unchanged || file.kind === 'graph') file.content = result.document.content
+            file.savedContent = result.document.content
+            file.contentOrigin = 'reload'
             file.dirty = !unchanged || !isLatestWrite
             file.saveState = isLatestWrite ? (unchanged ? SAVE_STATE.saved : SAVE_STATE.dirty) : SAVE_STATE.saving
             file.saveError = null
@@ -231,6 +236,7 @@ export const useFileStore = defineStore('files', () => {
             await saveFile(targetPath, targetContent)
           }
           addRecentFile(targetPath)
+          file.savedContent = targetContent
           const isLatestWrite = writesByFileId.get(file.id) === operation
           const isCurrentSnapshot = file.path === targetPath && file.content === targetContent
           if (isLatestWrite) {
@@ -361,7 +367,7 @@ export const useFileStore = defineStore('files', () => {
             existing.graph.sourceRevision = ''
             existing.kind = 'text'
           } else {
-            existing.content = graphDocument.content
+            replaceSavedContent(existing, graphDocument.content)
             existing.kind = kind === 'graph' && graphDocument.node ? 'graph' : 'text'
           }
         } else existing.kind = kind
@@ -385,30 +391,15 @@ export const useFileStore = defineStore('files', () => {
       ? activeFileIndex.value
       : reusablePreviewIndex
     if (replacementIndex >= 0) {
-      const replacement = openFiles.value[replacementIndex]
-      replacement.path = path
-      replacement.draftId = null
-      replacement.content = content
-      replacement.scratchpadBase = path === scratchpad.path ? content : undefined
-      replacement.newTab = false
-      replacement.kind = kind
-      replacement.preview = preview
-      replacement.previewView = null
-      replacement.previewRevision = 0
-      replacement.meta = meta
-      clearTimeout(graphSaveTimers.get(replacement.id))
-      graphSaveTimers.delete(replacement.id)
-      pausedGraphSaves.delete(replacement.id)
-      graphRefreshVersions.delete(replacement.id)
+      // Reuse the tab position, never the document or its undo/save identity.
+      const previous = openFiles.value[replacementIndex]
+      clearTimeout(graphSaveTimers.get(previous.id))
+      graphSaveTimers.delete(previous.id)
+      pausedGraphSaves.delete(previous.id)
+      graphRefreshVersions.delete(previous.id)
+      const replacement = makeFile({ path, content, kind, preview, meta, workspacePath })
       replacement.graph = graphDocument ? graphDocumentState(graphDocument) : null
-      replacement.workspacePath = owningWorkspacePath(path, [
-        workspacePath,
-        ...knownWorkspacePaths.value,
-      ])
-      replacement.dirty = false
-      replacement.saveState = SAVE_STATE.idle
-      replacement.saveError = null
-      replacement.reviews = null
+      openFiles.value.splice(replacementIndex, 1, replacement)
       activeFileIndex.value = replacementIndex
       addRecentFile(path)
       return replacement
@@ -446,7 +437,7 @@ export const useFileStore = defineStore('files', () => {
     return file
   }
 
-  function restorePath({ path, content = '', dirty = false, workspacePath, graph = null, kind = 'text' } = {}) {
+  function restorePath({ path, content = '', dirty = false, savedContent = dirty ? null : content, workspacePath, graph = null, kind = 'text' } = {}) {
     if (!path) return null
     const existing = openFiles.value.find((file) => file.path === path)
     if (existing) {
@@ -457,6 +448,7 @@ export const useFileStore = defineStore('files', () => {
       path,
       content: String(content),
       dirty: Boolean(dirty),
+      savedContent,
       workspacePath,
       kind,
     })
@@ -560,21 +552,31 @@ export const useFileStore = defineStore('files', () => {
     }
   }
 
-  // Update content (called on editor change)
-  function updateContent(content) {
-    const file = currentFile.value
-    if (!file || file.kind !== 'text') return
+  // Commit text to its document immediately. Selection is not a write target.
+  function updateContent(content, file = currentFile.value) {
+    if (!file || file.kind !== 'text' || !openFiles.value.includes(file)) return null
+    if (file.content === content) return file
     file.content = content
+    file.contentOrigin = 'edit'
     if (file.graph) file.graph.version += 1
     file.newTab = false
     file.preview = false
-    markFileDirty(file)
+    file.dirty = file.savedContent == null || content !== file.savedContent || writesByFileId.has(file.id)
+    file.saveState = writesByFileId.has(file.id) ? SAVE_STATE.saving : file.dirty ? SAVE_STATE.dirty : SAVE_STATE.saved
+    file.saveError = null
+    return file
   }
 
-  function markDirty(file = currentFile.value) {
-    if (!file || !openFiles.value.includes(file) || !['text', 'graph'].includes(file.kind)) return
-    file.preview = false
-    markFileDirty(file)
+  function replaceSavedContent(file, content, { origin = 'reload' } = {}) {
+    if (!file || !openFiles.value.includes(file)) return false
+    file.content = content
+    file.savedContent = content
+    file.contentOrigin = origin
+    if (file.path === scratchpad.path) file.scratchpadBase = content
+    file.dirty = false
+    file.saveState = SAVE_STATE.saved
+    file.saveError = null
+    return true
   }
 
   // Replace a disk-backed snapshot only while the Editor still considers it
@@ -593,8 +595,7 @@ export const useFileStore = defineStore('files', () => {
     }
     const nextContent = String(content)
     if (file.content === nextContent) return false
-    file.content = nextContent
-    if (file.path === scratchpad.path) file.scratchpadBase = nextContent
+    replaceSavedContent(file, nextContent)
     file.saveState = SAVE_STATE.idle
     file.saveError = null
     file.reviews = null
@@ -651,7 +652,7 @@ export const useFileStore = defineStore('files', () => {
 
   // Save current file
   async function save(file = currentFile.value) {
-    if (!file || !['text', 'graph'].includes(file.kind)) return false
+    if (!file || !openFiles.value.includes(file) || !['text', 'graph'].includes(file.kind)) return false
     clearTimeout(graphSaveTimers.get(file.id))
     graphSaveTimers.delete(file.id)
     if (file.path) {
@@ -764,6 +765,7 @@ export const useFileStore = defineStore('files', () => {
     const removed = {
       path: file.path,
       content: file.content,
+      savedContent: file.savedContent,
       dirty: file.dirty,
       draftId: file.draftId,
       kind: file.kind,
@@ -784,12 +786,14 @@ export const useFileStore = defineStore('files', () => {
     return removed
   }
 
-  function addFileFromTransfer({ path, content, dirty, draftId, kind = 'text', preview = false, meta = null, workspacePath, graph = null }) {
+  function addFileFromTransfer({ path, content, dirty, savedContent = dirty ? null : content, draftId, kind = 'text', preview = false, meta = null, workspacePath, graph = null }) {
     const existing = path && openFiles.value.find(file => file.path === path)
     if (existing) {
       if (existing.dirty && dirty) throw new Error('This file already has an unsaved draft in this window.')
       if (dirty) {
         existing.content = content || ''
+        existing.savedContent = savedContent
+        existing.contentOrigin = 'edit'
         existing.kind = kind
         existing.graph = graph ? restoredGraphState(graph) : existing.graph
         markFileDirty(existing)
@@ -797,7 +801,7 @@ export const useFileStore = defineStore('files', () => {
       activeFileIndex.value = openFiles.value.indexOf(existing)
       return existing
     }
-    const file = makeFile({ path: path || null, content: content || '', dirty: !!dirty, draftId, kind, preview, meta, workspacePath })
+    const file = makeFile({ path: path || null, content: content || '', dirty: !!dirty, savedContent, draftId, kind, preview, meta, workspacePath })
     if (graph) file.graph = restoredGraphState(graph)
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
@@ -907,7 +911,8 @@ export const useFileStore = defineStore('files', () => {
   function graphDraftChanged(file) {
     if (!file?.graph || !openFiles.value.includes(file)) return
     file.graph.version += 1
-    markDirty(file)
+    file.preview = false
+    markFileDirty(file)
     scheduleGraphSave(file)
   }
 
@@ -969,7 +974,7 @@ export const useFileStore = defineStore('files', () => {
     const nodeId = file.graph?.nodeId || file.graph?.node?.id
     const closedUndo = file.graph?.closedUndo?.sourceRevision === document.sourceRevision ? file.graph.closedUndo : null
     file.graph = { ...graphDocumentState(document), version, nodeId: document.node?.id || nodeId, closedUndo }
-    file.content = document.content
+    replaceSavedContent(file, document.content)
     if (!document.node) file.kind = 'text'
     file.dirty = false
     file.saveState = SAVE_STATE.idle
@@ -988,7 +993,7 @@ export const useFileStore = defineStore('files', () => {
       file.graph.sourceRevision = ''
       return false
     }
-    file.content = document.content
+    replaceSavedContent(file, document.content)
     return true
   }
 
@@ -1103,8 +1108,8 @@ export const useFileStore = defineStore('files', () => {
     activateSessionEntry,
     collapseLegacyDuplicateDrafts,
     updateContent,
-    markDirty,
     replaceCleanContent,
+    replaceSavedContent,
     setActiveTab,
     setActiveVisibleTab,
     setWorkspaceScope,

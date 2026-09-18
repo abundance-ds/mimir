@@ -335,7 +335,7 @@ describe('Graph entry Editor tabs', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Saved Jon')
     await wrapper.vm.mimirOpenGraph('jolo')
-    expect(useFileStore().currentFile.id).toBe(previewId)
+    expect(useFileStore().currentFile.id).not.toBe(previewId)
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Jolo')
     expect(wrapper.find('[data-inspector-file-history-panel]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Saved Jon')

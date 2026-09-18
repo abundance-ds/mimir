@@ -39,6 +39,15 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Graph session hydration', () => {
+  it('restores an ordinary draft with the disk text as its saved baseline', async () => {
+    loadSession.mockResolvedValue({ openFiles: [{ path: '/ordinary.md', content: 'Unsaved draft', dirty: true }] })
+    const { files, lifecycle } = harness()
+    await lifecycle.hydrate()
+    expect(files.currentFile).toMatchObject({ content: 'Unsaved draft', savedContent: 'Ordinary disk content', dirty: true })
+    files.updateContent('Ordinary disk content')
+    expect(files.currentFile.dirty).toBe(false)
+  })
+
   it('loads a clean Details tab from the native source rather than an old persisted draft', async () => {
     loadSession.mockResolvedValue({ openFiles: [{ path, kind: 'graph', graph: { nodeId: 'note', restoreView: 'graph' } }], activeFileIndex: 0 })
     const { files, lifecycle, readFile } = harness()

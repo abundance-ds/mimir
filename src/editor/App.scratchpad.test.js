@@ -99,8 +99,8 @@ it('retains pending Scratchpad typing and undo during a project switch with an e
   await wrapper.vm.mimirOpen(path)
   const view = surface.vm.getView()
   view.dispatch({ changes: { from: 0, insert: 'My edit: ' }, userEvent: 'input.type' })
-  // The content debounce has not copied this transaction to FileStore yet.
-  expect(scratchpad.content).toBe('Scratchpad text')
+  // The draft is authoritative before a project switch or external refresh.
+  expect(scratchpad.content).toBe('My edit: Scratchpad text')
   const switching = wrapper.setProps({ workspacePath: '/other' })
   store.content = 'External scratchpad text'
   await switching

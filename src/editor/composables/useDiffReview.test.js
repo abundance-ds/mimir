@@ -15,7 +15,7 @@ function makeReviewHarness() {
   })
   const fileManager = {
     openFiles: [currentFile.value],
-    markDirty: vi.fn(),
+    updateContent: vi.fn((content, file) => { file.content = content; file.dirty = true }),
     clearFileReviews: vi.fn((file) => { if (file) file.reviews = null }),
   }
   const review = useDiffReview({
@@ -104,7 +104,8 @@ describe('useDiffReview proposal responses', () => {
     diffStore.activate({ original: 'old text', modified: 'new text', path: file.path, review: { id: 'p1' } })
     let finish
     invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
-    fileManager.markDirty.mockImplementation(target => {
+    fileManager.updateContent.mockImplementation((content, target) => {
+      target.content = content
       expect(target.reviewPending).toBe(true)
       target.dirty = true
     })
@@ -160,15 +161,16 @@ describe('useDiffReview proposal responses', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 
-  it('uses the open Graph save queue and preserves edits made during its write', async () => {
+  it.each(['Graph', 'text'])('uses the open %s save queue and preserves edits made during its write', async kind => {
     const { diffStore, fileManager, review } = makeReviewHarness()
-    const target = { id: 8, path: '/graph/item.md', kind: 'text', content: 'old', dirty: false, graph: { sourceRevision: 'old' } }
+    const target = { id: 8, path: '/item.md', kind: 'text', content: 'old', dirty: false }
+    if (kind === 'Graph') target.graph = { sourceRevision: 'old' }
     fileManager.openFiles.push(target)
-    fileManager.markDirty.mockImplementation(file => { file.dirty = true })
+    fileManager.updateContent.mockImplementation((content, file) => { file.content = content; file.dirty = true })
     fileManager.save = vi.fn(async file => {
       expect(file.content).toBe('new')
       file.content = 'edit during save'
-      file.graph.sourceRevision = 'new revision'
+      if (file.graph) file.graph.sourceRevision = 'new revision'
       return false
     })
     diffStore.activateBatch({ fileList: [{ path: target.path, original: 'old', modified: 'new', proposalId: 'p1' }] })
@@ -176,7 +178,8 @@ describe('useDiffReview proposal responses', () => {
 
     await expect(review.onBatchAllResolved()).resolves.toEqual({ ok: true })
     expect(fileManager.save).toHaveBeenCalledWith(target)
-    expect(target).toMatchObject({ content: 'edit during save', dirty: true, graph: { sourceRevision: 'new revision' } })
+    expect(target).toMatchObject({ content: 'edit during save', dirty: true })
+    if (target.graph) expect(target.graph.sourceRevision).toBe('new revision')
     expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
   })
 
@@ -433,7 +436,7 @@ describe('useDiffReview proposal responses', () => {
     ]
     expect(writeOrder).toBeLessThan(resolveOrder)
     expect(currentFile.value.content).toBe('active new')
-    expect(fileManager.markDirty).toHaveBeenCalled()
+    expect(fileManager.updateContent).toHaveBeenCalled()
     expect(diffStore.active).toBe(false)
   })
 

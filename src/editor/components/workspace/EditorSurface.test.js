@@ -223,7 +223,7 @@ describe('EditorSurface feature extensions', () => {
     wrapper.unmount()
   })
 
-  it('keeps unflushed edits when the store did not change while the file was in the background', async () => {
+  it('uses the authoritative store text when returning to a cached document', async () => {
     const wrapper = mount(EditorSurface, {
       props: { content: 'file one', path: '/work/one.md', fileId: 1, openFileIds: [1, 2] },
       global: { plugins: [createPinia()] },
@@ -234,8 +234,6 @@ describe('EditorSurface feature extensions', () => {
     await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
     await wrapper.setProps({ content: 'file one', path: '/work/one.md', fileId: 1 })
 
-    expect(view.state.doc.toString()).toBe('EDIT file one')
-    undo(view)
     expect(view.state.doc.toString()).toBe('file one')
 
     wrapper.unmount()

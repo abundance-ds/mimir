@@ -99,11 +99,7 @@ export function useScratchpadEditor({ fileManager, currentFile, flush, sync, ope
       // Typing can continue while IPC is in flight. Keep any newer input as
       // a dirty buffer instead of replacing it with the restored text.
       if (file.dirty && file.content !== originalContent) return
-      file.content = text
-      file.scratchpadBase = text
-      file.dirty = false
-      file.saveState = 'saved'
-      file.saveError = null
+      fileManager.replaceSavedContent(file, text, { origin: 'edit' })
       sync()
       selected.value = null
       changes.value = false

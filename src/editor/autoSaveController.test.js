@@ -12,51 +12,46 @@ describe('auto-save controller', () => {
 
   function setup({ autoSaveEnabled = true, file = { path: '/tmp/doc.md', dirty: true } } = {}) {
     const state = { autoSaveEnabled, file }
-    const flush = vi.fn()
     const save = vi.fn(() => Promise.resolve())
     const onError = vi.fn()
     const controller = createAutoSaveController({
-      flush,
       save,
       getFile: () => state.file,
       isAutoSaveEnabled: () => state.autoSaveEnabled,
       onError,
       delay: 1000,
     })
-    return { controller, flush, save, onError, state }
+    return { controller, save, onError, state }
   }
 
   it('does not schedule saves when auto-save is off', async () => {
-    const { controller, flush, save } = setup({ autoSaveEnabled: false })
+    const { controller, save } = setup({ autoSaveEnabled: false })
 
     controller.schedule()
     await vi.advanceTimersByTimeAsync(1200)
 
-    expect(flush).not.toHaveBeenCalled()
     expect(save).not.toHaveBeenCalled()
   })
 
   it('does not save untitled files', async () => {
-    const { controller, flush, save } = setup({
+    const { controller, save } = setup({
       file: { path: null, dirty: true },
     })
 
     controller.schedule()
     await vi.advanceTimersByTimeAsync(1200)
 
-    expect(flush).not.toHaveBeenCalled()
     expect(save).not.toHaveBeenCalled()
   })
 
   it('saves named dirty files after the pause delay', async () => {
-    const { controller, flush, save, state } = setup()
+    const { controller, save, state } = setup()
 
     controller.schedule()
     await vi.advanceTimersByTimeAsync(999)
     expect(save).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(flush).toHaveBeenCalledWith({ bridge: 'flush' })
     expect(save).toHaveBeenCalledWith({ source: 'auto', file: state.file })
   })
 
@@ -97,13 +92,12 @@ describe('auto-save controller', () => {
   it('keeps the save bound to the edited file when another tab becomes active', async () => {
     const fileA = { id: 'a', path: '/tmp/a.md', dirty: true }
     const fileB = { id: 'b', path: '/tmp/b.md', dirty: true }
-    const { controller, flush, save, state } = setup({ file: fileA })
+    const { controller, save, state } = setup({ file: fileA })
 
     controller.schedule()
     state.file = fileB
     await vi.advanceTimersByTimeAsync(1000)
 
-    expect(flush).not.toHaveBeenCalled()
     expect(save).toHaveBeenCalledWith({ source: 'auto', file: fileA })
   })
 

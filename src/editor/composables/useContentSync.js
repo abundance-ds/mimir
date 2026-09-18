@@ -1,21 +1,11 @@
-const CONTENT_SYNC_DELAY = 150
-
 export function useContentSync({
-  editorSurfaceRef,
   currentFile,
-  fileManager,
   documentBridge,
 }) {
-  let contentSyncTimer = null
-
+  // FileStore receives editor transactions synchronously. Reading or publishing
+  // a document never pulls text from whichever view happens to be mounted.
   function currentEditorContent() {
-    const file = currentFile.value
-    if (!file) return ''
-    if (file.kind !== 'text') return file.content || ''
-    // Store selection can change before CodeMirror switches documents.
-    // Only text from the actual target document can enter its buffer.
-    const snapshot = editorSurfaceRef.value?.getDocumentSnapshot?.()
-    return snapshot?.fileId === file.id ? snapshot.content : file.content || ''
+    return currentFile.value?.content || ''
   }
 
   function syncDerivedContent(content, { bridge = 'schedule' } = {}) {
@@ -25,23 +15,16 @@ export function useContentSync({
   }
 
   function flushEditorContent(options = {}) {
-    clearTimeout(contentSyncTimer)
     const file = currentFile.value
     if (!file) return ''
     if (file.kind === 'graph') return file.content || ''
     const content = currentEditorContent()
-    if (content !== file.content) {
-      fileManager.updateContent(content)
-    }
     syncDerivedContent(content, options)
     return content
   }
 
   function scheduleContentSync() {
-    clearTimeout(contentSyncTimer)
-    contentSyncTimer = setTimeout(() => {
-      flushEditorContent()
-    }, CONTENT_SYNC_DELAY)
+    flushEditorContent()
   }
 
   function syncOpenFileSnapshot({ bridge = 'flush' } = {}) {
@@ -50,15 +33,10 @@ export function useContentSync({
     syncDerivedContent(file.content || '', { bridge })
   }
 
-  function dispose() {
-    clearTimeout(contentSyncTimer)
-  }
-
   return {
     currentEditorContent,
     flushEditorContent,
     scheduleContentSync,
     syncOpenFileSnapshot,
-    dispose,
   }
 }

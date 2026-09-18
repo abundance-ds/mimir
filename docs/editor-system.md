@@ -44,11 +44,38 @@ full-width wash from `markdownCodeBlocks.js`. The file store is the durable rend
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
 
-CodeMirror retains undo history, selection, and scroll position by file id.
-The EditorSurface document snapshot contains the loaded document's id and text.
-`useContentSync` copies that text only when the id matches the current FileStore entry.
-Tab selection can change before CodeMirror loads the document; during that
-interval, content reads use the selected file's stored buffer.
+### Document model
+
+A tab displays one open document. A document owns its id, current text, saved
+text, and save queue. CodeMirror retains its undo history, selection, and scroll
+position under that id. A rename or tab switch keeps the document. Replacing
+a preview reuses only its tab position and creates a new document and id.
+
+Each editor transaction sends the loaded document's id and text to FileStore
+before the transaction returns. The store is the authority for reads, saves,
+proposals, and session snapshots. Selection does not determine an edit's target.
+An event from a closed document is ignored. No save or tab switch needs to copy
+pending text from the active view.
+
+`useContentSync` only reads stored text and publishes it through the document
+bridge. Publication, statistics, session writes, and autosave can be delayed;
+draft updates cannot. Autosave has one timer per document and pauses during
+close confirmation.
+
+For text documents, `savedContent` records the last successful save or disk
+load. Undo back to that text clears the changed flag. Pending writes keep the
+document changed until their result is known. A restored draft with no readable
+saved version keeps an unknown baseline and remains changed.
+
+Store-to-editor updates have an explicit origin. A reload does not add an undo
+step. An accepted edit adds a separate undo step. These updates project the
+stored text exactly and do not pass through typing filters. CodeMirror uses
+logical newlines internally; emitted edits use the document's line ending.
+Opening or reading a document does not rewrite its text.
+
+`App.documents.test.js` checks these rules with the real editor and file store,
+including preview replacement, typing during a pending file read, separate
+autosaves, Undo/Redo, reloads, saved text, close decisions, and session snapshots.
 
 Bun applies `patches/style-mod@4.1.3.patch` to both package exports. CodeMirror
 mounts reuse unchanged stylesheet text instead of replacing its text node and

@@ -73,6 +73,7 @@ export function useEditorSessionLifecycle({
           fileManager.restorePath({
             path: entry.path,
             content: entry.dirty ? entry.content : content,
+            savedContent: entry.graph && !source ? null : content,
             dirty: entry.dirty,
             workspacePath: entry.workspacePath,
             graph,

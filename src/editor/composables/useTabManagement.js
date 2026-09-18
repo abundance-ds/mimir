@@ -131,10 +131,10 @@ export function useTabManagement({
 
   async function confirmFileClose(file) {
     if (file?.reviewPending) return 'cancel'
-    const pausedSource = file?.graph && cancelAutoSave(file)
+    const pausedSave = cancelAutoSave(file)
     const resume = () => {
       fileManager.resumeGraphSave?.(file)
-      if (pausedSource) resumeAutoSave(file)
+      if (pausedSave) resumeAutoSave(file)
     }
     fileManager.pauseGraphSave?.(file)
     try { await fileManager.waitForFile?.(file) }

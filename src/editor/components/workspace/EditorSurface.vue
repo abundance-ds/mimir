@@ -22,9 +22,9 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
-import { Compartment } from '@codemirror/state'
+import { Compartment, Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { undo, redo, selectAll } from '@codemirror/commands'
+import { undo, redo, selectAll, isolateHistory } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
 import { createEditor, createEditorState, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
@@ -34,6 +34,7 @@ import EditorContextMenu from './EditorContextMenu.vue'
 
 const props = defineProps({
   content: { type: String, default: '' },
+  contentOrigin: { type: String, default: 'reload' },
   path: { type: String, default: '' },
   fileId: { type: [String, Number], default: '' },
   openFileIds: { type: Array, default: () => [] },
@@ -63,6 +64,7 @@ const view = shallowRef(null)
 let applyingExternalContent = false
 let typographyMeasureGeneration = 0
 let activeFileId = props.fileId
+let activeLineEnding = lineEndingFor(props.content)
 const featureCompartment = new Compartment()
 const fileStates = new Map()
 
@@ -81,12 +83,7 @@ defineExpose({
     view.value?.focus()
   },
   getContent() {
-    return view.value?.state.doc.toString() ?? ''
-  },
-  getDocumentSnapshot() {
-    if (!view.value) return null
-    // Props can name the next file before the post-render switch loads it.
-    return { fileId: activeFileId, content: view.value.state.doc.toString() }
+    return view.value ? documentContent(view.value.state) : ''
   },
   hasFocus() {
     return Boolean(view.value?.hasFocus)
@@ -222,9 +219,19 @@ async function remeasureTypography() {
   currentView.requestMeasure()
 }
 
-function onCMChange() {
+function lineEndingFor(content, fallback = '\n') {
+  return content.match(/\r\n?|\n/)?.[0] || fallback
+}
+
+function documentContent(state) {
+  return state.doc.sliceString(0, state.doc.length, activeLineEnding)
+}
+
+function onCMChange(update) {
   if (applyingExternalContent) return
-  emit('change')
+  // Bind the transaction to the loaded document, even when props already name
+  // the next document. The parent commits this text before dispatch returns.
+  emit('change', { fileId: activeFileId, content: documentContent(update.state) })
 }
 
 function onCMCursor(info) {
@@ -287,6 +294,8 @@ function syncDerivedViewState() {
 }
 
 function applyBackgroundContent(newContent) {
+  activeLineEnding = lineEndingFor(newContent, activeLineEnding)
+  newContent = newContent.replace(/\r\n?/g, '\n')
   const currentContent = view.value.state.doc.toString()
   if (newContent === currentContent) return
   applyingExternalContent = true
@@ -307,7 +316,16 @@ function applyBackgroundContent(newContent) {
     const insert = newContent.slice(prefixLen, newContent.length - suffixLen)
 
     if (from !== to || insert.length > 0) {
-      view.value.dispatch({ changes: { from, to, insert } })
+      view.value.dispatch({
+        changes: { from, to, insert },
+        // Project the accepted store snapshot exactly; typing filters must not
+        // silently change a reload or an accepted proposal (e.g. comment tags).
+        filter: false,
+        annotations: [
+          Transaction.addToHistory.of(props.contentOrigin === 'edit'),
+          isolateHistory.of('full'),
+        ],
+      })
     }
   } finally {
     applyingExternalContent = false
@@ -318,17 +336,18 @@ function languageEffect(path) {
   return languageCompartment.reconfigure(languageExtensionForPath(path))
 }
 
-function switchFile(fileId, content, path, previousContent, previousPath) {
+function switchFile(fileId, content, path, previousPath) {
   fileStates.set(activeFileId, {
     state: view.value.state,
     scrollTop: view.value.scrollDOM.scrollTop,
-    storeContent: previousContent,
+    lineEnding: activeLineEnding,
     path: previousPath,
   })
   activeFileId = fileId
 
   const cached = fileStates.get(fileId)
   if (cached) {
+    activeLineEnding = cached.lineEnding
     view.value.setState(cached.state)
     view.value.dispatch({
       effects: cached.path === path
@@ -337,12 +356,12 @@ function switchFile(fileId, content, path, previousContent, previousPath) {
     })
     view.value.scrollDOM.scrollTop = cached.scrollTop
     syncDerivedViewState()
-    if (content !== cached.storeContent) applyBackgroundContent(content)
+    applyBackgroundContent(content)
     return
   }
 
   const state = createEditorState(stateOptionsFor(content, path))
-  fileStates.set(fileId, { state, scrollTop: 0, storeContent: content, path })
+  activeLineEnding = lineEndingFor(content)
   view.value.setState(state)
   view.value.scrollDOM.scrollTop = 0
   syncDerivedViewState()
@@ -356,7 +375,7 @@ onMounted(() => {
   fileStates.set(activeFileId, {
     state: view.value.state,
     scrollTop: 0,
-    storeContent: props.content,
+    lineEnding: activeLineEnding,
     path: props.path,
   })
   void remeasureTypography()
@@ -418,10 +437,10 @@ watch(() => props.extensions, (extensions) => {
 
 watch(
   [() => props.fileId, () => props.content, () => props.path],
-  ([fileId, content, path], [, previousContent, previousPath]) => {
+  ([fileId, content, path], [, , previousPath]) => {
     if (!view.value) return
     if (fileId !== activeFileId) {
-      switchFile(fileId, content, path, previousContent, previousPath)
+      switchFile(fileId, content, path, previousPath)
       return
     }
     if (path !== previousPath) view.value.dispatch({ effects: languageEffect(path) })

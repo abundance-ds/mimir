@@ -84,7 +84,7 @@ export function useEditorCommandApi({
     const file = currentFile.value
     if (!file) return null
     const details = file.kind === 'graph'
-    const content = details ? file.content || '' : editorSurfaceRef.value?.getContent?.() ?? file.content ?? ''
+    const content = file.content || ''
     return {
       path: file.path || null,
       name: editorTabs.value[activeVisibleFileIndex.value]?.name || basename(file.path),
