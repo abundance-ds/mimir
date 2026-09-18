@@ -6,6 +6,12 @@
     :data-status="status"
     class="flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
     @pointerdown="focusTerminal"
+    @pointerdown.capture="cancelResizeAnchor"
+    @wheel.capture.passive="cancelResizeAnchor"
+    @touchstart.capture.passive="cancelResizeAnchor"
+    @keydown.capture="cancelResizeAnchor"
+    @input.capture="cancelResizeAnchor"
+    @paste.capture="cancelResizeAnchor"
   >
     <Teleport v-if="active" to="[data-pane-actions='activity']">
       <div
@@ -122,6 +128,7 @@ import {
 import { graphLinkId } from '../../editor/codemirror/graphLinkSyntax.js'
 import { createTerminalLinkProvider } from './terminalLinks.js'
 import { createTerminalPromptTitleTracker } from './terminalPromptTitle.js'
+import { createTerminalResizeAnchor } from './terminalResizeAnchor.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
 import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
 import { parentPath } from '../../shared/utils/path.js'
@@ -185,6 +192,7 @@ const restartTitle = computed(() => (
     : 'Start this Activity again'
 ))
 let terminal = null
+let resizeAnchor = null
 let fitAddon = null
 let serializeAddon = null
 let webglAddon = null
@@ -274,6 +282,7 @@ async function initialize() {
     terminal.unicode.activeVersion = UNICODE_VERSION
     terminal.attachCustomKeyEventHandler(handleCustomKey)
     terminal.open(surface.value)
+    resizeAnchor = createTerminalResizeAnchor(terminal)
 
     // Listen before reading the durable restore state. Events that arrive
     // during the native read stay queued and are de-duplicated by sequence.
@@ -410,6 +419,7 @@ function showCurrentTerminal() {
 }
 
 function deactivateSurface() {
+  cancelResizeAnchor()
   resizeObserver?.disconnect()
   resizeObserver = null
   themeObserver?.disconnect()
@@ -467,6 +477,7 @@ function queueTerminalEvent(event) {
           if (cols > 0 && rows > 0 && (terminal.cols !== cols || terminal.rows !== rows)) {
             terminal.resize(cols, rows)
           }
+          resizeAnchor?.applied(true)
         } else {
           // One timer per event turns a background backlog into a visible replay.
           // Combine raw bytes, with a bounded write and a strict resize barrier.
@@ -487,6 +498,7 @@ function queueTerminalEvent(event) {
           }
           if (bytes.byteLength) {
             await terminalWrite(bytes)
+            resizeAnchor?.applied()
             outputBytesSinceCheckpoint += bytes.byteLength
           }
         }
@@ -499,6 +511,7 @@ function queueTerminalEvent(event) {
       // A rejected write or resize can leave a partial model. Do not save it
       // or advance across the missing event; native retains the recovery tail.
       terminalOutputFailed = true
+      cancelResizeAnchor()
       queuedTerminalEvents = []
       exposeSurfaceError(cause, 'Could not apply terminal output.')
     } finally {
@@ -648,6 +661,7 @@ function capturePromptInput(input) {
 }
 
 function handleCustomKey(event) {
+  if (event.type === 'keydown') cancelResizeAnchor()
   if (event.isComposing) return true
   if (event.metaKey && !event.shiftKey && !event.ctrlKey && !event.altKey) {
     const input = {
@@ -714,6 +728,7 @@ function installWebglRenderer() {
 }
 
 async function interrupt() {
+  cancelResizeAnchor()
   const sent = await enqueueInput(Uint8Array.of(3), { type: 'feed', value: '\u0003' })
   if (sent) emit('interrupt', { activityId: activityId.value })
   terminal?.focus()
@@ -727,6 +742,7 @@ function requestRestart() {
 }
 
 async function pasteText(value = '') {
+  cancelResizeAnchor()
   const bytes = terminalBytes(value)
   if (!bytes.byteLength || !live.value) return false
   const sent = await enqueueInput(bytes, { type: 'paste', value })
@@ -786,12 +802,18 @@ function scheduleFit() {
     if (size.cols <= 0 || size.rows <= 0) return
     if (size.cols === lastSize.cols && size.rows === lastSize.rows) return
     lastSize = size
+    if (props.active && hydrated) resizeAnchor?.begin()
     resizeActivity(activityId.value, size.cols, size.rows).catch(() => {
       if (lastSize.cols === size.cols && lastSize.rows === size.rows) {
         lastSize = { cols: 0, rows: 0 }
+        cancelResizeAnchor()
       }
     })
   })
+}
+
+function cancelResizeAnchor() {
+  resizeAnchor?.cancel()
 }
 
 // WebGL glyphs are bitmap blits. Pane splits frequently place their canvas at
@@ -841,6 +863,7 @@ watch(
 )
 
 async function resetForTerminalRun() {
+  cancelResizeAnchor()
   hydrated = false
   pendingEvents = []
   if (checkpointTimer) clearTimeout(checkpointTimer)
@@ -938,6 +961,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('focus', showCurrentTerminal)
   document.removeEventListener('visibilitychange', showCurrentTerminal)
   deactivateSurface()
+  resizeAnchor?.dispose()
+  resizeAnchor = null
   unlistenEvents?.()
   unlistenEvents = null
   dataDisposable?.dispose()

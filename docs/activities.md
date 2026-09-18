@@ -89,3 +89,24 @@ main tabs, and Activity surfaces. Launcher and continuation details are in
 [agent-setup.md](agent-setup.md).
 
 Cmd+Up/Down scroll; Cmd+Left/Right send Ctrl-A/E; Cmd+Delete sends Ctrl-E,U; Shift+Enter sends Ctrl-J.
+
+## Terminal resize position
+
+Resizing keeps the view at the bottom if it was already there. When reading
+earlier output, a temporary marker follows the first visible logical line
+through changes to line wrapping. If the CLI clears history and redraws it,
+the saved scroll percentage gives an approximate position instead.
+
+The anchor remains active for one second after the latest resize request or
+applied resize event. Output restoration is limited to once per display frame;
+output alone does not extend this period. The anchor is not saved in checkpoints.
+Wheel, pointer, touch, keyboard, and paste input cancel it. Hiding the Activity,
+changing terminal buffers, or starting a new run also cancels it. Alternate
+screens retain the CLI's own behavior. Text that has left scrollback cannot be
+recovered by an anchor.
+
+`terminalResizeAnchor.test.js` checks the real xterm buffer. The browser check
+in `scripts/check-terminal-resize.mjs` also checks display scroll timing through
+width and height changes and split redraws. Run it with Node and Puppeteer Core;
+`PUPPETEER_MODULE` and `CHROME_PATH` can select local installations. These checks
+do not establish installed macOS WebView behavior.

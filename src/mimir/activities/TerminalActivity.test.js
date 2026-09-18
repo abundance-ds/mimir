@@ -49,6 +49,8 @@ vi.mock('@xterm/xterm', () => ({
       this.refresh = vi.fn()
       this.scrollToTop = vi.fn()
       this.scrollToBottom = vi.fn()
+      this.scrollToLine = vi.fn()
+      this.registerMarker = vi.fn(() => ({ line: 40, isDisposed: false, dispose: vi.fn() }))
       this.reset = vi.fn()
       this.dispose = vi.fn()
       this.dataDisposable = { dispose: vi.fn() }
@@ -58,7 +60,12 @@ vi.mock('@xterm/xterm', () => ({
       })
       this.unicode = { activeVersion: '6' }
       this.buffer = {
+        onBufferChange: vi.fn(() => ({ dispose: vi.fn() })),
         active: {
+          type: 'normal',
+          viewportY: 0,
+          baseY: 0,
+          cursorY: 0,
           length: 1,
           getLine: index => (
             index === 0 ? terminalBufferLine(xterm.bufferText, this.cols) : undefined
@@ -1131,6 +1138,81 @@ describe('TerminalActivity', () => {
     expect(api.attach).toHaveBeenCalledTimes(1)
     expect(terminal.options.fontSize).toBe(14)
     expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('restores after ordered resize and only after redraw output has been parsed', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    await wrapper.get('[data-terminal-surface]').trigger('wheel')
+    Object.assign(terminal.buffer.active, { viewportY: 40, baseY: 100, cursorY: 20 })
+    xterm.proposedSize = { cols: 60, rows: 30 }
+    resizeObservers[0].callback()
+    flushRaf()
+    expect(terminal.registerMarker).toHaveBeenLastCalledWith(-80)
+    const marker = terminal.registerMarker.mock.results.at(-1).value
+    marker.line = 55
+    api.callback({ type: 'resize', activityId: agent.id, sequence: 3, cols: 60, rows: 30 })
+    await flushPromises()
+    flushRaf()
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(55)
+
+    // A CLI's automatic terminal response must not count as user input.
+    terminal.dataCallback('\x1b[1;1R')
+    xterm.deferWrites = true
+    terminal.scrollToLine.mockClear()
+    api.callback({ type: 'output', activityId: agent.id, sequence: 4, bytes: [65] })
+    await flushPromises()
+    flushRaf()
+    expect(terminal.scrollToLine).not.toHaveBeenCalled()
+    marker.isDisposed = true
+    terminal.buffer.active.baseY = 200
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    flushRaf()
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80)
+    wrapper.unmount()
+  })
+
+  it.each(['wheel', 'pointerdown', 'touchstart', 'keydown', 'input', 'paste'])(
+    'cancels a pending resize anchor on %s before the native reply',
+    async (event) => {
+      const wrapper = await initialize()
+      const terminal = xterm.terminals[0]
+      await wrapper.get('[data-terminal-surface]').trigger('wheel')
+      Object.assign(terminal.buffer.active, { viewportY: 40, baseY: 100, cursorY: 20 })
+      xterm.proposedSize = { cols: 60, rows: 30 }
+      resizeObservers[0].callback()
+      flushRaf()
+      const marker = terminal.registerMarker.mock.results.at(-1).value
+      await wrapper.get('[data-terminal-surface]').trigger(event)
+      api.callback({ type: 'resize', activityId: agent.id, sequence: 3, cols: 60, rows: 30 })
+      await flushPromises()
+      flushRaf()
+      expect(marker.dispose).toHaveBeenCalledOnce()
+      expect(terminal.scrollToLine).not.toHaveBeenCalled()
+      wrapper.unmount()
+    },
+  )
+
+  it('cancels the resize anchor for programmatic paste and hidden surfaces', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    await wrapper.get('[data-terminal-surface]').trigger('wheel')
+    Object.assign(terminal.buffer.active, { viewportY: 40, baseY: 100, cursorY: 20 })
+    xterm.proposedSize = { cols: 60, rows: 30 }
+    resizeObservers[0].callback()
+    flushRaf()
+    const first = terminal.registerMarker.mock.results.at(-1).value
+    await wrapper.vm.pasteText('hello')
+    expect(first.dispose).toHaveBeenCalledOnce()
+
+    xterm.proposedSize = { cols: 65, rows: 30 }
+    resizeObservers[0].callback()
+    flushRaf()
+    const second = terminal.registerMarker.mock.results.at(-1).value
+    await wrapper.setProps({ active: false })
+    expect(second.dispose).toHaveBeenCalledOnce()
+    wrapper.unmount()
   })
 
   it('keeps one hidden xterm model current while suspending layout observers', async () => {
