@@ -64,6 +64,26 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Graph document lifecycle', () => {
+  it('rebases a Project context draft over a Home-only change and retains the new canvas', async () => {
+    const initial = document({ kind: 'project', properties: { home: { canvas: 'Old' } } })
+    disk.set(path, initial)
+    const files = useFileStore()
+    await files.openGraphDocument(initial)
+    const file = files.currentFile
+    file.graph.draft.body = 'New context'
+    files.graphDraftChanged(file)
+    disk.set(path, document({ kind: 'project', revision: 'remote', properties: { home: { canvas: 'New canvas' } } }))
+    await files.save(file)
+    expect(disk.get(path).node.body).toBe('New context')
+    expect(disk.get(path).node.properties.home.canvas).toBe('New canvas')
+    expect(file.dirty).toBe(false)
+    file.graph.draft.body = 'Competing context'
+    files.graphDraftChanged(file)
+    disk.set(path, document({ kind: 'project', body: 'Their context', revision: 'remote-again', properties: { home: { canvas: 'New canvas' } } }))
+    await expect(files.save(file)).rejects.toThrow('Graph source changed')
+    expect(file.graph.draft.body).toBe('Competing context')
+  })
+
   it('saves time rows through the shared queue and retains invalid or conflicting drafts', async () => {
     const initial = document({ kind: 'timesheet', properties: { period: '2026-09', entries: [
       { id: 't1', date: '2026-09-15', minutes: 90, description: 'Review', invoice: 'INV-014' },

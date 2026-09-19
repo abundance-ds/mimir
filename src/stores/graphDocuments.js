@@ -14,7 +14,7 @@ export function graphDocumentState(document) {
   if (node) hydrateInspectorDraft(draft, node)
   return {
     node, nodeId: node?.id || null, draft, sourceRevision: document.sourceRevision,
-    bodyFrom: document.bodyFrom, version: 0, unavailable: false, closedUndo: null,
+    bodyFrom: document.bodyFrom, sourceContent: document.content, version: 0, unavailable: false, closedUndo: null,
   }
 }
 
@@ -47,7 +47,7 @@ export async function writeGraphDocument(file, snapshot, nodes = []) {
   const { graph, content, kind, path } = snapshot
   if (!path || graph.unavailable) throw new Error(GRAPH_UNAVAILABLE)
   if (kind === 'text') {
-    return { path, document: await saveGraphSource({ path, content, expectedRevision: graph.sourceRevision }) }
+    return { path, document: await saveGraphSource({ path, content, expectedRevision: graph.sourceRevision, ...(graph.node?.kind === 'project' && graph.sourceContent != null ? { baseContent: graph.sourceContent } : {}) }) }
   }
   if (!graph.node || !graph.draft.title?.trim()) throw new Error('Enter a title before saving this entry.')
   let payload, targetScopeId
@@ -67,7 +67,16 @@ export async function writeGraphDocument(file, snapshot, nodes = []) {
     payload = { ...built.payload, expectedRevision: graph.sourceRevision, expectedSourcePath: path }
     targetScopeId = built.targetScopeId
   }
-  let node = await updateGraphNode(payload)
+  let node
+  try { node = await updateGraphNode(payload) }
+  catch (error) {
+    // Home writes only its own field. Rebase a context draft only when every
+    // other Project field is still the baseline that this draft was made on.
+    if (kind !== 'graph' || graph.node?.kind !== 'project' || !/conflict|source changed|changed since|revision/i.test(String(error))) throw error
+    const current = await graphSource(path)
+    if (!current?.node || !sameProjectContext(graph.node, current.node)) throw error
+    node = await updateGraphNode({ ...payload, expectedRevision: current.sourceRevision })
+  }
   // Retain the committed revision even if a later move or source read fails.
   // A retry must not repeat the body write against the preceding revision.
   file.graph.node = cloneGraphDocument(node)
@@ -100,4 +109,20 @@ export function graphSourceBodyStart(state) {
   // The source parser retains an incomplete header as text. Completion stays
   // suppressed until its closing fence exists, so typing metadata is safe.
   return state.doc.length
+}
+
+function sameProjectContext(left, right) {
+  const normalize = value => {
+    if (Array.isArray(value)) return value.map(normalize)
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])]))
+    return value
+  }
+  const context = node => {
+    const value = cloneGraphDocument(node)
+    delete value.properties?.home
+    delete value.updatedAt
+    delete value.provenance
+    return JSON.stringify(normalize(value))
+  }
+  return context(left) === context(right)
 }

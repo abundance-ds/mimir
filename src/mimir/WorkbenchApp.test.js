@@ -529,6 +529,100 @@ describe('WorkbenchApp', () => {
     expect(document.querySelector('[data-quick-open]')).toBeTruthy()
   })
 
+  it.each(['expanded', 'rail'])('uses Sidebar order for hidden Main tabs with the Sidebar %s', async sidebarState => {
+    const wrapper = await render({ workspace: '/w', teleport: false })
+    const activities = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    const settings = useSettingsStore()
+    for (const id of ['one', 'two']) activities.upsert(activityRecord(id, id, '2026-07-25T10:00:00Z'))
+    activities.upsert({ ...activityRecord('other-project', 'Other project', '2026-07-25T10:00:00Z'), workspacePath: '/other' })
+    await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
+    await flushPromises()
+    const savedOrder = ['two', 'routines', 'other-project', 'files', 'app:ledger', 'one']
+    workbench.restoreTabs(savedOrder)
+    settings.set('sidebarToolOrder', ['app:ledger', 'core:scratchpad', 'core:routines', 'core:chats'])
+    settings.set('showMainTabs', false)
+    workbench.setPaneState('sidebar', sidebarState)
+    await nextTick()
+
+    for (const [key, expected] of [
+      ['ArrowRight', ['routines', 'two', 'one', 'files', 'app:ledger']],
+      ['ArrowLeft', ['files', 'one', 'two', 'routines', 'app:ledger']],
+    ]) {
+      for (const id of expected) {
+        await wrapper.get('[data-pane="activity"]').trigger('keydown', { key, metaKey: true, altKey: true })
+        expect(workbench.activeActivityId).toBe(id)
+      }
+    }
+
+    await wrapper.get('[aria-label="Open views"]').trigger('click')
+    await flushPromises()
+    const menu = document.querySelector('[role="dialog"][aria-label="Open views"]')
+    expect([...menu.querySelectorAll('[role="option"]:not([data-menu-action])')]
+      .map(option => option.firstChild.textContent.trim())).toEqual(['Ledger', 'Routines', 'two', 'one', 'Files'])
+    expect(workbench.openTabIds).toEqual(savedOrder)
+    expect(editorScratchpad).not.toHaveBeenCalled()
+    expect(appsApi.resolveAppLaunch).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates hidden Main navigation after Sidebar reordering and restores horizontal navigation when shown', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activities = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    const settings = useSettingsStore()
+    for (const id of ['one', 'two']) activities.upsert(activityRecord(id, id, '2026-07-25T10:00:00Z'))
+    await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
+    await flushPromises()
+    workbench.restoreTabs(['one', 'routines', 'two', 'app:ledger'])
+    settings.set('sidebarToolOrder', ['core:routines', 'app:ledger'])
+    settings.set('showMainTabs', false)
+    workbench.openActivity('routines')
+    await nextTick()
+    const next = () => wrapper.get('[data-pane="activity"]').trigger('keydown', {
+      key: 'ArrowRight', metaKey: true, altKey: true,
+    })
+    await next()
+    expect(workbench.activeActivityId).toBe('app:ledger')
+
+    settings.set('sidebarToolOrder', ['app:ledger', 'core:routines'])
+    workbench.reorderTabs(['two', 'one'])
+    await next()
+    expect(workbench.activeActivityId).toBe('routines')
+    await next()
+    expect(workbench.activeActivityId).toBe('two')
+    await next()
+    expect(workbench.activeActivityId).toBe('one')
+
+    settings.set('showMainTabs', true)
+    workbench.openActivity('two')
+    await nextTick()
+    expect(wrapper.findAll('[data-main-tab]').map(tab => tab.attributes('data-main-tab')))
+      .toEqual(['two', 'routines', 'one', 'app:ledger'])
+    for (const id of ['routines', 'one', 'app:ledger', 'two']) {
+      await next()
+      expect(workbench.activeActivityId).toBe(id)
+    }
+    expect(workbench.openTabIds).toEqual(['two', 'routines', 'one', 'app:ledger'])
+  })
+
+  it.each(['routines', 'one'])('selects the next Sidebar view after closing %s with Main tabs hidden', async closingId => {
+    const wrapper = await render({ workspace: '/w' })
+    const activities = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    for (const id of ['one', 'two']) activities.upsert(activityRecord(id, id, '2026-07-25T10:00:00Z'))
+    await nextTick()
+    workbench.restoreTabs(['one', 'routines', 'two'])
+    useSettingsStore().set('showMainTabs', false)
+    workbench.openActivity(closingId)
+    await nextTick()
+    await wrapper.get('[data-pane="activity"]').trigger('keydown', { key: 'w', metaKey: true })
+    await flushPromises()
+
+    expect(workbench.activeActivityId).toBe(closingId === 'routines' ? 'one' : 'two')
+    expect(workbench.openTabIds).not.toContain(closingId)
+    if (closingId === 'one') expect(activityApi.closeActivity).toHaveBeenCalledWith('one')
+  })
+
   it('projects native work status to the Sidebar without inferring work from output', async () => {
     const wrapper = await render({ workspace: '/w' })
     const activities = useActivitiesStore()

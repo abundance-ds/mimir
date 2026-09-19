@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
+import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import GraphReferences from './GraphReferences.vue'
 import { loadIpcFixture } from '../../../test/ipcFixtures.js'
 
@@ -21,6 +22,22 @@ async function toggleGroup(wrapper, name, open = true) {
 }
 beforeEach(() => { vi.mocked(invoke).mockReset() })
 describe('Graph note references', () => {
+  it('opens a canvas backlink in Main Home without a document action', async () => {
+    const canvas = structuredClone(data)
+    canvas.backlinks[0].source.kind = 'project'
+    canvas.backlinks[0].occurrences[0].sourceField = 'home.canvas'
+    vi.mocked(invoke).mockResolvedValue(canvas)
+    const wrapper = mount(GraphReferences, { props })
+    await flushPromises()
+    await toggleGroup(wrapper, 'backlinks')
+    await wrapper.get('[data-graph-backlink]').trigger('click')
+    const graph = useBusinessGraphStore()
+    expect(graph.section).toBe('home')
+    expect(graph.homeProjectId).toBe('note')
+    expect(wrapper.emitted('open')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('renders nothing for an empty snapshot, including an unsaved note', async () => {
     vi.mocked(invoke).mockResolvedValue({ outgoing: [], backlinks: [], sourceRevision: 'jon-1' })
     const wrapper = mount(GraphReferences, { props: { ...props, dirty: true } })

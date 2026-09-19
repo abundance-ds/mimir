@@ -88,6 +88,11 @@ describe('meetings service', () => {
     expect(invoke).toHaveBeenCalledWith('meetings_check_audio')
   })
 
+  it.each(['summary_needs_update', 'summaryNeedsUpdate'])('retains the %s flag when a filed summary becomes stale', async field => {
+    vi.mocked(invoke).mockResolvedValue({ id: 'meeting-1', [field]: true })
+    await expect(loadMeeting('meeting-1')).resolves.toMatchObject({ summaryNeedsUpdate: true })
+  })
+
   it('normalizes stable microphones and bounded live level events', async () => {
     vi.mocked(invoke).mockResolvedValueOnce({
       selected_device_id: 'uid-selected',

@@ -1,6 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
+import { EditorView } from '@codemirror/view'
+import { undo } from '@codemirror/commands'
 import ProjectHome from './ProjectHome.vue'
 import { projectAttention } from './projectAttention.js'
 
@@ -24,18 +26,14 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Project home', () => {
-  it('renders a brief and ordered resources, with direct file, URL, and Graph actions', async () => {
+  it('opens an editable canvas with standard live preview and direct task actions', async () => {
     render()
     await flushPromises()
-    expect(wrapper.get('strong').text()).toBe('Deliverable:')
+    expect(wrapper.get('.cm-content').attributes('contenteditable')).toBe('true')
     expect(wrapper.text()).toContain('Keep this text too.')
-    expect(wrapper.find('[data-graph-markdown-editor]').exists()).toBe(false)
-    const resources = wrapper.findAll('.project-resource-link')
-    expect(resources.map(row => row.find('.project-resource-label').text())).toEqual(['Protocol', 'Evidence table', 'Analysis plan'])
-    for (const row of resources) await row.trigger('click')
-    expect(wrapper.emitted('openUrl')).toEqual([['https://example.org/protocol.pdf']])
-    expect(wrapper.emitted('openFile')).toEqual([['evidence/table.xlsx']])
-    expect(wrapper.emitted('openNode')).toEqual([['analysis-plan']])
+    expect(wrapper.find('[data-graph-markdown-editor]').exists()).toBe(true)
+    expect(wrapper.find('.graph-note-tools').exists()).toBe(false)
+    expect(wrapper.findAll('button').map(button => button.text())).not.toContain('Edit canvas')
     expect(wrapper.get('.project-attention-row').text()).toContain('Anna Berg')
     await wrapper.get('.project-attention-row').trigger('click')
     expect(wrapper.emitted('openNode').at(-1)).toEqual(['Review extraction'])
@@ -43,17 +41,21 @@ describe('Project home', () => {
     expect(wrapper.emitted('openWork')).toEqual([[project]])
   })
 
-  it('opens the Project editor only from an explicit edit action', async () => {
+  it('accepts typing and undo on an empty canvas without an edit step or purpose prompt', async () => {
     items = []
-    render({ modelValue: '' })
+    render({ modelValue: '', project: { ...project, body: 'Stable agent context' } })
     await flushPromises()
-    expect(wrapper.emitted('edit')).toBeUndefined()
-    expect(wrapper.find('.cm-editor').exists()).toBe(false)
-    await wrapper.get('[data-graph-control="project-write-brief"]').trigger('click')
-    await wrapper.get('[data-graph-control="project-edit-resources"]').trigger('click')
-    await wrapper.get('[data-graph-control="project-edit-page"]').trigger('click')
-    expect(wrapper.emitted('edit')).toHaveLength(3)
-    expect(wrapper.props('modelValue')).toBe('')
+    const view = EditorView.findFromDOM(wrapper.get('.cm-editor').element)
+    expect(wrapper.find('.cm-placeholder').exists()).toBe(false)
+    expect(wrapper.text()).not.toMatch(/What matters|Start the canvas|Edit canvas|Done/)
+    expect(wrapper.get('.project-home-project-context').attributes('open')).toBeUndefined()
+    view.dispatch({ changes: { from: 0, insert: 'A joke for tomorrow' } })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['A joke for tomorrow'])
+    undo(view)
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([''])
+    expect(wrapper.emitted('openNode')).toBeUndefined()
   })
 
   it('shows loading failures with Retry and keeps the authored page visible', async () => {
@@ -62,7 +64,7 @@ describe('Project home', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Index unavailable')
     expect(wrapper.text()).not.toContain('No waiting')
-    expect(wrapper.findAll('.project-resource-link')).toHaveLength(3)
+    expect(wrapper.get('.cm-content').text()).toContain('Evidence table')
     await wrapper.get('[data-graph-control="project-work-retry"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('.project-attention-row').exists()).toBe(true)
@@ -109,7 +111,7 @@ describe('Project home', () => {
   it('renders authored HTML as text and rejects executable links', async () => {
     render({ modelValue: '<img src=x onerror=alert(1)>\n\n[Unsafe](javascript:alert(1))\n\n- [x] Finished task\n\n| A | B |\n| - | - |\n| One | Two |' })
     await flushPromises()
-    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('img[onerror]').exists()).toBe(false)
     expect(wrapper.find('script').exists()).toBe(false)
     expect(wrapper.findAll('.project-inline-link')).toHaveLength(0)
     expect(wrapper.text()).toContain('Finished task')

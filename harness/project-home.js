@@ -15,6 +15,8 @@ const project = { id: 'project-atlas', kind: 'project', title: 'Atlas — Eviden
   properties: { projectStatus: 'active', projectType: 'client-engagement' },
   provenance: { scopeId: 'team:main', scopeKind: 'team', sourceRevision: 'fixture', sourcePath: '/preview/graph/project-atlas.md' },
 }
+project.properties.home = { canvas: project.body, updatedAt: '2026-09-19T00:00:00Z' }
+project.body = 'Stable context for the project and its agents.'
 const owners = [{ id: 'anna', title: 'Anna Berg', kind: 'person' }, { id: 'alex', title: 'Alex Rivera', kind: 'person' }]
 const issues = params.has('empty') ? [] : [
   { id: 'qc', title: 'Complete extraction quality control', status: 'review', dueDate: day(-2), assigneeId: 'alex' },
@@ -24,9 +26,23 @@ const issues = params.has('empty') ? [] : [
   { id: 'done', title: 'File kickoff notes', status: 'done' },
 ].map(issue => ({ ...issue, kind: 'issue', projectId: project.id, scopeId: 'team:main', priority: 'normal' }))
 const beta = { ...project, id: 'project-beta', title: 'Beta — Model review', body: '**Deliverable:** Review the economic model.\n\n## Key resources\n\n- [Model](models/beta.xlsx)' }
+beta.properties = { home: { canvas: beta.body } }
+beta.provenance = { ...project.provenance, sourcePath: '/preview/graph/project-beta.md' }
 const opened = ref('')
 // Local fixture IPC only. This page does not read or write a user's Graph.
 window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+  if (command === 'graph_source') {
+    const node = [project, beta].find(item => item.provenance.sourcePath === args.path)
+    return node ? { node: structuredClone(node), sourceRevision: node.provenance.sourceRevision } : null
+  }
+  if (command === 'graph_update') {
+    const node = [project, beta].find(item => item.id === args.patch.id)
+    if (node.provenance.sourceRevision !== args.patch.expectedRevision) throw new Error('Revision conflict')
+    Object.assign(node.properties, args.patch.setProperties)
+    node.properties.home.updatedAt = new Date().toISOString()
+    node.provenance.sourceRevision += '1'
+    return structuredClone(node)
+  }
   if (command === 'graph_get') return [project, beta, ...issues, ...owners].find(item => item.id === args.id)
   if (command === 'graph_query') {
     const rows = args.query.projectIds?.length ? issues.filter(item => args.query.projectIds.includes(item.projectId)) : [project, beta, ...issues, ...owners]

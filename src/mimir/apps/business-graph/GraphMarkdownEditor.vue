@@ -1,6 +1,6 @@
 <template>
-  <div class="graph-note-input">
-    <div class="graph-note-tools">
+  <div class="graph-note-input" :style="canvasTypography">
+    <div v-if="!canvasStyle" class="graph-note-tools">
       <button
         type="button"
         data-graph-insert-link
@@ -13,6 +13,7 @@
       ><IconLink :size="13" /><span>Link</span></button>
       <span v-if="linkError" role="status">{{ linkError }}</span>
     </div>
+    <p v-if="canvasStyle && linkError" role="status" class="text-ink-3 text-xs">{{ linkError }}</p>
     <div
       ref="host"
       data-graph-markdown-editor
@@ -26,12 +27,13 @@
 
 <script setup>
 import {
+  computed,
   onMounted,
   onUnmounted,
   ref,
   watch,
 } from 'vue'
-import { Compartment, EditorState } from '@codemirror/state'
+import { Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder as editorPlaceholder } from '@codemirror/view'
 import { defaultKeymap, history, historyField, historyKeymap } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -42,9 +44,17 @@ import { referenceSelection } from '../../../editor/codemirror/graphLinkSyntax.j
 import { lookupGraph, graphLinkTargets } from '../../../services/businessGraph.js'
 import { markdownListKeymap } from '../../../editor/codemirror/markdownLists.js'
 import { markdownLinkOpen } from './markdownLinkOpen.js'
+import { editorTheme, editorHighlightStyle, languageExtensionForPath } from '../../../editor/codemirror/core.js'
+import { syntaxHighlighting } from '@codemirror/language'
+import { livePreviewExtension } from '../../../editor/codemirror/livePreview.js'
+import { taskCheckboxExtension } from '../../../editor/codemirror/taskCheckboxes.js'
+import { useSettingsStore } from '../../../stores/settings.js'
+import { editorTypographyVars } from '../../../shared/fonts.js'
+import { canvasLayout } from './homeCanvasStyles.js'
 import { graphMarkdownStyles } from './graphMarkdownStyles.js'
 
 const props = defineProps({
+  canvasStyle: { type: Boolean, default: false },
   modelValue: { type: String, default: '' },
   viewState: { type: Object, default: null },
   ariaLabel: { type: String, default: 'Markdown working note' },
@@ -70,6 +80,8 @@ const links = graphLinks({
   open: id => emit('open-graph', id),
   onError: message => { linkError.value = message },
 })
+const settings = props.canvasStyle ? useSettingsStore() : null
+const canvasTypography = computed(() => settings ? editorTypographyVars({ fontSize: settings.editorFontSize, fontKey: settings.editorFontFamily, dark: settings.isDarkTheme }) : null)
 const editableCompartment = new Compartment()
 let view = null
 let applyingExternal = false
@@ -89,16 +101,20 @@ onMounted(() => {
       editableCompartment.of(editableExtensions(props.disabled)),
       history(),
       drawSelection(),
-      markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+      props.canvasStyle ? languageExtensionForPath('home.md') : markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
       links.extension,
       markdownLinkOpen({
         enabled: () => props.openLinks,
+        selector: props.canvasStyle ? '.cm-lp-link' : '.cm-graph-link',
+        preserveRenderedLink: props.canvasStyle,
         onOpenFile: target => emit('open-file', target),
         onOpenUrl: target => emit('open-url', target),
         onOpenGraph: target => links.openTarget(target),
       }),
-      graphMarkdownStyles(props.framed, props.openLinks),
+      props.canvasStyle ? [canvasLayout, editorTheme, syntaxHighlighting(editorHighlightStyle),
+        livePreviewExtension(() => true, () => '', state => links.references(state)), taskCheckboxExtension(() => true)]
+        : graphMarkdownStyles(props.framed, props.openLinks),
       editorPlaceholder(props.placeholder),
       keymap.of([
         {
@@ -132,6 +148,7 @@ watch(() => props.modelValue, (value) => {
   if (!view || view.state.doc.toString() === value) return
   applyingExternal = true
   view.dispatch({
+    annotations: props.canvasStyle ? Transaction.addToHistory.of(false) : [],
     changes: {
       from: 0,
       to: view.state.doc.length,

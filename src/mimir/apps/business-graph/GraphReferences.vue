@@ -78,6 +78,7 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { IconChevronRight } from '@tabler/icons-vue'
+import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import { graphReferences } from '../../../services/businessGraph.js'
 
 const props = defineProps({
@@ -87,6 +88,7 @@ const props = defineProps({
   dirty: { type: Boolean, default: false },
 })
 const emit = defineEmits(['open'])
+const graph = useBusinessGraphStore()
 const empty = () => ({ outgoing: [], backlinks: [], sourceRevision: '' })
 const references = ref(empty())
 const loading = ref(false)
@@ -125,6 +127,11 @@ watch(() => [props.node?.id, props.node?.provenance?.sourceRevision, props.graph
 
 function openBacklink(backlink) {
   const occurrence = backlink.occurrences[0]
+  if (occurrence?.sourceField === 'home.canvas') {
+    graph.homeProjectId = backlink.source.id
+    graph.setSection('home')
+    return
+  }
   emit('open', {
     id: backlink.source.id,
     targetId: props.node.id,

@@ -37,6 +37,7 @@ const expectedLiveMeeting = {
   segments: [],
   summary: null,
   summaryTruncated: false,
+  summaryNeedsUpdate: false,
   summaryState: 'not-started',
   kgState: 'not-offered',
   jobs: [],
@@ -75,6 +76,7 @@ const expectedFinalMeeting = {
   segments: [],
   summary: 'Release readiness is confirmed; prepare the deployment checklist.',
   summaryTruncated: false,
+  summaryNeedsUpdate: false,
   summaryState: 'succeeded',
   kgState: 'awaiting-decision',
   jobs: [

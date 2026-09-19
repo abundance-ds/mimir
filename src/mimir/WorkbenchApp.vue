@@ -60,7 +60,7 @@
           <ActivityTitle :activity="activeMainTab" :hidden="workbench.paneLayout.activity.state === 'rail'" @rename="renameActivity" />
         </template>
         <template v-if="!settings.showMainTabs" #leading>
-          <ActivityTabMenu label="Open views" :tabs="mainTabs" :active-id="workbench.activeActivityId || ''"
+          <ActivityTabMenu label="Open views" :tabs="mainNavigationTabs" :active-id="workbench.activeActivityId || ''"
             :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds"
             @select="selectActivity" @new="openQuickOpen('tabs')"
           />
@@ -415,7 +415,7 @@ const activityLifecycle = useActivityLifecycle({
   diagnostic,
   coreActivityIds: CORE_ACTIVITY_IDS,
   isStableActivity: isToolActivity,
-  getSidebarActivities: () => mainTabs.value,
+  getSidebarActivities: () => mainNavigationTabs.value,
   openCoreActivity,
   selectActivity,
   openActivityRecord,
@@ -491,7 +491,7 @@ async function closeMainTab(id) {
   const tab = mainTabs.value.find(tab => tab.id === id)
   if (!tab) return
   if (tab.unique) {
-    workbench.closeTab(id, mainTabs.value.map(tab => tab.id))
+    workbench.closeTab(id, mainNavigationTabs.value.map(tab => tab.id))
     return
   }
   await closeActivity(id)
@@ -661,6 +661,20 @@ const toolRows = computed(() => orderSidebarRows([
   ...(chat.config.enabled ? [{ id: 'core:chats', title: 'Chats', icon: 'chats', activityId: 'chats' }] : []),
 ], settings.sidebarToolOrder))
 
+// Navigation follows the controls on screen without rewriting saved tab order.
+const mainNavigationTabs = computed(() => {
+  if (settings.showMainTabs) return mainTabs.value
+  const openTabs = new Map(mainTabs.value.map(tab => [tab.id, tab]))
+  const ids = new Set([
+    ...toolRows.value.map(tool => tool.activityId || tool.id),
+    ...sessionTabs.value.map(tab => tab.id),
+    'files',
+    // Keep open views without a Sidebar row reachable in their saved order.
+    ...openTabs.keys(),
+  ])
+  return [...ids].map(id => openTabs.get(id)).filter(Boolean)
+})
+
 const newActivityRows = computed(() => orderSidebarRows([
   ...launchers.decoratedPresets.filter(
     preset => preset.enabled && preset.available,
@@ -750,7 +764,7 @@ const {
   editorFiles,
   workbench,
   focusMain: () => requestEntryFocus(workbench.activeActivityId),
-  sidebarActivities: mainTabs,
+  sidebarActivities: mainNavigationTabs,
   sidebarSelection: sidebarSelectedActivityIds,
   toggleSidebar,
   selectActivity,
@@ -769,7 +783,7 @@ watch(
   () => tracker.enabled,
   enabled => {
     if (!enabled && activeActivity.value?.source?.appId === 'tracker') {
-      workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
+      workbench.closeTab(workbench.activeActivityId, mainNavigationTabs.value.map(tab => tab.id))
     }
   },
 )
@@ -852,7 +866,7 @@ watch(
   () => chat.config.enabled,
   enabled => {
     if (!enabled && workbench.activeActivityId === 'chats') {
-      workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
+      workbench.closeTab(workbench.activeActivityId, mainNavigationTabs.value.map(tab => tab.id))
     }
   },
 )
@@ -898,7 +912,7 @@ onMounted(async () => {
     }),
   ])
   if (!tracker.enabled && activeActivity.value?.source?.appId === 'tracker') {
-    workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
+    workbench.closeTab(workbench.activeActivityId, mainNavigationTabs.value.map(tab => tab.id))
   }
   workbench.restoreTabs(workbench.openTabIds.filter(id => activities.byId(id) && !activities.byId(id).archivedAt && !activities.byId(id).closeRequestedAt))
   workbenchReady = true

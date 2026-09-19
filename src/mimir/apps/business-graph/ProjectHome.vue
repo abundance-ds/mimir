@@ -2,22 +2,30 @@
   <section class="project-home" data-project-home>
     <div class="project-home-actions">
       <div class="project-home-context"><slot name="status" /><button type="button" data-graph-control="project-open-work" class="project-open-work" @click="$emit('openWork', project)">Open Work <IconArrowUpRight :size="13" /></button></div>
-      <button type="button" data-graph-control="project-edit-page" @click="$emit('edit')">Edit page</button>
+      <span v-if="saveLabel" class="project-home-save-state" role="status" :title="updatedTitle">{{ saveLabel }}</span>
     </div>
+    <div v-if="draft?.error" class="project-home-save-error" role="status">
+      <p>{{ draft.error }}</p>
+      <template v-if="draft.remote != null">
+        <details><summary>View saved canvas</summary><ProjectMarkdown :document="remoteDocument" @open="openLink" /></details>
+        <button type="button" @click="$emit('resolve', false)">Save my version</button>
+        <button type="button" @click="$emit('resolve', true)">Use saved version</button>
+      </template>
+      <button v-else type="button" @click="$emit('save')">Retry save</button>
+    </div>
+    <button v-if="draft?.recovery != null" class="project-home-recover" type="button" @click="$emit('recover')">Restore my previous draft</button>
     <div class="project-home-layout">
       <div class="project-home-content">
-          <ProjectMarkdown v-if="document.brief.length" :document="document" @open="openLink" />
-          <div v-else class="project-home-empty">
-            <p>Keep the objective, deliverable, and next milestone here.</p>
-            <button type="button" data-graph-control="project-write-brief" @click="$emit('edit')">Write brief</button>
-          </div>
-          <section class="project-home-resources" aria-label="Key resources">
-            <div class="project-home-section-heading"><h2>Key resources</h2>
-              <button type="button" data-graph-control="project-edit-resources" @click="$emit('edit')">{{ document.resources.length ? 'Edit links' : 'Add links' }}</button>
-            </div>
-            <ProjectMarkdown v-if="document.resources.length" :document="document" section="resources" @open="openLink" />
-            <p v-else class="project-home-muted">Keep the protocol, evidence table, model, and shared folder within reach.</p>
-          </section>
+        <GraphMarkdownEditor :model-value="modelValue" :view-state="editorState" :framed="false" canvas-style open-links
+          aria-label="Team canvas" :min-height="280" :scope-ids="scopeIds" :graph-revision="graphRevision"
+          placeholder=""
+          @update:model-value="$emit('update:modelValue', $event)" @save="$emit('save')"
+          @open-file="$emit('openFile', $event)" @open-url="$emit('openUrl', $event)" @open-graph="$emit('openNode', $event)" />
+        <details v-if="project.body?.trim()" class="project-home-project-context">
+          <summary><IconChevronRight :size="13" />Project context</summary>
+          <div class="project-home-section-heading"><span class="project-home-muted">Scope, methods, and agent instructions</span><button type="button" @click="$emit('editContext')">Edit context</button></div>
+          <ProjectMarkdown :document="contextDocument" @open="openLink" />
+        </details>
       </div>
       <aside class="project-home-attention" aria-label="Needs attention" :aria-busy="loading">
         <div class="project-home-section-heading"><h2>Needs attention</h2><span v-if="total" class="project-attention-count">{{ total }}</span></div>
@@ -42,17 +50,35 @@
 
 <script setup>
 import { computed } from 'vue'
-import { IconArrowUpRight } from '@tabler/icons-vue'
+import { IconArrowUpRight, IconChevronRight } from '@tabler/icons-vue'
+import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import ProjectMarkdown from './ProjectMarkdown.vue'
 import { projectHomeMarkdown } from './projectHomeMarkdown.js'
 import { useProjectAttention } from './useProjectAttention.js'
 
 const props = defineProps({
+  draft: { type: Object, default: null },
   project: { type: Object, required: true }, modelValue: { type: String, default: '' },
   scopeIds: { type: Array, default: () => [] }, graphRevision: { type: [Number, String], default: 0 },
 })
-const emit = defineEmits(['edit', 'openWork', 'openNode', 'openFile', 'openUrl'])
-const document = computed(() => projectHomeMarkdown(props.modelValue))
+const emit = defineEmits(['update:modelValue', 'save', 'resolve', 'recover', 'editContext', 'openWork', 'openNode', 'openFile', 'openUrl'])
+const editorState = { note: null }
+const contextDocument = computed(() => projectHomeMarkdown(props.project.body, { splitResources: false }))
+const remoteDocument = computed(() => projectHomeMarkdown(props.draft?.remote, { splitResources: false }))
+const updatedTitle = computed(() => props.draft?.home?.updatedAt ? new Date(props.draft.home.updatedAt).toLocaleString() : '')
+const saveLabel = computed(() => {
+  const state = props.draft?.status
+  if (state === 'saving') return 'Saving…'
+  if (state === 'dirty') return 'Unsaved changes'
+  if (state === 'error' || state === 'conflict') return 'Not saved'
+  const home = props.draft?.home
+  if (home?.updatedAt) {
+    const date = new Date(home.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    const actor = home.updatedBy?.label
+    return `Updated ${date}${actor && actor !== 'You' ? ` · ${actor}` : ''}`
+  }
+  return props.modelValue.trim() ? 'Saved' : ''
+})
 const { rows, total, owners, loading, error, load } = useProjectAttention(props)
 function openLink(destination) {
   emit(destination.kind === 'graph' ? 'openNode' : destination.kind === 'file' ? 'openFile' : 'openUrl', destination.target)
@@ -64,17 +90,22 @@ function openLink(destination) {
 .project-home-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 20px; }
 .project-home button { font-size: 11px; }
 .project-home-actions button, .project-more-work { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; color: var(--color-ink-3); }
+.project-home-save-state { color: var(--color-ink-3); font-size: 10px; text-align: right; }
+.project-home-save-error { margin-bottom: 16px; color: var(--color-rem); font-size: 12px; line-height: 1.6; }
+.project-home-save-error button, .project-home-recover { color: var(--color-accent); padding: 5px 0; margin-right: 16px; }
+.project-home-save-error details { margin: 8px 0; color: var(--color-ink); }
+.project-home-project-context { border-top: 1px solid var(--color-rule-light); margin-top: 32px; padding-top: 8px; }
+.project-home-project-context > summary { display: flex; align-items: center; gap: 6px; min-height: 28px; list-style: none; cursor: pointer; color: var(--color-ink-3); font-size: 11px; }
+.project-home-project-context > summary::-webkit-details-marker { display: none; }
+.project-home-project-context[open] > summary > svg { transform: rotate(90deg); }
 .project-home-context { display: flex; align-items: center; gap: 14px; }
 .project-home-actions .project-open-work { color: var(--color-accent); font-weight: 550; }
 .project-home-layout { display: grid; grid-template-columns: minmax(0, 1fr) 235px; align-items: start; gap: 28px; }
 .project-home-content, .project-home-attention { min-width: 0; }
-.project-home-resources { margin-top: 24px; }
 .project-home-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-bottom: 6px; }
 .project-home-section-heading h2 { color: var(--color-ink); font-size: 12px; font-weight: 650; }
 .project-home-section-heading > button { color: var(--color-ink-3); }
-.project-home-muted, .project-home-empty { color: var(--color-ink-3); font-size: 12px; line-height: 1.6; }
-.project-home-empty { padding: 10px 0; }
-.project-home-empty button, .project-home-muted button { color: var(--color-accent); min-height: 28px; }
+.project-home-muted { color: var(--color-ink-3); font-size: 12px; line-height: 1.6; }
 .project-attention-count { color: var(--color-ink-3); font-size: 10px; font-variant-numeric: tabular-nums; }
 .project-attention-row { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 8px; text-align: left; }
 .project-attention-row strong { color: var(--color-ink); font-size: 12px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; }

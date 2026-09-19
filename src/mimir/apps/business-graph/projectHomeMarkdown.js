@@ -21,7 +21,7 @@ const referenceKey = value => markdownText(value).trim().replace(/\s+/g, ' ').to
 
 // Ordinary Markdown owns the page. The Resources section is only a display
 // convention; parsing never rewrites or discards source text.
-export function projectHomeMarkdown(value) {
+export function projectHomeMarkdown(value, { splitResources = true } = {}) {
   const source = String(value || '')
   const nodes = children(markdown.parse(source).topNode)
   const definitions = new Map()
@@ -39,7 +39,7 @@ export function projectHomeMarkdown(value) {
     const level = Number(/(?:ATX|Setext)Heading(\d)/.exec(node.name)?.[1])
     const heading = source.slice(node.from, node.to).replace(/^#+\s*|\s*#+$|\n[=-]+$/g, '').trim().toLowerCase()
     if (level && (!resourceLevel || level <= resourceLevel)) {
-      resourceLevel = ['resources', 'key resources'].includes(heading) ? level : 0
+      resourceLevel = splitResources && ['resources', 'key resources'].includes(heading) ? level : 0
       if (resourceLevel) continue
     }
     if (node.name !== 'LinkReference') (resourceLevel ? resources : brief).push(node)

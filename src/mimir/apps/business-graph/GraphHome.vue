@@ -9,12 +9,13 @@
       </header>
       <p v-if="error" class="graph-home-message" role="status">{{ error }} <button data-graph-control="home-retry" type="button" @click="load">Retry</button></p>
       <p v-else-if="loading && !project" class="graph-home-message" role="status">Loading Project home…</p>
-      <ProjectHome v-if="project" :key="project.id" :project="project" :model-value="project.body"
+      <ProjectHome v-if="project" :key="project.provenance.sourcePath" :project="project" :model-value="draft?.canvas || ''" :draft="draft"
         :scope-ids="graph.activeScopeIds" :graph-revision="graph.status?.graphRevision || 0"
-        @edit="$emit('openNode', project.id)" @open-node="$emit('openNode', $event)" @open-work="openWork"
+        @update:model-value="home.edit(draft, $event)" @save="home.save(draft)"
+        @resolve="home.resolve(draft, $event)" @recover="home.recover(draft)" @edit-context="$emit('openNode', project.id)" @open-node="$emit('openNode', $event)" @open-work="openWork"
         @open-file="openFile" @open-url="openUrl" />
       <div v-else-if="!loading && !error" class="graph-home-empty">
-        <p>Choose a Project above to see its brief, resources, and work.</p>
+        <p>Choose a Project above to see its team canvas, resources, and work.</p>
         <button type="button" data-graph-control="home-link-workspace" @click="$emit('configureWorkspace')">Link a Project to this workspace</button>
       </div>
     </div>
@@ -23,6 +24,7 @@
 
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useProjectHomeStore } from '../../../stores/projectHome.js'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import { getGraphNode } from '../../../services/businessGraph.js'
 import { resolveProjectFile } from '../../../services/workspaceConfig.js'
@@ -33,6 +35,8 @@ import ProjectHome from './ProjectHome.vue'
 const props = defineProps({ active: { type: Boolean, default: true } })
 const emit = defineEmits(['openNode', 'openFile', 'configureWorkspace'])
 const graph = useBusinessGraphStore()
+const home = useProjectHomeStore()
+const draft = computed(() => home.entries[project.value?.provenance?.sourcePath])
 const root = ref(null), project = ref(null), loading = ref(false), error = ref('')
 let generation = 0, loadedWorkspace = ''
 const selectedId = computed(() => graph.homeProjectId || graph.workspaceProjectId)
@@ -57,6 +61,7 @@ async function load() {
     const node = await getGraphNode(id)
     if (request !== generation) return
     if (!node || node.kind !== 'project') throw new Error('This Project is unavailable. Choose another Project above.')
+    home.receive(node)
     project.value = node
     loadedWorkspace = graph.projectRoot
   } catch (cause) {

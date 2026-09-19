@@ -7,6 +7,7 @@ import { EditorView } from '@codemirror/view'
 import WorkbenchApp from './WorkbenchApp.vue'
 import { useFileStore } from '../stores/files.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
+import { useProjectHomeStore } from '../stores/projectHome.js'
 import { useBusinessGraphStore } from '../stores/businessGraph.js'
 
 // Keep the complete Graph -> Activity -> Workbench -> Editor route real.
@@ -101,7 +102,7 @@ describe('Graph Details through Workbench', () => {
     const project = {
       ...structuredClone(source.node), id: 'project-atlas', kind: 'project', title: 'Atlas',
       body: '**Deliverable:** Evidence review.\n\n## Key resources\n\n- [Protocol](https://example.org/protocol)',
-      properties: { projectStatus: 'active' },
+      properties: { projectStatus: 'active', home: { canvas: 'Canvas text.' } },
       provenance: { ...source.node.provenance, sourcePath: '/work/graph/project-atlas.md' },
     }
     const header = '---\ntitle: Atlas\nkind: project\n---\n'
@@ -115,6 +116,11 @@ describe('Graph Details through Workbench', () => {
       }
       if (command === 'graph_source' && args.path === project.provenance.sourcePath) return structuredClone(projectSource)
       if (command === 'graph_get' && args.id === project.id) return structuredClone(project)
+      if (command === 'graph_update' && args.patch.id === project.id) {
+        Object.assign(project.properties, args.patch.setProperties)
+        projectSource.sourceRevision = project.provenance.sourceRevision = 'revision-2'
+        return structuredClone(project)
+      }
       return fallback(command, args)
     })
     wrapper = mount(WorkbenchApp, { attachTo: document.body, global: { plugins: [pinia],
@@ -157,11 +163,16 @@ describe('Graph Details through Workbench', () => {
     expect(wrapper.get('[data-graph-home]').element).toBe(home.element)
     expect(home.element.scrollTop).toBe(180)
     expect(files.currentFile).toBe(taskFile)
-    await wrapper.get('[data-graph-control="project-edit-page"]').trigger('click')
+    const canvas = EditorView.findFromDOM(home.get('.cm-editor').element)
+    canvas.dispatch({ changes: { from: canvas.state.doc.length, insert: ' More text.' } })
     await flushPromises()
-    expect(files.currentFile.path).toBe(project.provenance.sourcePath)
-    expect(wrapper.get('[data-graph-inspector]').find('[data-project-home]').exists()).toBe(false)
-    expect(wrapper.get('[data-graph-markdown-editor]').text()).toContain('Deliverable')
+    const homeStore = useProjectHomeStore()
+    await homeStore.save(homeStore.entries[project.provenance.sourcePath])
+    expect(project.properties.home.canvas).toBe('Canvas text. More text.')
+    expect(project.body).toContain('Evidence review.')
+    expect(files.currentFile).toBe(taskFile)
+    expect(graph.section).toBe('home')
+    expect(home.get('.project-home-project-context').attributes('open')).toBeUndefined()
     expect(wrapper.find('[data-workbench-diagnostic]').exists()).toBe(false)
   })
 

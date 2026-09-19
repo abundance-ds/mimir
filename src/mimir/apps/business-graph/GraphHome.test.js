@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
+import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphHome from './GraphHome.vue'
 
 let graph, wrapper
 const atlas = { id: 'atlas', kind: 'project', title: 'Atlas', body: 'Atlas brief.\n\n## Resources\n\n- [Model](models/base.xlsx)',
-  properties: { projectStatus: 'active' }, provenance: { scopeId: 'team', sourcePath: '/team/graph/atlas.md' } }
-const beta = { ...atlas, id: 'beta', title: 'Beta', body: 'Beta brief.' }
+  properties: { projectStatus: 'active', home: { canvas: 'Atlas canvas.' } }, provenance: { scopeId: 'team', sourcePath: '/team/graph/atlas.md' } }
+const beta = { ...atlas, id: 'beta', title: 'Beta', body: 'Beta canvas.', properties: { home: { canvas: 'Beta canvas.' } }, provenance: { ...atlas.provenance, sourcePath: '/team/graph/beta.md' } }
 beforeEach(() => {
   setActivePinia(createPinia())
   graph = useBusinessGraphStore()
@@ -31,18 +32,18 @@ describe('Home in Main', () => {
   it('shows the workspace Project without opening a document and switches Projects directly', async () => {
     wrapper = mount(GraphHome)
     await flushPromises()
-    expect(wrapper.text()).toContain('Atlas brief.')
+    expect(wrapper.text()).toContain('Atlas canvas.')
     expect(wrapper.emitted('openNode')).toBeUndefined()
     await wrapper.get('[data-home-project]').trigger('click')
     expect(document.querySelector('[data-graph-select-option]').dataset.graphSelectOption).toBe('atlas')
     document.querySelector('[data-graph-select-option="beta"]').click()
     await flushPromises()
-    expect(wrapper.text()).toContain('Beta brief.')
-    expect(wrapper.text()).not.toContain('Atlas brief.')
+    expect(wrapper.text()).toContain('Beta canvas.')
+    expect(wrapper.text()).not.toContain('Atlas canvas.')
     expect(wrapper.emitted('openNode')).toBeUndefined()
     graph.projectRoot = '/another-workspace'
     await flushPromises()
-    expect(wrapper.text()).toContain('Atlas brief.')
+    expect(wrapper.text()).toContain('Atlas canvas.')
     expect(graph.homeProjectId).toBe('')
   })
 
@@ -54,12 +55,12 @@ describe('Home in Main', () => {
     await flushPromises()
     finish(atlas)
     await flushPromises()
-    expect(wrapper.text()).toContain('Beta brief.')
+    expect(wrapper.text()).toContain('Beta canvas.')
     vi.mocked(invoke).mockRejectedValueOnce(new Error('Project read failed'))
     graph.status.graphRevision++
     await flushPromises()
     expect(wrapper.text()).toContain('Project read failed')
-    expect(wrapper.text()).toContain('Beta brief.')
+    expect(wrapper.text()).toContain('Beta canvas.')
     await wrapper.get('[data-graph-control="home-retry"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).not.toContain('Project read failed')
@@ -68,7 +69,7 @@ describe('Home in Main', () => {
   it('resolves Project files and opens Work after including the source scope', async () => {
     wrapper = mount(GraphHome)
     await flushPromises()
-    await wrapper.get('.project-resource-link').trigger('click')
+    wrapper.getComponent(GraphMarkdownEditor).vm.$emit('open-file', 'models/base.xlsx')
     await flushPromises()
     expect(invoke).toHaveBeenCalledWith('workspace_project_file_resolve', {
       projectId: 'atlas', scopeId: 'team', relativePath: 'models/base.xlsx', fallbackWorkspace: '/workspace',
