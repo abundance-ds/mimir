@@ -137,6 +137,11 @@ notary service timed out before upload. Publication used that verified local
 stage. All eight uploaded file sizes and SHA-256 hashes matched the local
 files; no second macOS runner build was needed.
 
+At the user's request, 0.3.3 was rebuilt from `8bc1e49` later that day to
+include the agent launch fix. The tag and all eight release assets were
+replaced. Signing, notarization, and public-file hash checks passed; no further
+GitHub build ran. Existing 0.3.3 installations need the replacement DMG.
+
 ## Dependencies and licenses
 
 After a lockfile, policy, or embedded-asset change:
