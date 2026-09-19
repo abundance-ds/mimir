@@ -13,6 +13,9 @@ and cleanup. `src/stores/files.js` owns open files and save state.
   their draft, source, and link rules. Inspect files before opening; only text
   enters CodeMirror.
 - A single click opens a clean preview; editing or pinning makes it persistent.
+- Text and Graph open commands share a navigation generation. A newer open, tab change,
+  workspace change, or unmount cancels older requests before they can select a
+  file, replace a preview, move the cursor, or restore focus.
 - Project tabs are hidden, not closed, when the workspace changes. Dirty state
   and reviews remain attached to their stable file id.
 - Files outside retained projects and untitled drafts are global. The
@@ -70,12 +73,13 @@ saved version keeps an unknown baseline and remains changed.
 Store-to-editor updates have an explicit origin. A reload does not add an undo
 step. An accepted edit adds a separate undo step. These updates project the
 stored text exactly and do not pass through typing filters. CodeMirror uses
-logical newlines internally; emitted edits use the document's line ending.
-Opening or reading a document does not rewrite its text.
-
-`App.documents.test.js` checks these rules with the real editor and file store,
-including preview replacement, typing during a pending file read, separate
-autosaves, Undo/Redo, reloads, saved text, close decisions, and session snapshots.
+logical newlines internally. Selection and change offsets refer to that text,
+not to the stored string: CRLF takes two characters on disk but one editor
+position. Range edits and previews use CodeMirror's change operations before
+serialization. Emitted edits use the first detected line ending; mixed endings
+are retained on open and normalized to that ending on edit. Opening or reading
+a document does not rewrite its text. Diff views compare logical lines.
+Single-file reviews serialize resolved text with the review's line ending.
 
 Bun applies `patches/style-mod@4.1.3.patch` to both package exports. CodeMirror
 mounts reuse unchanged stylesheet text instead of replacing its text node and
@@ -83,10 +87,50 @@ invalidating styles across the document. New rules and changed rule order still
 update normally. The editor style tests cover both exports and repeated Graph
 mounts. Remove the patch when the dependency provides the same behavior.
 
+## Verification
+
+`App.documents.test.js` uses the real editor and file store with mocked disk
+I/O. It covers preview replacement, per-document Undo/Redo, typing during a
+pending file read, separate autosaves, saved text, session snapshots, and
+reloads. Close tests cover Cancel, discard, failed save, and retry. Line-ending
+tests cover opening, editing, Undo, saving, command replacement, and inline AI
+selection and preview. `merge.test.js` and `DiffView.test.js` cover diff content,
+line endings, and completion in unified and split views.
+File-open tests complete reads in reverse order and cancel pending work during
+navigation. Real batch merge views test rejection, mixed decisions, Accept All
+after a partial rejection, and Undo before completion. Proposal tests delay and
+fail status replies, edit during the wait, retry after tab changes, and retain
+newer reviews.
+
+Run these tests when document identity, draft updates, history, or save timing
+changes. Also run the affected store and composable tests, the production build,
+and `bun run test:scratchpad`. Do not replace these tests with separate editor
+and store mocks; the regression crossed their boundary.
+
+Before closing native verification, use disposable LF and CRLF files in the
+current macOS build. Open previews from the Files sidebar, pin and edit two
+files, switch tabs and projects, and use Cmd+Z and Shift+Cmd+Z in each file.
+Check that an untouched file closes without a prompt, Cancel retains edits,
+and Don't Save causes no later autosave. Save and reopen the files, then restart
+with one unsaved draft and check its recovery. Record the build and results.
+Renderer tests do not prove macOS key routing, native dialogs, or restart.
+This native check remains open in [issues.md](issues.md).
+
 ## Proposal and Git review
 
 - Rust owns proposal lifecycle; the renderer owns presentation and dirty
   buffers. Accept or reject is complete only after `proposal_respond` succeeds.
+- A review retains its original text, proposed text, and current result. Batch
+  chunk decisions update that result before the file is resolved. A result equal
+  to the original is rejected; a mixed decision applies only the retained edits.
+  Accept All and Reject All settle pending files and preserve prior decisions.
+- Single-file acceptance checks the current draft against the review snapshot,
+  then commits the result before reporting it. Rejection keeps the current
+  draft. Status replies never write document text. A failed report retains the
+  decision on its document and offers Retry status, including after a tab switch.
+  Retry reports only unfinished proposal ids and never reapplies the text.
+  The review result is read-only once decided; document edits made during the
+  report remain intact. A completed report clears only the proposals it owns.
 - Text actions require Source for Graph entries. Source-location requests and
   proposal-open actions save Details before changing views; failures keep the
   draft. Review decisions cannot change an unseen rich draft.

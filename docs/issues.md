@@ -5,6 +5,11 @@ task scope.
 
 ## Open
 
+- Editor document changes need a native macOS verification record for sidebar
+  opens, key routing, close decisions, and restart recovery. Follow
+  [Editor verification](editor-system.md#verification) with disposable files;
+  renderer tests do not establish this evidence.
+
 - CLI entry path: running `bin/mimir.mjs` through a symlink path can exit with
   status 0 and no output. The script-entry check compares the raw argument URL
   with the resolved module URL. On macOS, `/tmp` versus `/private/tmp` reproduces

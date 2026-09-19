@@ -57,7 +57,10 @@ resolve to several local workspaces; absolute local paths never enter Team.
 - Offline edits amend one unpublished commit. Published history is never
   squashed or force-pushed; bounded local recovery refs protect rewrites.
 - Different-file changes merge. For a same-file conflict, the later recorded
-  complete file wins and the losing version remains in History.
+  complete file wins and the losing version remains in History. Project Home
+  is the exception: its canvas merges separately from the rest of the Project.
+  When both canvases changed, the later canvas timestamp wins, with commit
+  time as fallback. Both parent versions remain in History.
 - Unpublished work is branch-bound, mutating operations are serialized per
   repository, and a manual ahead commit joins the next push.
 - Team stays mounted while offline. Only actionable failures appear in UI.
@@ -160,7 +163,8 @@ establish native dialog or installed-app behavior.
 ## Inline links and backlinks
 
 In a Graph working note, type `@` and part of an entry title, or use **Link**.
-The same lookup works in the body of a Graph source in the Editor. Ordinary
+The same lookup works in the [Home canvas](#project-home) and in the body of
+a Graph source in the Editor. Ordinary
 Markdown and frontmatter do not enable Graph completion or reference checks.
 The menu shows the title, kind, and scope. Arrow keys select a result;
 Enter inserts it; Escape closes the menu. Lookup ignores case and accents,
@@ -180,13 +184,14 @@ Click a resolved link to open its entry in an Editor tab. Details shows
 the reference in its current view. The previous draft stays in its own tab.
 If the source changed, Mimir finds a current occurrence of that target. If
 none remains, it opens the body without selecting unrelated text.
+Canvas backlinks follow the navigation rules in [Project home](#project-home).
 
 The suggestion menu has a 320 px preferred width, bounded by the pane and
 viewport. Each row separates the title from its kind and scope. The popup
 sits outside clipping containers, stays keyboard-accessible, and follows
 pane resizing.
 
-Rust derives `references` connections from the saved body. Repeated links keep
+Rust derives `references` connections from the saved body and Project canvas. Repeated links keep
 their separate locations but produce one connection. Removing the last link
 removes that connection; undo restores it on save. Explicit relations such as
 Assigned to remain independent. Derived references never enter YAML `links`
@@ -205,7 +210,7 @@ diagnostics report unresolved body targets. Restore rejects an unmounted
 source before writing. Renaming source files outside Mimir changes their IDs.
 
 GraphStore owns the title and reference indexes in memory. Lookup and target
-resolution read those indexes without reading files. A saved body reparses
+resolution read those indexes without reading files. A saved body or canvas reparses
 only that entry; a title edit reuses its parsed references. Watcher events
 reconcile only affected direct `graph/*.md` files across mounted roots, with
 the same duplicate-ID precedence as startup. Unchanged events do not change
@@ -290,18 +295,49 @@ between views and resets when the workspace or its Project link changes.
 If the workspace has no linked Project, Home offers the same selector and a
 direct action to link a Project in workspace settings.
 
-The Project entry's Markdown body holds the brief and ordered resource list.
-A short brief can state the objective, deliverable, current focus, and next
-milestone. A **Key resources** or **Resources** heading marks the resource
-section. Named links open external URLs, workspace files, Team resources, or
-Graph entries. Reference links can use definitions elsewhere in the body.
-Other Markdown sections remain visible. Reading Home never changes the body.
-Raw HTML is shown as text; unsafe URL schemes cannot run.
+Home uses the optional `home.canvas` property in the Project's existing
+Markdown file. It is a Markdown string, separate from the stable Project body.
+There is no new entry kind, file, or resource store. Existing Projects start
+with an empty canvas. The body is never copied into it.
 
-**Edit page**, **Write brief**, and **Edit links** open the Project's normal
-Markdown document in Editor. The existing document owns its draft, save queue,
-errors, and undo. Saving updates Home through the Graph revision. Home itself
-stays in Main. There is no new entry kind or separate dashboard data.
+```yaml
+home:
+  canvas: |
+    Any Markdown the team chooses to put here.
+  updatedAt: '2026-09-19T08:00:00Z'
+  updatedBy:
+    kind: human
+    id: local-human
+    label: You
+    initials: ME
+```
+
+The canvas is always editable in Main. It uses the standard Editor typography,
+syntax colours, live Markdown preview, undo, links, tables, and checkboxes.
+There is no read mode, edit button, start button, or suggested-purpose text.
+Markdown sections and links stay in authored order; no heading has a special
+layout rule. Link text opens its target using the normal Editor behaviour.
+The Project body is in a collapsed **Project context** section below. Its
+**Edit context** action opens the existing Project document in Editor.
+
+Canvas edits autosave after 600 ms. The quiet status shows saving, saved, or
+failed state. Failed and conflicting drafts remain in Home and in the normal
+atomic session snapshot, including on native Quit. Recovery never depends on
+an Editor tab. A canvas conflict shows the saved text and keeps the local draft
+until the user chooses a version. Choosing the saved version keeps the local
+text available through **Restore my previous draft**.
+
+Home writes only its field against a fresh source path and revision. It retries
+independent context changes. Details and Source can also rebase a context-only
+draft over a canvas-only disk change. Other changes keep the normal conflict
+check. Team sync applies the separate-field rule described above; this is not
+a real-time collaborative editor.
+
+Structured Graph writes and Source saves set `home.updatedAt` and
+`home.updatedBy` only when canvas text changes. Direct external file authors
+must maintain these optional fields themselves. Missing metadata produces no
+invented date or author. Search, agent context, and Graph references include
+canvas text. Canvas backlinks open that Project's Home in Main.
 
 **Needs attention** shows up to five open tasks that are waiting, in review,
 overdue, or due today. Each row gives the task title, reason, owner, and due
@@ -312,7 +348,7 @@ The first load orders tasks by urgency. Background updates keep visible tasks
 in place and fill free places. Dates update each minute and on window focus.
 Failures show **Retry**, not an empty result. More tasks link to Work.
 
-The brief and resources sit beside Needs attention in wide panes. Narrow panes
+The canvas sits beside Needs attention in wide panes. Narrow panes
 stack these sections. **Open Work** selects this Project in Work and clears
 search, Owner, Priority, and collapsed status columns. It keeps the Board/List
 view, grouping, sorting, and closed-task preference. Project-filtered Work
@@ -325,7 +361,15 @@ Project selector returns to the selected Project's Home in Main.
 `harness/project-home.html` mounts the production Business Graph app with local
 fixtures. It does not read or write user Graph files. Component and Workbench
 integration tests cover direct Home access without changing Editor, Project
-switching, task/file actions, and the return from Work.
+switching, task/file actions, direct typing, undo, autosave, conflict recovery,
+and the return from Work. Native tests cover canvas metadata, search, links,
+Source rebasing, and two-clone Team sync with both versions retained.
+
+Browser checks on 2026-09-19 used the fixture page in WebKit and Chrome at
+320, 520, 760, and 1000 px. Direct typing, autosave, undo, empty canvases, view
+switching, and horizontal bounds passed. File, web, and Graph links opened
+with one click. These checks do not establish installed-app or two-machine
+sync behaviour.
 
 Opening a listed entry uses its mounted scope to locate the source. Rust
 validates that source and its entry id; a stale path falls back to native

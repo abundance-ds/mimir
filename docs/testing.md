@@ -40,6 +40,7 @@ UPDATE_IPC_FIXTURES=1 cargo test --manifest-path src-tauri/Cargo.toml ipc_fixtur
 | Change | Minimum focused evidence |
 |---|---|
 | Workbench or Editor UI | nearest component/composable/store tests plus production build |
+| Editor document identity, history, or save timing | real editor/store tests and native checks in [Editor verification](editor-system.md#verification) |
 | Activity or terminal lifecycle | renderer Activity tests, native supervisor/launcher tests, live PTY smoke |
 | Command or tool contract | native registry/runtime tests, service tests, command check, CLI smoke |
 | Files or Git | native index/workspace/Git tests and Files/Editor tests |

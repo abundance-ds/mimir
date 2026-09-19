@@ -96,8 +96,8 @@ must never replace or disturb the mounted Editor document and review state.
   rules as session tabs. Unique tools retain their names.
   Close uses Stop and archive for live PTYs, Archive for ended sessions, and
   Close for tools. Editor document tabs remain visible. The setting changes
-  only navigation controls: selection, order, surfaces, and pane layout remain
-  intact. Sidebar width and collapse never change this preference.
+  only navigation controls: selection, saved tab order, surfaces, and pane
+  layout remain intact. Sidebar width and collapse never change this preference.
 - Tabs use a small existing provider/tool icon and a short title. Tabs are
   28 px high, with widths that shrink to fit. Selection adds a quiet background
   without an enclosing border. The label area selects the tab. Close is always visible
@@ -111,8 +111,15 @@ must never replace or disturb the mounted Editor document and review state.
   Errors, unread output, and requests for input have a textual/glyph signal,
   including in All Tabs. Status never reorders tabs.
 - Dragging reorders tabs. The context menu also has Move tab left/right.
-  Cmd/Ctrl+Alt+Left/Right cycles visible tabs in their displayed order. The
-  previous/next Activity navigation history and controls are removed.
+  Cmd/Ctrl+Alt+Left/Right cycles open tabs in the focused panel. When Main tabs
+  are shown, it follows their displayed order. When Main tabs are hidden, it
+  follows Sidebar order: open Tools, then current-project sessions, then the
+  open Files manager. Closed Tools and the Editor Scratchpad are excluded.
+  Other open views without a Sidebar row follow in saved tab order. The
+  Sidebar rail uses the same order as the expanded Sidebar. Navigation wraps
+  at both ends. Open views and selection after closing a Main tab use this
+  same order. Changing the display mode does not change the saved tab order.
+  The previous/next Activity navigation history and controls are removed.
 - Right-click Rename, F2, or double-click on a session label edits its name
   inline, with the full name selected. Enter saves a nonempty trimmed name
   through the existing native rename command. Escape or blur cancels; IME
