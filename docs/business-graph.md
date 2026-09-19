@@ -84,35 +84,34 @@ preserved.
 
 ## Time sheets
 
-A `timesheet` entry stores one person's work for one project and month.
+A `timesheet` stores one person's project work across any dates.
 Use `part_of` for the Project and `assigned_to` for the Person. These links
 remain optional. Graph creation offers Time sheet, and Project details offers
 **Add time sheet**. Graph's kind filter includes **Time sheets**.
 
-The Markdown header stores `period` as `YYYY-MM` and `entries` as a list:
+The Markdown header stores `entries` as a list:
 
 ```yaml
 kind: timesheet
-title: Atlas — September 2026
-period: "2026-09"
+title: Atlas — 2026–2028
 entries:
   - id: time-001
-    date: "2026-09-15"
+    date: "2026-01-15"
     minutes: 90
     description: Test the export
   - id: time-002
-    date: "2026-09-15"
+    date: "2028-12-15"
     minutes: 45
     description: Project meeting
     invoice: "INV-014"
 ```
 
-The body holds free-form notes. Each row has a permanent ID, a valid date
-within the sheet's month, a whole number of minutes from 1 to 1,440, and a
+The body holds free-form notes. Each row has a permanent ID, a valid date,
+a whole number of minutes from 1 to 1,440, and a
 non-empty description. IDs contain letters, digits, underscores, or hyphens;
 the first character is a letter or digit. IDs must be unique within the
 sheet and contain at most 128 characters. A sheet can contain 10,000 rows.
-Unknown sheet and row properties remain intact after Details edits.
+Unknown fields stay intact; old `period` does not restrict dates.
 
 An absent `invoice` means **Open**. A non-empty invoice reference means
 **Invoiced**. This records inclusion on an invoice, not payment or invoice
@@ -120,7 +119,7 @@ creation. Boolean and empty invoice values are invalid. Invoiced rows remain
 editable; the reference does not freeze their amounts or descriptions.
 
 Details shows an editable table and Open, Invoiced, and Total durations.
-The totals cover the complete month and do not change with row filters.
+Totals cover all rows and do not change with row filters.
 **Show** filters All, Open, Invoiced, or one invoice reference. Checkboxes,
 Shift-click, and **Select all shown rows** provide a separate selection total.
 A filter change clears selection. Hidden rows never receive selection actions.
@@ -143,21 +142,21 @@ retains unsaved row values through the normal Graph draft.
 
 **Export selected CSV** exports the selection. With no selection,
 **Export shown CSV** exports the filtered rows. Both use the current draft
-and include project, person, month, exact minutes, duration, invoice, and a
+and include project, person, date, exact minutes, duration, invoice, and a
 calculated total. Invalid sheets cannot export. The export freezes its data
 before the file dialog opens. Authored text cannot become a spreadsheet formula.
 
-Use separate files for each person and month to reduce Team sync conflicts.
+The user and AI choose the span: one month, 36 months, or any other span.
 Sync still resolves conflicts at complete-file level; row selection does not
 change this rule. Totals are calculated and never written into the header.
 Tracker imports and automatic invoice generation are outside this feature.
 
 Native validation and agent writes share tests with renderer validation.
-Component tests cover edits, range selection, filtered export, invoice groups,
-undo after save, and invalid-source recovery. The browser preview is
+Tests cover 36-month sheets, edits, selection, exports, invoices, undo after
+save, and invalid-source recovery. The browser preview is
 `harness/timesheet.html`; it uses fixture data and does not write Graph files.
-Chrome checks covered a 760 px light pane and a 380 px dark pane, row
-selection, invoice assignment, and the resulting totals. These checks do not
+Chrome checks covered years in dates, totals, a 760 px light pane, and a
+380 px dark pane. These checks do not
 establish native dialog or installed-app behavior.
 
 ## Inline links and backlinks

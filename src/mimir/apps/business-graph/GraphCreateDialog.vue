@@ -173,7 +173,6 @@
           </div>
 
           <div v-if="draft.kind === 'timesheet'" class="create-kind-properties">
-            <label><span>Month</span><input v-model="draft.period" data-graph-control="create-time-period" aria-label="Time sheet month" placeholder="YYYY-MM" maxlength="7" pattern="[0-9]{4}-(0[1-9]|1[0-2])" required /></label>
             <label><span>Person</span><GraphSelect v-model="draft.personId" :options="timePeople" variant="property" aria-label="Time sheet person" searchable search-placeholder="Find a person" /></label>
             <label><span>Project</span><GraphSelect v-model="draft.projectId" :options="timeProjects" variant="property" aria-label="Time sheet project" searchable search-placeholder="Find a project" /></label>
           </div>
@@ -277,7 +276,6 @@ import GraphCheckbox from './GraphCheckbox.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphSelect from './GraphSelect.vue'
 import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
-import { localTimeDate, validPeriod } from './timesheet.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -404,7 +402,6 @@ function emptyDraft() {
     companyRole: '',
     entityStatus: 'active',
     teamMember: false,
-    period: localTimeDate().slice(0, 7),
     personId: props.selfPersonId,
     projectId: props.initialProjectId,
   }
@@ -422,7 +419,6 @@ function defaultScope(kind = draft.kind) {
 
 function submit() {
   if (!draft.title.trim() || !draft.scopeId || props.saving) return
-  if (draft.kind === 'timesheet' && !validPeriod(draft.period)) return
   const properties = createProperties()
   emit('create', {
     kind: draft.kind,
@@ -448,7 +444,7 @@ function submit() {
 }
 
 function createProperties() {
-  if (draft.kind === 'timesheet') return { period: draft.period, entries: [] }
+  if (draft.kind === 'timesheet') return { entries: [] }
   if (draft.kind === 'issue') {
     return { status: draft.status, priority: draft.priority }
   }

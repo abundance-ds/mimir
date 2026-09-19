@@ -12,7 +12,7 @@ describe('Business Graph dialogs', () => {
     document.body.innerHTML = ''
   })
 
-  it('creates a time sheet with a month, person, and project', async () => {
+  it('creates a time sheet without a month, with a person and project', async () => {
     wrapper = mount(GraphCreateDialog, {
       attachTo: document.body,
       props: { open: true, initialKind: 'timesheet', initialProjectId: 'atlas', selfPersonId: 'alex',
@@ -22,16 +22,16 @@ describe('Business Graph dialogs', () => {
     })
     await flushPromises()
     const title = document.querySelector('[data-create-title]')
-    title.value = 'Atlas September'; title.dispatchEvent(new Event('input', { bubbles: true }))
-    const period = document.querySelector('[data-graph-control="create-time-period"]')
-    period.value = '2026-09'; period.dispatchEvent(new Event('input', { bubbles: true }))
+    title.value = 'Atlas 2026–2028'; title.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('[data-graph-control="create-time-period"]')).toBeNull()
     await flushPromises()
     document.querySelector('[data-create-submit]').click()
     await flushPromises()
-    expect(wrapper.emitted('create')[0][0]).toMatchObject({ kind: 'timesheet', title: 'Atlas September',
-      properties: { period: '2026-09', entries: [] },
+    expect(wrapper.emitted('create')[0][0]).toMatchObject({ kind: 'timesheet', title: 'Atlas 2026–2028',
+      properties: { entries: [] },
       relations: [{ relation: 'part_of', target: 'atlas' }, { relation: 'assigned_to', target: 'alex' }],
     })
+    expect(wrapper.emitted('create')[0][0].properties).not.toHaveProperty('period')
   })
 
   it('keeps Create link lookup within the active scopes and does not close during IME input', async () => {

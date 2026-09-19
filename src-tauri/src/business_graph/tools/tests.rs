@@ -154,6 +154,7 @@ fn timesheet_tools_round_trip_rows_reject_bad_data_and_check_revisions() {
         .unwrap()
         .value;
     assert_eq!(read["properties"]["entries"][0]["custom"]["keep"], true);
+    assert_eq!(read["properties"]["period"], "2026-09");
     let found = execute_native_tool(&runtime, "graph.find", json!({"kinds":["timesheet"]}))
         .unwrap()
         .value;
@@ -182,6 +183,43 @@ fn timesheet_tools_round_trip_rows_reject_bad_data_and_check_revisions() {
     }
     assert!(!source.contains("total:"));
     assert!(!source.contains("editedDuration"));
+}
+
+#[test]
+fn timesheet_tools_accept_36_months_without_a_period_and_can_extend_the_span() {
+    let (_root, runtime) = fixture();
+    let cases: Vec<Value> =
+        serde_json::from_str(include_str!("../../../tests/fixtures/timesheets.json")).unwrap();
+    let properties = &cases
+        .iter()
+        .find(|case| case["name"] == "36 months in one sheet")
+        .unwrap()["properties"];
+    let created = execute_native_tool(
+        &runtime,
+        "graph.create",
+        json!({
+            "id": "three-years", "kind": "timesheet", "title": "Three years",
+            "scopeId": "project:test", "properties": properties
+        }),
+    )
+    .unwrap()
+    .value;
+    assert_eq!(&created["properties"], properties);
+    let mut entries = created["properties"]["entries"].as_array().unwrap().clone();
+    entries
+        .push(json!({"id":"later", "date":"2030-01-01", "minutes":30, "description":"Follow-up"}));
+    let updated = execute_native_tool(
+        &runtime,
+        "graph.update",
+        json!({
+            "id": "three-years", "expectedRevision": created["provenance"]["sourceRevision"],
+            "setProperties": { "entries": entries }
+        }),
+    )
+    .unwrap()
+    .value;
+    assert_eq!(updated["properties"]["entries"], json!(entries));
+    assert!(updated["properties"].get("period").is_none());
 }
 
 #[test]

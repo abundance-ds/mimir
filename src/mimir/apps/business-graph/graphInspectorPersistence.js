@@ -54,7 +54,6 @@ export function hydrateInspectorDraft(draft, node) {
   draft.teamMember = Boolean(node.properties?.teamMember)
   draft.relations = (node.relations || []).map(edge => ({ ...edge }))
   if (node.kind === 'timesheet') {
-    draft.timePeriod = node.properties?.period ?? ''
     draft.timeRows = hydrateTimeRows(node.properties?.entries)
   }
 

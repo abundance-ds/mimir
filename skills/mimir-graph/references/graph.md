@@ -41,8 +41,8 @@ Companies use `roles` from
 Issue statuses: `backlog plan in-progress waiting review done cancelled`.
 Priorities: `low normal high urgent`.
 
-For `timesheet`, link the project with `part_of` and person with `assigned_to`;
-read `graph_create` and `graph_update` tool help for row rules.
+`timesheet`: any date span; user and AI choose. Project: `part_of`; person: `assigned_to`.
+See `graph_create` and `graph_update` for row rules.
 
 Preferred relations:
 

@@ -7,10 +7,6 @@ export function localTimeDate(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-export function validPeriod(value) {
-  return typeof value === 'string' && /^(?!0000)\d{4}-(0[1-9]|1[0-2])$/.test(value)
-}
-
 export function validTimeDate(value) {
   if (typeof value !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T12:00:00Z`)
@@ -56,10 +52,9 @@ export function timeEntries(rows, { preserveInvalidDuration = false } = {}) {
     : clone(row.entry))
 }
 
-export function timeProblems(period, entries) {
+export function timeProblems(entries) {
   const problems = []
   const add = (row, field, message) => problems.push({ row, field, message })
-  if (!validPeriod(period)) add(null, 'period', 'Enter a month as YYYY-MM.')
   if (!Array.isArray(entries)) {
     add(null, 'entries', 'Time entries must be a list. Repair the list in Source.')
     return problems
@@ -73,7 +68,6 @@ export function timeProblems(period, entries) {
     } else if (ids.has(entry.id)) add(index, 'id', 'Row IDs must be unique. Repair this ID in Source.')
     ids.add(entry.id)
     if (!validTimeDate(entry.date)) add(index, 'date', 'Choose a valid date.')
-    else if (validPeriod(period) && !entry.date.startsWith(`${period}-`)) add(index, 'date', 'Choose a date within this month.')
     if (!Number.isInteger(entry.minutes) || entry.minutes < 1 || entry.minutes > 1440) {
       add(index, 'minutes', 'Enter a duration from 1m to 24h.')
     }
@@ -98,16 +92,16 @@ export function timeTotals(entries, problems = []) {
 
 export function buildTimeProperties(draft, { validate = true } = {}) {
   const entries = timeEntries(draft.timeRows, { preserveInvalidDuration: !validate })
-  const problems = timeProblems(draft.timePeriod, entries)
+  const problems = timeProblems(entries)
   if (validate && problems.length) {
     const first = problems[0]
     throw new Error(`${first.row === null ? '' : `Row ${first.row + 1}: `}${first.message}`)
   }
-  return { period: draft.timePeriod, entries }
+  return { entries }
 }
 
-export function timesheetCsv({ title, project, person, period, entries }) {
-  const problems = timeProblems(period, entries)
+export function timesheetCsv({ title, project, person, entries }) {
+  const problems = timeProblems(entries)
   if (problems.length) throw new Error('Correct the time sheet before exporting it.')
   // Quote every cell and neutralize spreadsheet formulas in authored text.
   const cell = value => {
@@ -116,10 +110,10 @@ export function timesheetCsv({ title, project, person, period, entries }) {
     return `"${text.replaceAll('"', '""')}"`
   }
   const rows = [
-    ['Time sheet', 'Project', 'Person', 'Month', 'Date', 'Work', 'Minutes', 'Duration', 'Invoice'],
-    ...entries.map(entry => [title, project, person, period, entry.date, entry.description,
+    ['Time sheet', 'Project', 'Person', 'Date', 'Work', 'Minutes', 'Duration', 'Invoice'],
+    ...entries.map(entry => [title, project, person, entry.date, entry.description,
       entry.minutes, formatMinutes(entry.minutes), entry.invoice || '']),
-    ['', '', '', '', '', 'Total', entries.reduce((sum, entry) => sum + entry.minutes, 0),
+    ['', '', '', '', 'Total', entries.reduce((sum, entry) => sum + entry.minutes, 0),
       formatMinutes(entries.reduce((sum, entry) => sum + entry.minutes, 0)), ''],
   ]
   return rows.map(row => row.map(cell).join(',')).join('\r\n') + '\r\n'

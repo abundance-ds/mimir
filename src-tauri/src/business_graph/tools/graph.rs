@@ -560,7 +560,7 @@ fn graph_create_properties() -> Value {
         "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "relations": relation_array(),
         "properties": { "type": "object", "additionalProperties": true,
-            "description": "Timesheet: period YYYY-MM; entries [{id, date, minutes, description, invoice?}]. IDs unique/stable; dates within period; minutes integer 1–1440; invoice nonempty reference string (absent=Open)." },
+            "description": "Timesheet: any date span; entries [{id, date, minutes, description, invoice?}]. IDs unique/stable; dates YYYY-MM-DD; minutes integer 1–1440; invoice nonempty reference string (absent=Open)." },
     })
 }
 

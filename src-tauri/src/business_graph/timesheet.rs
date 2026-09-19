@@ -8,15 +8,6 @@ pub(super) fn problems(node: &GraphNode) -> Vec<String> {
         return Vec::new();
     }
     let mut errors = Vec::new();
-    let period = node
-        .properties
-        .get("period")
-        .and_then(|value| value.as_str());
-    let valid_period =
-        period.is_some_and(|value| value.len() == 7 && valid_date(&format!("{value}-01")));
-    if !valid_period {
-        errors.push("Enter a month as YYYY-MM.".into());
-    }
     let Some(entries) = node
         .properties
         .get("entries")
@@ -51,11 +42,7 @@ pub(super) fn problems(node: &GraphNode) -> Vec<String> {
             _ => add("Each row needs a permanent ID. Repair it in Source."),
         }
         match entry.get("date").and_then(|value| value.as_str()) {
-            Some(date) if valid_date(date) => {
-                if valid_period && !date.starts_with(&format!("{}-", period.unwrap_or_default())) {
-                    add("Choose a date within this month.");
-                }
-            }
+            Some(date) if valid_date(date) => {}
             _ => add("Choose a valid date."),
         }
         if !entry

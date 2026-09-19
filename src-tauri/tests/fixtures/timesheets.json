@@ -33,7 +33,7 @@
     "valid": true
   },
   {
-    "name": "missing period",
+    "name": "period not required",
     "properties": {
       "entries": [
         {
@@ -54,10 +54,10 @@
         }
       ]
     },
-    "valid": false
+    "valid": true
   },
   {
-    "name": "bad month",
+    "name": "legacy period is not validated",
     "properties": {
       "period": "2026-13",
       "entries": [
@@ -79,16 +79,16 @@
         }
       ]
     },
-    "valid": false
+    "valid": true
   },
   {
-    "name": "year zero",
+    "name": "row date year zero",
     "properties": {
       "period": "0000-09",
       "entries": [
         {
           "id": "t1",
-          "date": "2026-09-15",
+          "date": "0000-09-15",
           "minutes": 90,
           "description": "Test export",
           "custom": {
@@ -222,7 +222,7 @@
     "valid": false
   },
   {
-    "name": "date outside month",
+    "name": "dates outside legacy period",
     "properties": {
       "period": "2026-09",
       "entries": [
@@ -244,7 +244,7 @@
         }
       ]
     },
-    "valid": false
+    "valid": true
   },
   {
     "name": "zero minutes",
@@ -473,5 +473,275 @@
       ]
     },
     "valid": false
+  },
+  {
+    "name": "36 months in one sheet",
+    "properties": {
+      "entries": [
+        {
+          "id": "span-0",
+          "date": "2026-01-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-1",
+          "date": "2026-02-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-2",
+          "date": "2026-03-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-3",
+          "date": "2026-04-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-4",
+          "date": "2026-05-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-5",
+          "date": "2026-06-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-6",
+          "date": "2026-07-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-7",
+          "date": "2026-08-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-8",
+          "date": "2026-09-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-9",
+          "date": "2026-10-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-10",
+          "date": "2026-11-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-11",
+          "date": "2026-12-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-12",
+          "date": "2027-01-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-13",
+          "date": "2027-02-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-14",
+          "date": "2027-03-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-15",
+          "date": "2027-04-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-16",
+          "date": "2027-05-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-17",
+          "date": "2027-06-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-18",
+          "date": "2027-07-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-19",
+          "date": "2027-08-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-20",
+          "date": "2027-09-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-21",
+          "date": "2027-10-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-22",
+          "date": "2027-11-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-23",
+          "date": "2027-12-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-24",
+          "date": "2028-01-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-25",
+          "date": "2028-02-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-26",
+          "date": "2028-03-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-27",
+          "date": "2028-04-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-28",
+          "date": "2028-05-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-29",
+          "date": "2028-06-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-30",
+          "date": "2028-07-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-31",
+          "date": "2028-08-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-32",
+          "date": "2028-09-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-33",
+          "date": "2028-10-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        },
+        {
+          "id": "span-34",
+          "date": "2028-11-15",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-35",
+          "date": "2028-12-15",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "no maximum date span",
+    "properties": {
+      "entries": [
+        {
+          "id": "span-0",
+          "date": "2000-02-29",
+          "minutes": 60,
+          "description": "Project work"
+        },
+        {
+          "id": "span-1",
+          "date": "2100-12-31",
+          "minutes": 60,
+          "description": "Project work",
+          "invoice": "INV-014"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "empty sheet without period",
+    "properties": {
+      "entries": []
+    },
+    "valid": true
   }
 ]

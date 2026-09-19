@@ -1,4 +1,5 @@
 import { createApp, h, reactive } from 'vue'
+import { createPinia } from 'pinia'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
@@ -18,17 +19,17 @@ const nodes = [
   { id: 'person-alex', kind: 'person', title: 'Alex Rivera' },
 ]
 const node = {
-  id: 'atlas-september', kind: 'timesheet', title: 'Atlas — September 2026', summary: '', tags: [],
-  body: 'Client reference: PO-1042.\n\nInclude a short description of each task in the monthly report.',
+  id: 'atlas-time', kind: 'timesheet', title: 'Atlas — 2026–2028', summary: '', tags: [],
+  body: 'Client reference: PO-1042.\n\nInclude a short description of each task in the report.',
   relations: [{ relation: 'part_of', target: 'project-atlas' }, { relation: 'assigned_to', target: 'person-alex' }],
-  properties: { period: '2026-09', entries: [
-    { id: 't1', date: '2026-09-14', minutes: 120, description: 'Review the export requirements', invoice: 'INV-014' },
+  properties: { entries: [
+    { id: 't1', date: '2026-01-14', minutes: 120, description: 'Review the export requirements', invoice: 'INV-014' },
     { id: 't2', date: '2026-09-14', minutes: 45, description: 'Project meeting', invoice: 'INV-014' },
-    { id: 't3', date: '2026-09-15', minutes: 90, description: 'Test the export' },
+    { id: 't3', date: '2027-09-15', minutes: 90, description: 'Test the export' },
     { id: 't4', date: '2026-09-15', minutes: 30, description: 'Review client comments' },
-    { id: 't5', date: '2026-09-16', minutes: 75, description: 'Correct the date format' },
+    { id: 't5', date: '2028-12-16', minutes: 75, description: 'Correct the date format' },
   ] },
-  provenance: { scopeId: 'team:main', scopeKind: 'team', sourceRevision: 'fixture', sourcePath: '/preview/graph/atlas-september.md' },
+  provenance: { scopeId: 'team:main', scopeKind: 'team', sourceRevision: 'fixture', sourcePath: '/preview/graph/atlas-time.md' },
 }
 const file = reactive({ id: 'preview', kind: 'graph', path: node.provenance.sourcePath,
   dirty: false, saveState: 'idle', graph: graphDocumentState({ node, sourceRevision: 'fixture', bodyFrom: 0 }) })
@@ -46,4 +47,4 @@ createApp({ setup() {
       },
     }),
   ])
-} }).mount('#app')
+} }).use(createPinia()).mount('#app')

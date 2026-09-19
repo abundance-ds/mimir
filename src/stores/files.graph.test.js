@@ -97,10 +97,11 @@ describe('Graph document lifecycle', () => {
     files.graphDraftChanged(file)
     await files.setGraphView(file, 'source')
     expect(updateGraphNode).toHaveBeenLastCalledWith(expect.objectContaining({ expectedSourcePath: path,
-      expectedRevision: 'r0', setProperties: { period: '2026-09', entries: [
+      expectedRevision: 'r0', setProperties: { entries: [
         { id: 't1', date: '2026-09-15', minutes: 120, description: 'Review', invoice: 'INV-014' },
       ] },
     }))
+    expect(disk.get(path).node.properties.period).toBe('2026-09')
     expect(file.kind).toBe('text')
     await files.setGraphView(file, 'details')
     expect(file.graph.draft.timeRows[0].duration).toBe('2h')

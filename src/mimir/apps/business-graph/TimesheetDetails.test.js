@@ -5,6 +5,9 @@ import { graphDocumentState } from '../../../stores/graphDocuments.js'
 import { hydrateInspectorDraft, buildInspectorSave } from './graphInspectorPersistence.js'
 import GraphInspector from './GraphInspector.vue'
 import GraphSelect from './GraphSelect.vue'
+import GraphDatePicker from './GraphDatePicker.vue'
+import { localTimeDate } from './timesheet.js'
+import cases from '../../../../src-tauri/tests/fixtures/timesheets.json'
 import { exportTimesheetCsv } from '../../../services/timesheetExport.js'
 
 vi.mock('../../../services/timesheetExport.js', () => ({ exportTimesheetCsv: vi.fn(async () => true) }))
@@ -111,11 +114,33 @@ describe('Time sheet Details', () => {
     await control('add').trigger('click')
     const row = file.graph.draft.timeRows.at(-1)
     expect(row.entry.id).toMatch(/^time-/)
-    expect(row.entry.date).toMatch(/^2026-09-/)
+    expect(row.entry.date).toBe(localTimeDate())
     expect(row.entry.minutes).toBeNull()
     expect(() => payload()).toThrow('duration')
     await control(`duration-${row.entry.id}`).setValue('15m')
     await control(`work-${row.entry.id}`).setValue('Review')
     expect(payload().setProperties.entries.at(-1).minutes).toBe(15)
+  })
+  it('edits and exports one sheet across 36 months with no month field', async () => {
+    const entries = structuredClone(cases.find(item => item.name === '36 months in one sheet').properties.entries)
+    const { wrapper, control, payload } = setup({ title: 'Atlas 2026–2028', properties: { entries } })
+    expect(wrapper.find('[data-graph-control="time-period"]').exists()).toBe(false)
+    expect(wrapper.get('[data-time-total]').text()).toBe('36h')
+    expect(wrapper.findAll('[data-time-row]')).toHaveLength(36)
+    expect(wrapper.get('[data-time-row="span-0"]').text()).toContain('2026')
+    expect(wrapper.get('[data-time-row="span-35"]').text()).toContain('2028')
+    wrapper.getComponent(GraphDatePicker).vm.$emit('update:modelValue', '2025-12-31')
+    await flushPromises()
+    expect(payload().setProperties.entries[0].date).toBe('2025-12-31')
+    await control('export').trigger('click')
+    const [name, csv] = vi.mocked(exportTimesheetCsv).mock.calls.at(-1)
+    expect(name).toBe('Atlas 2026–2028')
+    expect(csv).toContain('2025-12-31')
+    expect(csv).toContain('2028-12-15')
+    expect(csv).toContain('"Total","2160","36h"')
+    await filter(wrapper, 'open')
+    await control('select-all').trigger('click')
+    expect(wrapper.get('[data-time-selected]').text()).toContain('18 rows · 18h')
+    expect(wrapper.get('[data-time-total]').text()).toBe('36h')
   })
 })

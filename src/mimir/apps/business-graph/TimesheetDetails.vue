@@ -21,16 +21,9 @@
             :aria-label="`Open person: ${displayTitle(relatedTarget(draft.assigneeId))}`" @click="openRelated(draft.assigneeId)"><IconArrowUpRight :size="14" /></button>
         </div>
       </div>
-      <label>
-        <span class="time-label">Month</span>
-        <input :value="draft.timePeriod" data-graph-control="time-period" aria-label="Time sheet month"
-          placeholder="YYYY-MM" maxlength="7" autocorrect="off" autocapitalize="off" spellcheck="false"
-          :aria-invalid="problems.some(problem => problem.field === 'period')"
-          @input="updateDraft('timePeriod', $event.target.value)" />
-      </label>
     </div>
 
-    <div class="time-totals" aria-label="Month totals" aria-live="polite">
+    <div class="time-totals" aria-label="Time sheet totals" aria-live="polite">
       <span>Open <strong data-time-open>{{ formatMinutes(totals.open) }}</strong></span>
       <span>Invoiced <strong data-time-invoiced>{{ formatMinutes(totals.invoiced) }}</strong></span>
       <span>Total <strong data-time-total>{{ formatMinutes(totals.total) }}</strong></span>
@@ -55,7 +48,7 @@
 
     <div v-if="editableRows" class="time-table-scroll" tabindex="0" aria-label="Time rows">
       <table>
-        <caption class="sr-only">Work recorded for {{ draft.timePeriod }}</caption>
+        <caption class="sr-only">Recorded work</caption>
         <colgroup><col class="time-check-col" /><col class="time-date-col" /><col /><col class="time-duration-col" /><col class="time-invoice-col" /><col class="time-actions-col" /></colgroup>
         <thead><tr>
           <th scope="col"><button type="button" role="checkbox" :aria-checked="allSelected ? 'true' : selectedRows.length ? 'mixed' : 'false'"
@@ -105,7 +98,7 @@
       </table>
     </div>
     <div class="time-tools">
-      <button type="button" data-graph-control="time-add" :disabled="!editableRows || !validPeriod(draft.timePeriod) || entries.length >= MAX_TIME_ROWS" @click="add"><IconPlus :size="14" />Add row</button>
+      <button type="button" data-graph-control="time-add" :disabled="!editableRows || entries.length >= MAX_TIME_ROWS" @click="add"><IconPlus :size="14" />Add row</button>
       <span class="time-spacer" />
       <button type="button" data-graph-control="time-export" :disabled="Boolean(problems.length) || exporting" @click="exportCsv">{{ selectedRows.length ? 'Export selected CSV' : 'Export shown CSV' }}</button>
     </div>
@@ -134,7 +127,7 @@ import GraphDatePicker from './GraphDatePicker.vue'
 import GraphSelect from './GraphSelect.vue'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 import { exportTimesheetCsv } from '../../../services/timesheetExport.js'
-import { MAX_TIME_ROWS, formatMinutes, hydrateTimeRows, isTimeRow, localTimeDate, timeEntries, timeProblems, timeTotals, timesheetCsv, validPeriod, validTimeDate } from './timesheet.js'
+import { MAX_TIME_ROWS, formatMinutes, hydrateTimeRows, isTimeRow, localTimeDate, timeEntries, timeProblems, timeTotals, timesheetCsv, validTimeDate } from './timesheet.js'
 
 const { draft, viewState, projectOptions, personOptions, relatedTarget, displayTitle, openRelated, changed, updateDraft, emit } = inject(GRAPH_INSPECTOR_CONTEXT)
 const sheetRoot = ref(null)
@@ -145,7 +138,7 @@ const invoiceOpen = ref(false), invoiceReference = ref(''), invoiceInput = ref(n
 const exporting = ref(false), exportError = ref(''), notice = ref('')
 let editKey = ''
 const entries = computed(() => timeEntries(draft.value.timeRows))
-const problems = computed(() => timeProblems(draft.value.timePeriod, entries.value))
+const problems = computed(() => timeProblems(entries.value))
 const generalProblems = computed(() => problems.value.filter(problem => problem.row === null))
 const editableRows = computed(() => Array.isArray(draft.value.timeRows) && !problems.value.some(problem => ['id', 'entry'].includes(problem.field)))
 const totals = computed(() => timeTotals(entries.value, problems.value))
@@ -165,13 +158,13 @@ const selectedOpen = computed(() => selectedRows.value.filter(item => !item.row.
 const selectedInvoiced = computed(() => selectedRows.value.filter(item => item.row.entry.invoice))
 const selectedTotal = computed(() => {
   const selected = timeEntries(selectedRows.value.map(item => item.row))
-  return timeTotals(selected, timeProblems(draft.value.timePeriod, selected))
+  return timeTotals(selected, timeProblems(selected))
 })
 const allSelected = computed(() => visibleRows.value.length > 0 && selectedRows.value.length === visibleRows.value.length)
-const fingerprint = () => JSON.stringify([draft.value.timePeriod, entries.value])
+const fingerprint = () => JSON.stringify(entries.value)
 
 // Undo belongs to this tab. Source and external replacements invalidate it.
-watch(() => JSON.stringify([draft.value.timePeriod, entries.value]), value => {
+watch(fingerprint, value => {
   if (state.expected !== null && state.expected !== value) { state.undo = []; state.redo = []; editKey = '' }
   state.expected = value
 }, { immediate: true, flush: 'post' })
@@ -182,7 +175,7 @@ watch(() => visibleRows.value.map(item => item.row.entry.id), ids => {
 })
 
 function problemFor(index, field) { return problems.value.find(problem => problem.row === index && problem.field === field)?.message || '' }
-function shortDate(value) { return validTimeDate(value) ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`)) : 'Choose date' }
+function shortDate(value) { return validTimeDate(value) ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T12:00:00`)) : 'Choose date' }
 function remember(key = '') {
   if (!key || key !== editKey) {
     state.undo.push(clone(draft.value.timeRows))
@@ -207,7 +200,7 @@ async function add() {
   state.filter = ''
   const today = localTimeDate()
   const id = `time-${crypto.randomUUID()}`
-  draft.value.timeRows.push(...hydrateTimeRows([{ id, date: today.startsWith(draft.value.timePeriod) ? today : `${draft.value.timePeriod}-01`, minutes: null, description: '' }]))
+  draft.value.timeRows.push(...hydrateTimeRows([{ id, date: today, minutes: null, description: '' }]))
   finish()
   await nextTick()
   sheetRoot.value?.querySelector(`[data-graph-control="time-work-${id}"]`)?.focus()
@@ -272,10 +265,10 @@ async function exportCsv() {
   exporting.value = true; exportError.value = ''
   try {
     // Freeze the reviewed rows before opening the native file dialog.
-    const content = timesheetCsv({ title: draft.value.title, period: draft.value.timePeriod,
+    const content = timesheetCsv({ title: draft.value.title,
       project: relatedTarget(draft.value.projectId)?.title || '', person: relatedTarget(draft.value.assigneeId)?.title || '',
       entries: timeEntries((selectedRows.value.length ? selectedRows.value : visibleRows.value).map(item => item.row)) })
-    if (await exportTimesheetCsv(`${draft.value.title}-${draft.value.timePeriod}`, content)) notice.value = 'CSV exported.'
+    if (await exportTimesheetCsv(draft.value.title, content)) notice.value = 'CSV exported.'
   } catch (cause) { exportError.value = String(cause?.message || cause) }
   finally { exporting.value = false }
 }
@@ -290,7 +283,7 @@ function onKeydown(event) {
 
 <style scoped>
 .time-sheet { margin-top: 14px; color: var(--color-ink-2); font-size: 12px; }
-.time-properties { display: grid; grid-template-columns: 1fr 1fr 104px; gap: 12px; align-items: start; }
+.time-properties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 .time-properties > *, .time-relation > :first-child { min-width: 0; }
 .time-label { color: var(--color-ink-3); font-size: 11px; }
 .time-properties .time-label { display: block; margin-bottom: 3px; }
@@ -312,7 +305,7 @@ function onKeydown(event) {
 .time-spacer { flex: 1; }
 .time-table-scroll { overflow-x: auto; }
 table { width: 100%; min-width: 530px; border-collapse: collapse; table-layout: fixed; }
-.time-check-col { width: 28px; }.time-date-col { width: 94px; }.time-duration-col { width: 88px; }.time-invoice-col { width: 96px; }.time-actions-col { width: 52px; }
+.time-check-col { width: 28px; }.time-date-col { width: 118px; }.time-duration-col { width: 88px; }.time-invoice-col { width: 96px; }.time-actions-col { width: 52px; }
 th { height: 30px; color: var(--color-ink-3); font-size: 11px; font-weight: 600; text-align: left; }
 td { padding: 3px 1px; border-top: 1px solid var(--color-rule-light); vertical-align: top; }
 td small { display: block; padding: 2px 4px; font-size: 10px; }
@@ -332,5 +325,4 @@ tbody tr.is-selected { background: var(--color-accent-soft); }
 .time-invoice-form button[type="submit"] { background: var(--color-accent); color: var(--color-accent-ink); }
 .time-error { color: var(--color-rem); font-size: 11px; line-height: 1.5; margin: 5px 0; overflow-wrap: anywhere; }
 .time-notice { color: var(--color-ink-3); font-size: 11px; margin: 5px 0; }
-@container graph-document (max-width: 420px) { .time-properties { grid-template-columns: 1fr 1fr; } .time-properties > label { grid-column: 1 / -1; max-width: 120px; } }
 </style>
