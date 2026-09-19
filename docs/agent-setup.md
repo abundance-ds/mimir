@@ -3,6 +3,10 @@
 Mimir detects Codex, Claude, Pi, and Gemini from the login-shell `PATH`.
 Presets live in `~/.mimir/launchers.json` and preserve exact argv, environment,
 and `workspace`, `home`, or custom working-directory policy.
+On macOS and Linux, skill preparation and the agent process also use the
+login-shell `PATH`, so they can find runtimes such as Node when Mimir starts
+from the desktop. An explicit preset `env.PATH` takes precedence. Mimir adds
+`~/.mimir/bin` to either path.
 
 ## Connection
 

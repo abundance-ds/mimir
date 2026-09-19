@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -413,11 +413,7 @@ pub fn resolve_launch(
 
     let mut environment = preset.env.clone();
     let inherited_path = std::env::var_os("PATH");
-    let current_path = environment
-        .get("PATH")
-        .map(OsStr::new)
-        .or(inherited_path.as_deref());
-    let path = crate::mimir_cli::path_with_mimir_at(home_path, current_path)?;
+    let path = launcher_path(preset, home_path, default_shell, inherited_path.as_deref())?;
     environment.insert("PATH".into(), path.to_string_lossy().into_owned());
     environment.insert("MIMIR_MCP_URL".into(), mcp_url.to_string());
     let mut args = preset.args.clone();
@@ -457,6 +453,69 @@ pub fn resolve_launch(
         cwd,
         env: environment,
     })
+}
+
+fn launcher_path(
+    preset: &LauncherPreset,
+    home: &Path,
+    shell: &Path,
+    inherited_path: Option<&OsStr>,
+) -> Result<OsString, String> {
+    if let Some(path) = preset.env.get("PATH") {
+        return crate::mimir_cli::path_with_mimir_at(home, Some(OsStr::new(path)));
+    }
+    // Desktop apps can inherit a PATH that omits Homebrew and version managers.
+    // Skill preparation and the agent child need the login-shell PATH used for
+    // detection, including the runtime behind an /usr/bin/env shebang.
+    #[cfg(not(windows))]
+    if preset.kind == LauncherKind::Agent {
+        let path = login_shell_path(shell, inherited_path)?;
+        return crate::mimir_cli::path_with_mimir_at(home, Some(&path));
+    }
+    #[cfg(windows)]
+    let _ = shell;
+    crate::mimir_cli::path_with_mimir_at(home, inherited_path)
+}
+
+#[cfg(not(windows))]
+fn login_shell_flag(shell: &Path) -> &'static str {
+    match shell.file_name().and_then(|name| name.to_str()) {
+        Some("sh" | "dash") => "-lc",
+        _ => "-lic",
+    }
+}
+
+#[cfg(not(windows))]
+fn login_shell_path(shell: &Path, inherited_path: Option<&OsStr>) -> Result<OsString, String> {
+    let mut command = Command::new(shell);
+    // NUL boundaries exclude profile output. printenv reads the exported PATH,
+    // including shells such as fish that represent PATH as an array internally.
+    command.args([
+        login_shell_flag(shell),
+        "printf '\\0'; /usr/bin/printenv PATH && printf '\\0'",
+    ]);
+    if let Some(path) = inherited_path {
+        command.env("PATH", path);
+    } else {
+        command.env_remove("PATH");
+    }
+    let output = command
+        .output()
+        .map_err(|error| format!("Could not read the login-shell PATH: {error}"))?;
+    if !output.status.success() {
+        return Err("Could not read the login-shell PATH: the shell command failed.".into());
+    }
+    let mut fields = output.stdout.split(|byte| *byte == 0);
+    let _ = fields.next();
+    let path = fields.next().filter(|path| !path.is_empty());
+    let path = path
+        .filter(|_| fields.next().is_some())
+        .ok_or_else(|| "The login shell returned no PATH.".to_string())?;
+    let path = path.strip_suffix(b"\n").unwrap_or(path);
+    if path.is_empty() {
+        return Err("The login shell returned an empty PATH.".into());
+    }
+    Ok(OsString::from(String::from_utf8_lossy(path).into_owned()))
 }
 
 fn append_scratchpad_args(
@@ -1033,20 +1092,12 @@ pub(crate) fn detect_binary(binary: &str) -> Result<String, String> {
 
     #[cfg(not(windows))]
     let output = {
-        let shell = std::env::var_os("SHELL")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/bin/sh"));
-        let shell_name = shell
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("sh");
-        let flag = if matches!(shell_name, "sh" | "dash") {
-            "-lc"
-        } else {
-            "-lic"
-        };
+        let shell = default_shell_path();
         Command::new(&shell)
-            .args([flag, &format!("command -v -- {}", shell_quote(binary))])
+            .args([
+                login_shell_flag(&shell),
+                &format!("command -v -- {}", shell_quote(binary)),
+            ])
             .output()
     };
 
@@ -1312,6 +1363,123 @@ mod tests {
         assert_eq!(shell_quote("not'valid"), "'not'\"'\"'valid'");
     }
 
+    #[cfg(unix)]
+    fn write_executable(path: &Path, source: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(path, source).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_launch_finds_node_for_skills_and_agent_through_login_shell() {
+        let home = tempdir().unwrap();
+        let bin = home.path().join(".mimir/bin");
+        let runtime = home.path().join("runtime with spaces");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&runtime).unwrap();
+        write_executable(&bin.join("mimir"), "#!/usr/bin/env node\n");
+        let agent = home.path().join("codex");
+        write_executable(&agent, "#!/usr/bin/env node\n");
+        write_executable(
+            &runtime.join("node"),
+            "#!/bin/sh\ncase \"$1\" in\n*/mimir) printf '{}\\n';;\n*) printf 'agent started\\n';;\nesac\n",
+        );
+        let shell = home.path().join("login-shell");
+        write_executable(
+            &shell,
+            &format!(
+                "#!/bin/sh\nprintf 'profile output\\n'\nexport PATH={}\n/bin/sh -c \"$2\"\nresult=$?\nprintf 'logout output\\n'\nexit \"$result\"\n",
+                shell_quote(runtime.to_str().unwrap())
+            ),
+        );
+        let sparse_env = BTreeMap::from([("PATH".into(), bin.to_string_lossy().into_owned())]);
+        assert!(prepare_agent_skills("codex", home.path(), home.path(), &sparse_env).is_err());
+        assert_eq!(
+            login_shell_path(&shell, Some(bin.as_os_str())).unwrap(),
+            runtime.as_os_str()
+        );
+
+        let mut preset = default_config().presets[0].clone();
+        preset.binary = Some(agent.to_string_lossy().into_owned());
+        preset.cwd = WorkingDirectory::Home;
+        let launch = resolve_launch(
+            &preset,
+            &[],
+            None,
+            home.path(),
+            &shell,
+            DEFAULT_MIMIR_MCP_URL,
+        )
+        .unwrap();
+        assert_eq!(
+            std::env::split_paths(launch.env.get("PATH").unwrap()).collect::<Vec<_>>(),
+            vec![bin, runtime]
+        );
+        let child = Command::new(&launch.command)
+            .args(&launch.args)
+            .envs(&launch.env)
+            .current_dir(&launch.cwd)
+            .output()
+            .unwrap();
+        assert!(child.status.success());
+        assert_eq!(child.stdout, b"agent started\n");
+    }
+
+    #[test]
+    fn explicit_path_and_terminal_path_do_not_require_a_login_shell() {
+        let home = tempdir().unwrap();
+        let inherited = home.path().join("inherited bin");
+        let explicit = home.path().join("explicit bin");
+        let missing_shell = home.path().join("missing-shell");
+        let mut preset = default_config().presets[0].clone();
+        preset
+            .env
+            .insert("PATH".into(), explicit.to_string_lossy().into_owned());
+        let path = launcher_path(
+            &preset,
+            home.path(),
+            &missing_shell,
+            Some(inherited.as_os_str()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<_>>(),
+            vec![home.path().join(".mimir/bin"), explicit]
+        );
+
+        preset.env.clear();
+        preset.kind = LauncherKind::Terminal;
+        let path = launcher_path(
+            &preset,
+            home.path(),
+            &missing_shell,
+            Some(inherited.as_os_str()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<_>>(),
+            vec![home.path().join(".mimir/bin"), inherited]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn login_shell_path_rejects_failed_or_incomplete_output() {
+        let home = tempdir().unwrap();
+        let shell = home.path().join("login-shell");
+        for source in [
+            "#!/bin/sh\nexit 1\n",
+            "#!/bin/sh\nprintf 'profile output\\n'\n",
+            "#!/bin/sh\nprintf '\\0/missing-end'\n",
+            "#!/bin/sh\nprintf '\\0\\n\\0'\n",
+            "#!/bin/sh\nprintf '\\0/valid/path\\n\\0'; exit 1\n",
+        ] {
+            write_executable(&shell, source);
+            assert!(login_shell_path(&shell, Some(OsStr::new("/usr/bin:/bin"))).is_err());
+        }
+    }
+
     #[test]
     fn resolves_exact_argv_and_workspace_without_shell_strings() {
         let directory = tempdir().unwrap();
@@ -1333,7 +1501,7 @@ mod tests {
             &detected,
             Some(directory.path().to_str().unwrap()),
             directory.path(),
-            Path::new("/bin/zsh"),
+            Path::new("/bin/sh"),
             "http://127.0.0.1:29999/mcp",
         )
         .unwrap();
