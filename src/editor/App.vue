@@ -381,6 +381,7 @@ import { useCommentsStore } from '../stores/comments.js'
 import { useEditorProposalLifecycle } from './composables/useEditorProposalLifecycle.js'
 import { useEditorNativeLifecycle } from './composables/useEditorNativeLifecycle.js'
 import { useEditorSessionLifecycle } from './composables/useEditorSessionLifecycle.js'
+import { createNavigationGuard } from './navigationGuard.js'
 import { useEditorCommandApi } from './composables/useEditorCommandApi.js'
 import { useScratchpadEditor } from './composables/useScratchpadEditor.js'
 import ScratchpadBar from './components/workspace/ScratchpadBar.vue'
@@ -489,7 +490,7 @@ const isGraphSource = computed(() => currentFile.value?.kind === 'text' && Boole
 const editorSurfaceRef = computed(() => isGraphDetails.value ? null : textSurfaceRef.value)
 const graphViewError = ref('')
 const graphViewBusy = ref(false)
-let graphOpenGeneration = 0
+const editorNavigation = createNavigationGuard()
 let graphClosePending = false
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
@@ -498,7 +499,7 @@ const browserOpening = ref(false)
 const browserOpenError = ref('')
 watch(() => props.workspacePath, (path, previous) => {
   if (path === previous) return
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   inlineAIState.value = null
   selectionText.value = ''
 })
@@ -1060,7 +1061,7 @@ async function requestEditorWindowClose(options) {
 }
 
 async function closeEditorTab(index) {
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   const tab = displayTabs.value[index]
   const file = tab?.type === 'file' ? openFiles.value[tab.fileIndex] : null
   if (file?.meta?.scratchpad) {
@@ -1084,7 +1085,7 @@ function closeActiveEditorTab() {
 }
 
 function prepareWorkspaceSwitch() {
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   flushEditorContent({ bridge: 'flush' })
   if (gitReview.workspacePath && gitReview.workspacePath !== props.workspacePath) {
     gitReview.clearWorkspace()
@@ -1105,20 +1106,20 @@ function restoreEditorFocus() {
 }
 
 function selectEditorTab(index) {
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   const tab = displayTabs.value[index]
   onSelectTab(index)
   if (tab?.type === 'file') restoreEditorFocus()
 }
 
 function createBlankFile() {
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   onNewFile()
   restoreEditorFocus()
 }
 
 function openNewTabPage() {
-  graphOpenGeneration += 1
+  editorNavigation.cancel()
   gitReviewTabActive.value = false
   flushEditorContent({ bridge: 'flush' })
   fileManager.newTab()
@@ -1536,19 +1537,8 @@ async function onInlineCommentAction({ type, id, text, replyId }) {
   return { ok: false, error: `Unknown comment action: ${type}` }
 }
 
-function onScrollToLine(lineNumber) {
-  if (!editorSurfaceRef.value) return
-  const content = currentEditorContent()
-  const lines = content.split('\n')
-  let pos = 0
-  for (let i = 0; i < lineNumber - 1 && i < lines.length; i++) {
-    pos += lines[i].length + 1
-  }
-  editorSurfaceRef.value.scrollToPos(pos)
-}
-
 function buildSelectionContext(sel) {
-  const doc = editorSurfaceRef.value?.getContent?.() || ''
+  const doc = editorSurfaceRef.value?.getView()?.state.doc.toString() || ''
   return {
     ...sel,
     coords: sel.coords || editorSurfaceRef.value?.coordsAtPos(sel.to) || null,
@@ -1558,7 +1548,7 @@ function buildSelectionContext(sel) {
 }
 
 function getDocumentForInlineAI() {
-  const content = editorSurfaceRef.value?.getContent?.() || ''
+  const content = currentEditorContent()
   const path = currentFile.value?.path || null
   const title = path ? basename(path) : 'Untitled'
   return { content, path, title, documentId: documentIdFromPath(path) }
@@ -1597,9 +1587,9 @@ function onInlineAIApply(replacement, from, to) {
 }
 
 function onInlineAIActivateDiff({ replacement, from, to }) {
-  const content = editorSurfaceRef.value?.getContent?.() || ''
-  const modified = content.slice(0, from) + replacement + content.slice(to)
-  activateDiffForCurrentFile(content, modified, { review: { type: 'inline-ai' } })
+  const modified = editorSurfaceRef.value?.previewEdit(from, to, replacement)
+  if (modified == null) return
+  activateDiffForCurrentFile(currentEditorContent(), modified, { review: { type: 'inline-ai' } })
 }
 
 function onInlineAIDeactivateDiff() {
@@ -1645,7 +1635,7 @@ const editorCommands = useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
-  onNavigateIntent: () => { graphOpenGeneration += 1 },
+  navigation: editorNavigation,
 })
 const {
   mimirActive,
@@ -1685,8 +1675,7 @@ async function setGraphView(view) {
 }
 
 async function mimirOpenGraph(request) {
-  const generation = ++graphOpenGeneration
-  const isCurrent = () => generation === graphOpenGeneration && !editorDisposed
+  const isCurrent = editorNavigation.begin()
   const target = typeof request === 'string' ? { id: request } : request
   if (!target?.id) throw new Error('An entry id is required.')
   flushEditorContent({ bridge: 'flush' })
@@ -2032,6 +2021,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   editorDisposed = true
+  editorNavigation.cancel()
   // Synchronize the latest CodeMirror transaction before canceling its
   // debounce and before any replacement HMR instance reads the shared store.
   flushEditorContent({ bridge: 'unmount' })

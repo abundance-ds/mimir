@@ -79,7 +79,12 @@
     >{{ diff.reviewError }}</span>
 
     <!-- Actions (both modes) -->
-    <template v-if="isHistory">
+    <template v-if="diff.decision">
+      <button class="diff-action-btn accept" :disabled="diff.decision.pending" @mousedown.prevent
+        @click="emit(diff.decision.status === 'applied' ? 'accept-all' : 'reject-all')"
+      >{{ diff.decision.pending ? 'Updating status…' : 'Retry status' }}</button>
+    </template>
+    <template v-else-if="isHistory">
       <span class="history-label">{{ historyLabel }}</span>
       <button class="diff-action-btn cancel" @mousedown.prevent @click="emit('reject-all')">Cancel</button>
       <button class="diff-action-btn accept" @mousedown.prevent @click="emit('accept-all')">Restore</button>

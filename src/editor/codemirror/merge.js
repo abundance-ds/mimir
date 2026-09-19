@@ -1,6 +1,6 @@
 import { Compartment, Text, EditorState } from '@codemirror/state'
 import { EditorView, ViewPlugin, lineNumbers, keymap } from '@codemirror/view'
-import { unifiedMergeView, MergeView, getChunks, getOriginalDoc, updateOriginalDoc, mergeViewSiblings } from '@codemirror/merge'
+import { unifiedMergeView, MergeView, getChunks, getOriginalDoc, updateOriginalDoc } from '@codemirror/merge'
 import { history, historyKeymap, undo, redo, invertedEffects } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
@@ -10,6 +10,11 @@ import { commentConcealment } from './comments.js'
 
 const mergeViewCompartment = new Compartment()
 const diffConfig = { scanLimit: 5000 }
+
+export function resolvedDiffContent(doc, modified, original = '') {
+  const lineEnding = modified.match(/\r\n?|\n/)?.[0] || original.match(/\r\n?|\n/)?.[0] || '\n'
+  return doc.sliceString(0, doc.length, lineEnding)
+}
 
 const sharedDiffExtensions = [
   editorTheme,
@@ -28,6 +33,7 @@ function chunkWatcherPlugin(onAllResolved, onChunkCountChange) {
   let hadChunks = false
 
   return ViewPlugin.define((view) => {
+    let resolveTimer = null
     const info = getChunks(view.state)
     const initial = info ? info.chunks.length : 0
     hadChunks = initial > 0
@@ -35,43 +41,24 @@ function chunkWatcherPlugin(onAllResolved, onChunkCountChange) {
 
     return {
       update(update) {
+        const wasResolving = resolveTimer !== null
+        clearTimeout(resolveTimer)
+        resolveTimer = null
         const info = getChunks(update.state)
         const count = info ? info.chunks.length : 0
         onChunkCountChange?.(count)
 
-        if (hadChunks && count === 0) {
+        if ((hadChunks || wasResolving) && count === 0) {
           hadChunks = false
-          setTimeout(() => onAllResolved?.(), 0)
+          resolveTimer = setTimeout(() => {
+            resolveTimer = null
+            onAllResolved?.()
+          }, 0)
         } else {
           hadChunks = count > 0
         }
       },
-    }
-  })
-}
-
-function sideBySideChunkWatcher(onAllResolved, onChunkCountChange) {
-  let hadChunks = false
-
-  return ViewPlugin.define((view) => {
-    const info = mergeViewSiblings(view)
-    const initial = info ? info.chunks.length : 0
-    hadChunks = initial > 0
-    onChunkCountChange?.(initial)
-
-    return {
-      update(update) {
-        const info = mergeViewSiblings(update.view)
-        const count = info ? info.chunks.length : 0
-        onChunkCountChange?.(count)
-
-        if (hadChunks && count === 0) {
-          hadChunks = false
-          setTimeout(() => onAllResolved?.(), 0)
-        } else {
-          hadChunks = count > 0
-        }
-      },
+      destroy() { clearTimeout(resolveTimer) },
     }
   })
 }
@@ -85,15 +72,19 @@ export function createUnifiedDiffView({
   mergeControls = true,
   onAllResolved,
   onChunkCountChange,
+  onChange,
 }) {
   const state = EditorState.create({
     doc: modifiedContent,
     extensions: [
       ...sharedDiffExtensions,
+      EditorView.updateListener.of(update => {
+        if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
+      }),
       ...(editable ? [] : [EditorView.editable.of(false)]),
       mergeViewCompartment.of([
         unifiedMergeView({
-          original: Text.of(originalContent.split('\n')),
+          original: Text.of(originalContent.split(/\r\n?|\n/)),
           gutter: true,
           highlightChanges: true,
           syntaxHighlightDeletions: false,
@@ -136,6 +127,7 @@ export function createSplitDiffView({
   mergeControls = true,
   onAllResolved,
   onChunkCountChange,
+  onChange,
 }) {
   let mv
 
@@ -151,8 +143,11 @@ export function createSplitDiffView({
       doc: modifiedContent,
       extensions: [
         ...sharedDiffExtensions,
+        EditorView.updateListener.of(update => {
+          if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
+        }),
         ...(editable ? [] : [EditorView.editable.of(false)]),
-        sideBySideChunkWatcher(onAllResolved, onChunkCountChange),
+        chunkWatcherPlugin(onAllResolved, onChunkCountChange),
       ],
     },
     parent,
@@ -181,24 +176,12 @@ export function createSplitDiffView({
           // Tagged so the comment concealment change filter admits it.
           userEvent: 'accept',
         })
-        requestAnimationFrame(() => {
-          if (mv && mv.chunks.length === 0) {
-            setTimeout(() => onAllResolved?.(), 0)
-          }
-        })
       })
 
       const revertBtn = document.createElement('button')
       revertBtn.className = 'cm-merge-revert-btn'
       revertBtn.textContent = '✗'
       revertBtn.title = 'Reject this change'
-      revertBtn.addEventListener('mousedown', () => {
-        requestAnimationFrame(() => {
-          if (mv && mv.chunks.length === 0) {
-            setTimeout(() => onAllResolved?.(), 0)
-          }
-        })
-      })
 
       wrap.appendChild(acceptBtn)
       wrap.appendChild(revertBtn)

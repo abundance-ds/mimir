@@ -65,7 +65,7 @@ export function useEditorProposalLifecycle({
       // Wait for the surface before flushing its buffer into a pending review.
       await nextTick()
       if (cancelled || disposed || fileManager.currentFile !== file) return
-      if (file?.reviews) {
+      if (file?.reviews || file?.reviewDecision) {
         if (!activateDiffFromReviews(file)) diffStore.deactivate()
       } else if (diffStore.active && diffStore.reviewMeta?.ids) {
         diffStore.deactivate()
@@ -160,7 +160,7 @@ export function useEditorProposalLifecycle({
     const next = [...kept, ...added]
     if (next.length === 0) {
       fileManager.clearFileReviews(file)
-      diffStore.deactivate()
+      if (!file.reviewDecision) diffStore.deactivate()
     } else {
       fileManager.setFileReviews(file, next)
       activateDiffFromReviews(file)
@@ -168,6 +168,17 @@ export function useEditorProposalLifecycle({
   }
 
   function activateDiffFromReviews(file) {
+    if (file?.reviewDecision) {
+      const decision = file.reviewDecision
+      diffStore.activate({
+        original: decision.original, modified: decision.content,
+        path: file.path || '', fileId: file.id,
+        review: { ids: decision.ids, sessionId: decision.sessionId, path: file.path },
+      })
+      diffStore.decision = decision
+      diffStore.setReviewError(decision.error)
+      return true
+    }
     if (!file?.reviews?.length || file.kind === 'graph') return false
     if (fileManager.currentFile === file) flushEditorContent()
     const content = file.content || ''

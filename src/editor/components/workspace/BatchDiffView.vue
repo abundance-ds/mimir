@@ -9,6 +9,8 @@
           @accept="onAcceptFile"
           @reject="onRejectFile"
           @reset="onResetFile"
+          @change="diffStore.updateBatchContent"
+          @resolve="onResolveFile"
         />
       </div>
     </template>
@@ -46,6 +48,10 @@ const wrapperStyle = computed(() => {
 function onAcceptFile(path) {
   diffStore.acceptFile(path)
   emitIfResolved()
+}
+
+function onResolveFile(path, content) {
+  if (diffStore.resolveBatchFile(path, content)) emitIfResolved()
 }
 
 function onRejectFile(path) {

@@ -42,7 +42,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { createUnifiedDiffView } from '../../codemirror/merge.js'
+import { createUnifiedDiffView, resolvedDiffContent } from '../../codemirror/merge.js'
 import { computeLineDelta } from '../../../shared/lineDelta.js'
 
 const props = defineProps({
@@ -50,7 +50,7 @@ const props = defineProps({
   displayName: { type: String, default: '' },
 })
 
-const emit = defineEmits(['accept', 'reject', 'reset'])
+const emit = defineEmits(['accept', 'reject', 'reset', 'change', 'resolve'])
 
 const diffHost = ref(null)
 let editorView = null
@@ -71,8 +71,10 @@ function buildEditor() {
     modifiedContent: props.file.modified,
     collapse: true,
     onChunkCountChange: () => {},
+    onChange: content => emit('change', props.file.path, content),
     onAllResolved: () => {
-      emit('accept', props.file.path)
+      if (!editorView || props.file.status !== 'pending') return
+      emit('resolve', props.file.path, resolvedDiffContent(editorView.state.doc, props.file.modified, props.file.original))
     },
   })
 }
@@ -88,7 +90,7 @@ function destroyEditor() {
 watch(() => props.file.status, (status) => {
   if (status !== 'pending') destroyEditor()
   else buildEditor()
-})
+}, { flush: 'post' })
 
 onMounted(() => {
   if (props.file.status === 'pending') buildEditor()

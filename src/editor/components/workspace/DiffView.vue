@@ -20,11 +20,17 @@ import {
   createReadOnlyView,
   getUnifiedChunks,
   getSplitChunks,
+  resolvedDiffContent,
 } from '../../codemirror/merge.js'
 
 const diff = useDiffStore()
 const settings = useSettingsStore()
 const editorUI = useEditorUIStore()
+const resultContent = computed(() => diff.decision?.content ?? (
+  diff.isBatchFileFocused
+    ? diff.files.find(file => file.path === diff.focusedFile)?.modified ?? diff.modifiedContent
+    : diff.modifiedContent
+))
 
 const emit = defineEmits(['accept', 'reject'])
 
@@ -59,7 +65,8 @@ function buildView() {
   destroyCurrent()
   if (!viewHost.value || !diff.active) return
 
-  const { viewMode, layout, originalContent, modifiedContent } = diff
+  const { viewMode, layout, originalContent } = diff
+  const modifiedContent = resultContent.value
 
   if (viewMode === 'original') {
     currentView = createReadOnlyView({
@@ -80,10 +87,14 @@ function buildView() {
       originalContent,
       modifiedContent,
       collapse,
+      editable: !diff.decision,
+      mergeControls: !diff.decision,
       onChunkCountChange: (count) => diff.setChunkCount(count),
+      onChange: content => {
+        if (diff.isBatchFileFocused) diff.updateBatchContent(diff.focusedFile, content)
+      },
       onAllResolved: () => {
-        const content = currentView.state.doc.toString()
-        emit('accept', content)
+        emit('accept', getResolvedContent())
       },
     })
     currentType = 'unified'
@@ -104,10 +115,14 @@ function buildView() {
       originalContent,
       modifiedContent,
       collapse,
+      editable: !diff.decision,
+      mergeControls: !diff.decision,
       onChunkCountChange: (count) => diff.setChunkCount(count),
+      onChange: content => {
+        if (diff.isBatchFileFocused) diff.updateBatchContent(diff.focusedFile, content)
+      },
       onAllResolved: () => {
-        const content = currentView.b.state.doc.toString()
-        emit('accept', content)
+        emit('accept', getResolvedContent())
       },
     })
     currentType = 'split'
@@ -138,15 +153,16 @@ function scrollToChunk(index) {
 }
 
 function getResolvedContent() {
-  if (!currentView) return diff.modifiedContent
-  if (currentType === 'unified') return currentView.state.doc.toString()
-  if (currentType === 'split') return currentView.b.state.doc.toString()
-  return diff.modifiedContent
+  if (!currentView) return resultContent.value
+  const doc = currentType === 'unified' ? currentView.state.doc
+    : currentType === 'split' ? currentView.b.state.doc : null
+  if (!doc) return resultContent.value
+  return resolvedDiffContent(doc, resultContent.value, diff.originalContent)
 }
 
 defineExpose({ scrollToChunk, getResolvedContent })
 
-watch(() => [diff.viewMode, diff.layout, diff.originalContent, diff.modifiedContent], () => {
+watch(() => [diff.viewMode, diff.layout, diff.originalContent, diff.modifiedContent, diff.decision], () => {
   if (diff.active) nextTick(buildView)
 })
 

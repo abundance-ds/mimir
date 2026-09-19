@@ -7,6 +7,7 @@ import { basename } from '../../shared/utils/path.js'
 import { getCommentsFromState } from '../codemirror/comments.js'
 import { computeDiffFromReview } from './useProposalBridge.js'
 import { cloneGraphDocument } from '../../stores/graphDocuments.js'
+import { createNavigationGuard } from '../navigationGuard.js'
 
 export function useEditorCommandApi({
   fileManager,
@@ -28,43 +29,58 @@ export function useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
-  onNavigateIntent = () => {},
+  navigation = createNavigationGuard(),
 }) {
-  async function mimirOpen(path, { preview = false, entry = null, focus = true, source = false } = {}) {
-    if (!path) throw new Error('path is required')
-    onNavigateIntent()
-    if (path.endsWith('/scratchpad.md') && window.__TAURI_INTERNALS__) {
-      const canonical = await resolveScratchpad(path)
-      if (canonical) { path = canonical; preview = false; entry = { openBehavior: 'text', scratchpad: true } }
-    }
-    flushEditorContent({ bridge: 'flush' })
-    let inspected = entry?.openBehavior ? entry : null
-    if (!inspected) {
-      try {
-        inspected = await inspectWorkspaceEntry(path)
-      } catch {
-        // Trusted editor routes such as Settings definitions can be outside
-        // the active workspace. Their fallback remains text-oriented without
-        // weakening the workspace-scoped Files inspector.
+  async function mimirOpen(path, options = {}) {
+    return openDocument(path, options, navigation.begin())
+  }
+
+  async function openDocument(path, { preview = false, entry = null, focus = true, source = false }, isCurrent) {
+    try {
+      if (!path) throw new Error('path is required')
+      if (path.endsWith('/scratchpad.md') && window.__TAURI_INTERNALS__) {
+        const canonical = await resolveScratchpad(path)
+        if (canonical) { path = canonical; preview = false; entry = { openBehavior: 'text', scratchpad: true } }
       }
+      if (!isCurrent()) return null
+      flushEditorContent({ bridge: 'flush' })
+      let inspected = entry?.openBehavior ? entry : null
+      if (!inspected) {
+        try {
+          inspected = await inspectWorkspaceEntry(path)
+        } catch {
+          // Trusted editor routes such as Settings definitions can be outside
+          // the active workspace. Their fallback remains text-oriented without
+          // weakening the workspace-scoped Files inspector.
+        }
+      }
+      if (!isCurrent()) return null
+      inspected ||= fallbackOpenEntry(path)
+      const kind = inspected.openBehavior || (
+        inspected.textReadable === false ? 'external' : 'text'
+      )
+      const content = kind === 'text' ? await readFile(path) : ''
+      if (!isCurrent()) return null
+      const file = await fileManager.openFile(path, content, {
+        kind,
+        preview,
+        meta: inspected,
+        isCurrent,
+      })
+      if (!file || !isCurrent()) return null
+      if (source && file?.graph) await openSource(file)
+      await nextTick()
+      if (!isCurrent()) return null
+      if (source && currentFile.value !== file) throw new Error('The active document changed. Open Source again.')
+      if (file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
+      if (focus) emitNavigate({ path })
+      if (!isCurrent()) return null
+      if (kind === 'text' && focus) restoreEditorFocus()
+      return mimirActive()
+    } catch (error) {
+      if (!isCurrent()) return null
+      throw error
     }
-    inspected ||= fallbackOpenEntry(path)
-    const kind = inspected.openBehavior || (
-      inspected.textReadable === false ? 'external' : 'text'
-    )
-    const content = kind === 'text' ? await readFile(path) : ''
-    const file = await fileManager.openFile(path, content, {
-      kind,
-      preview,
-      meta: inspected,
-    })
-    if (source && file?.graph) await openSource(file)
-    await nextTick()
-    if (source && currentFile.value !== file) throw new Error('The active document changed. Open Source again.')
-    if (file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
-    if (focus) emitNavigate({ path })
-    if (kind === 'text' && focus) restoreEditorFocus()
-    return mimirActive()
   }
 
   function requireSource() {
@@ -210,8 +226,9 @@ export function useEditorCommandApi({
   function mimirSetContent(content = '') {
     requireSource()
     if (!currentFile.value) throw new Error('No document is open.')
-    const current = editorSurfaceRef.value?.getContent?.() || ''
-    editorSurfaceRef.value?.replaceRange(0, current.length, content)
+    const view = editorSurfaceRef.value?.getView?.()
+    if (!view) throw new Error('The editor is not ready.')
+    editorSurfaceRef.value.replaceRange(0, view.state.doc.length, content)
     return mimirActive()
   }
 
@@ -255,26 +272,29 @@ export function useEditorCommandApi({
   }
 
   async function mimirReveal({ path, line, column, offset, preview, entry } = {}) {
-    onNavigateIntent()
+    const isCurrent = navigation.begin()
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
       if (typeof preview === 'boolean') {
-        await mimirOpen(path, { preview, entry })
+        if (!await openDocument(path, { preview, entry }, isCurrent)) return null
       } else if (index >= 0) {
         flushEditorContent({ bridge: 'flush' })
         fileManager.setActiveTab(index)
         emitNavigate({ path })
       } else {
-        await mimirOpen(path)
+        if (!await openDocument(path, {}, isCurrent)) return null
       }
     }
+    if (!isCurrent()) return null
     const file = currentFile.value
     if (file?.graph && [line, column, offset].some(Number.isFinite)) await openSource(file)
+    if (!isCurrent()) return null
     if (file?.kind === 'text' && isSvgPath(file.path)
       && [line, column, offset].some(Number.isFinite)) {
       file.previewView = { ...file.previewView, sourceMode: true }
     }
     await nextTick()
+    if (!isCurrent()) return null
     if (file && currentFile.value !== file) throw new Error('The active document changed. Reveal the location again.')
     if (file?.kind === 'graph') {
       restoreEditorFocus()
@@ -307,7 +327,7 @@ export function useEditorCommandApi({
   function mimirCycleTab(direction = 1) {
     const length = visibleOpenFiles.value.length
     if (length < 2) return false
-    onNavigateIntent()
+    navigation.cancel()
     const next = (activeVisibleFileIndex.value + direction + length) % length
     fileManager.setActiveVisibleTab(next)
     return true

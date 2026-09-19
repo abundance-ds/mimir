@@ -85,6 +85,12 @@ defineExpose({
   getContent() {
     return view.value ? documentContent(view.value.state) : ''
   },
+  previewEdit(from, to, text) {
+    if (!view.value) return null
+    const state = view.value.state
+    const doc = state.changes({ from, to, insert: text }).apply(state.doc)
+    return doc.sliceString(0, doc.length, activeLineEnding)
+  },
   hasFocus() {
     return Boolean(view.value?.hasFocus)
   },

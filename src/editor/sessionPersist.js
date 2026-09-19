@@ -47,6 +47,7 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
 
   return {
     openFiles: persistedFiles,
+    ...(state.homeDrafts ? { homeDrafts: JSON.parse(JSON.stringify(state.homeDrafts.value)) } : {}),
     recentFiles: [...state.recentFiles.value],
     activeFileIndex: persistedActiveIndex,
     zoomLevel: state.zoomLevel.value,

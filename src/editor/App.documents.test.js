@@ -2,10 +2,13 @@ import { nextTick } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { undo, redo } from '@codemirror/commands'
+import { invoke } from '@tauri-apps/api/core'
 import App from './App.vue'
 import EditorSurface from './components/workspace/EditorSurface.vue'
+import DiffBar from './components/workspace/DiffBar.vue'
 import { useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
+import { useDiffStore } from '../stores/diff.js'
 import { createSessionSnapshot } from './sessionPersist.js'
 
 const io = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }))
@@ -34,6 +37,68 @@ async function setup() {
 }
 
 describe('document lifecycle with the real editor', () => {
+  it('retains a failed review decision across tab switches and retries without replacing newer edits', async () => {
+    const { files, wrapper, open } = await setup()
+    await open('/work/a.md')
+    const file = files.currentFile
+    files.setFileReviews(file, [{ proposalId: 'p1', targetText: 'Text', replacement: 'Proposed' }])
+    const diff = useDiffStore()
+    diff.activate({ original: file.content, modified: 'Proposed text', path: file.path, fileId: file.id, review: { id: 'p1' } })
+    let fail
+    invoke.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    await nextTick()
+    await wrapper.findComponent(DiffBar).get('.diff-action-btn.accept').trigger('click')
+    await flushPromises()
+    expect(file.content).toBe('Proposed text')
+    expect(wrapper.findComponent(DiffBar).get('button.diff-action-btn').attributes()).toHaveProperty('disabled')
+    files.updateContent('Newer user text', file)
+    fail(new Error('Registry unavailable'))
+    await flushPromises()
+    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry status')
+    await open('/work/b.md')
+    await open('/work/a.md')
+    expect(diff.decision).toBe(file.reviewDecision)
+    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry status')
+    invoke.mockResolvedValueOnce(undefined)
+    await wrapper.findComponent(DiffBar).get('.diff-action-btn.accept').trigger('click')
+    await flushPromises()
+    expect(file.content).toBe('Newer user text')
+    expect(file.reviewDecision).toBeNull()
+    expect(diff.active).toBe(false)
+  })
+
+  it.each(['open', 'reveal'])('keeps the latest preview when %s reads finish out of order', async command => {
+    const { files, wrapper, surface, open } = await setup()
+    const reads = new Map()
+    io.read.mockImplementation(path => new Promise(resolve => reads.set(path, resolve)))
+    const first = command === 'open' ? open('/work/a.md', true)
+      : wrapper.vm.mimirReveal({ path: '/work/a.md', preview: true, line: 2, entry: { openBehavior: 'text' } })
+    const second = open('/work/b.md', true)
+    reads.get('/work/b.md')('File B\nSecond line')
+    await second
+    reads.get('/work/a.md')('File A\nSecond line')
+    expect(await first).toBeNull()
+    expect(files.currentFile.path).toBe('/work/b.md')
+    expect(surface.vm.getContent()).toBe('File B\nSecond line')
+    expect(surface.vm.getCursor().offset).toBe(0)
+    expect(wrapper.emitted('navigateEditor').at(-1)).toEqual([{ path: '/work/b.md' }])
+  })
+
+  it.each(['tab', 'workspace', 'unmount'])('cancels a pending read after a %s change', async action => {
+    const { files, wrapper, open } = await setup()
+    await open('/work/a.md')
+    await open('/work/b.md')
+    let finish
+    io.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = open('/work/slow.md', true)
+    if (action === 'tab') wrapper.vm.mimirCycleTab(-1)
+    else if (action === 'workspace') await wrapper.setProps({ workspacePath: '/other', workspacePaths: ['/work', '/other'] })
+    else wrapper.unmount()
+    finish('Slow text')
+    expect(await pending).toBeNull()
+    expect(files.openFiles.some(file => file.path === '/work/slow.md')).toBe(false)
+  })
+
   it('closes an untouched preview without a save prompt', async () => {
     const { files, wrapper, open } = await setup()
     await open('/work/a.md', true)
@@ -72,6 +137,41 @@ describe('document lifecycle with the real editor', () => {
     await nextTick()
     expect(surface.vm.getContent()).toBe(content)
     expect(undo(surface.vm.getView())).toBe(false)
+    expect(files.currentFile.dirty).toBe(false)
+  })
+
+  it('keeps the draft open after a failed close-save and allows a successful retry', async () => {
+    const { files, wrapper, open, type } = await setup()
+    await open('/work/a.md')
+    type('Unsaved: ')
+    const file = files.currentFile
+    io.save.mockRejectedValueOnce(new Error('Disk full'))
+    const closing = wrapper.vm.mimirCloseActiveTab()
+    await flushPromises()
+    await wrapper.get('.btn-save').trigger('click')
+    expect(await closing).toBe(false)
+    expect(files.currentFile).toBe(file)
+    expect(file).toMatchObject({ content: 'Unsaved: Text of /work/a.md\n', dirty: true, saveState: 'failed' })
+    const retry = wrapper.vm.mimirCloseActiveTab()
+    await flushPromises()
+    await wrapper.get('.btn-save').trigger('click')
+    expect(await retry).toBe(true)
+    expect(files.openFiles).not.toContain(file)
+    expect(io.save).toHaveBeenLastCalledWith(file.path, file.content)
+  })
+
+  it('resumes autosave after Cancel in the close dialog', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    useSettingsStore().editorAutoSave = true
+    const { files, wrapper, open, type } = await setup()
+    await open('/work/a.md')
+    type('Keep: ')
+    const closing = wrapper.vm.mimirCloseActiveTab()
+    await flushPromises()
+    await wrapper.get('.btn-cancel').trigger('click')
+    expect(await closing).toBe(false)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(io.save).toHaveBeenCalledWith('/work/a.md', 'Keep: Text of /work/a.md\n')
     expect(files.currentFile.dirty).toBe(false)
   })
 
@@ -180,6 +280,33 @@ describe('document lifecycle with the real editor', () => {
     await nextTick()
     expect(undo(surface.vm.getView())).toBe(true)
     expect(files.currentFile).toMatchObject({ content: 'External text\n', dirty: false })
+  })
+
+  it('replaces a CRLF document through the command API without using disk offsets', async () => {
+    io.read.mockResolvedValue('First\r\nSecond\r\n')
+    const { files, wrapper, surface, open } = await setup()
+    await open('/work/windows.md')
+    wrapper.vm.mimirSetContent('Replacement\ntext\n')
+    expect(files.currentFile.content).toBe('Replacement\r\ntext\r\n')
+    expect(undo(surface.vm.getView())).toBe(true)
+    expect(files.currentFile).toMatchObject({ content: 'First\r\nSecond\r\n', dirty: false })
+  })
+
+  it('uses editor positions for inline edits and preserves line endings in the preview', async () => {
+    const content = 'One\r\nTwo\r\nThree'
+    io.read.mockResolvedValue(content)
+    const { files, wrapper, surface, open } = await setup()
+    await open('/work/windows.md')
+    const selection = { from: 4, to: 7, text: 'Two', force: true, coords: { left: 0, top: 0 } }
+    surface.vm.$emit('selection-command', selection)
+    await nextTick()
+    const inline = wrapper.findComponent({ name: 'InlineAI' })
+    expect(inline.props('selection')).toMatchObject({ contextBefore: 'One\n', contextAfter: '\nThree' })
+    inline.vm.$emit('activate-diff', { ...selection, replacement: 'Updated' })
+    expect(useDiffStore()).toMatchObject({ originalContent: content, modifiedContent: 'One\r\nUpdated\r\nThree' })
+    expect(files.currentFile).toMatchObject({ content, dirty: false })
+    inline.vm.$emit('apply', 'Updated', selection.from, selection.to)
+    expect(files.currentFile.content).toBe('One\r\nUpdated\r\nThree')
   })
 
   it('keeps edits dirty when an earlier save completes and saves the current text next', async () => {

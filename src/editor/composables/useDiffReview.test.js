@@ -16,6 +16,7 @@ function makeReviewHarness() {
   const fileManager = {
     openFiles: [currentFile.value],
     updateContent: vi.fn((content, file) => { file.content = content; file.dirty = true }),
+    setFileReviews: vi.fn((file, reviews) => { file.reviews = reviews }),
     clearFileReviews: vi.fn((file) => { if (file) file.reviews = null }),
   }
   const review = useDiffReview({
@@ -40,10 +41,75 @@ describe('useDiffReview proposal responses', () => {
     invoke.mockResolvedValue(undefined)
   })
 
+  it.each(['accept', 'reject'])('keeps newer edits while a single-file %s response is pending', async action => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
+    let finish
+    invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const deciding = action === 'accept' ? review.onDiffAcceptAll() : review.onDiffRejectAll()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(currentFile.value.content).toBe(action === 'accept' ? 'proposal text' : 'old text')
+    fileManager.updateContent('Newer user edit', currentFile.value)
+    finish()
+    await expect(deciding).resolves.toEqual({ ok: true })
+    expect(currentFile.value.content).toBe('Newer user edit')
+    expect(currentFile.value.reviewPending).toBe(false)
+  })
+
+  it('retries only failed status reports without reapplying text or clearing another review', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { ids: ['p1', 'p2'] } })
+    invoke.mockImplementation(async (_command, { result }) => { if (result.id === 'p2') throw new Error('offline') })
+    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false })
+    expect(currentFile.value.content).toBe('proposal text')
+    fileManager.updateContent('Newer edit', currentFile.value)
+    currentFile.value.reviews.push({ proposalId: 'p3' })
+    invoke.mockClear().mockResolvedValue(undefined)
+    await expect(review.onDiffAcceptAll()).resolves.toEqual({ ok: true })
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p2', status: 'applied' }) })
+    expect(currentFile.value).toMatchObject({ content: 'Newer edit', reviews: [{ proposalId: 'p3' }] })
+  })
+
+  it('does not apply a stale review or report it as applied', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
+    currentFile.value.content = 'Edited before accept'
+    expect(await review.onDiffAcceptAll()).toMatchObject({ ok: false, error: expect.stringContaining('document changed') })
+    expect(currentFile.value.content).toBe('Edited before accept')
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('coalesces repeated decisions and leaves a new review open after an old receipt', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
+    let finish
+    invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const first = review.onDiffAcceptAll()
+    const repeated = review.onDiffAcceptAll()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    diffStore.activate({ original: 'another', modified: 'new proposal', path: '/other.md', review: { id: 'p2' } })
+    finish()
+    await Promise.all([first, repeated])
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(diffStore).toMatchObject({ active: true, filePath: '/other.md', modifiedContent: 'new proposal' })
+    expect(currentFile.value.content).toBe('proposal text')
+  })
+
   it('normalizes single-id and multi-id review metadata', () => {
     expect(proposalIdsFromReviewMeta({ id: 'p1' })).toEqual(['p1'])
     expect(proposalIdsFromReviewMeta({ ids: ['p1', '', 'p2'] })).toEqual(['p1', 'p2'])
     expect(proposalIdsFromReviewMeta(null)).toEqual([])
+  })
+
+  it('reports rejection when the focused batch result equals its original text', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    diffStore.activateBatch({ fileList: [{ path: '/doc.md', original: 'old text', modified: 'proposed', proposalId: 'p1' }] })
+    diffStore.focusBatchFile('/doc.md')
+    await review.onDiffChunksResolved('old text')
+    expect(fileManager.updateContent).not.toHaveBeenCalled()
+    expect(currentFile.value.content).toBe('old text')
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p1', status: 'rejected' }) })
   })
 
   it('binds a new single-file review to the active tab id', () => {
@@ -124,7 +190,7 @@ describe('useDiffReview proposal responses', () => {
     invoke.mockRejectedValue(new Error('Registry offline'))
     await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false })
     expect(currentFile.value.reviewPending).toBe(false)
-    expect(currentFile.value.content).toBe('old text')
+    expect(currentFile.value.content).toBe('new text')
   })
 
   it('keeps a conflicting unopened Graph batch source pending without a generic write fallback', async () => {
@@ -284,7 +350,7 @@ describe('useDiffReview proposal responses', () => {
     expect(currentFile.value.content).toBe('new text')
   })
 
-  it('restores the snapshotted original when the store deactivates during reject', async () => {
+  it('keeps existing edits when the store deactivates during reject', async () => {
     const { diffStore, currentFile, review } = makeReviewHarness()
     currentFile.value.content = 'edited text'
     diffStore.activate({
@@ -301,7 +367,7 @@ describe('useDiffReview proposal responses', () => {
     const result = await review.onDiffRejectAll()
 
     expect(result).toEqual({ ok: true })
-    expect(currentFile.value.content).toBe('old text')
+    expect(currentFile.value.content).toBe('edited text')
   })
 
   it('resolves proposal chunk decisions and applies the resolved content', async () => {

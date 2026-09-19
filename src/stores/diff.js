@@ -14,6 +14,7 @@ export const useDiffStore = defineStore('diff', () => {
   const batchId = ref(null)
   const reviewMeta = ref(null)
   const reviewError = ref('')
+  const decision = ref(null)
 
   // Batch state
   const files = ref([]) // { path, original, modified, proposalId, status: 'pending'|'accepted'|'rejected' }
@@ -43,6 +44,7 @@ export const useDiffStore = defineStore('diff', () => {
     batchId.value = batch
     reviewMeta.value = review || null
     reviewError.value = ''
+    decision.value = null
     files.value = []
     viewMode.value = 'diff'
     chunkCount.value = 0
@@ -51,11 +53,13 @@ export const useDiffStore = defineStore('diff', () => {
   }
 
   function activateBatch({ fileList, batch = null, sessionId = null }) {
+    decision.value = null
     mode.value = 'batch'
     files.value = fileList.map(f => ({
       path: f.path,
       original: f.original,
       modified: f.modified,
+      proposed: f.modified,
       proposalId: f.proposalId || null,
       ...(f.graphSourceRevision != null ? { graphSourceRevision: f.graphSourceRevision } : {}),
       status: 'pending',
@@ -80,6 +84,7 @@ export const useDiffStore = defineStore('diff', () => {
   }
 
   function deactivate() {
+    decision.value = null
     active.value = false
     mode.value = 'single'
     originalContent.value = ''
@@ -99,30 +104,29 @@ export const useDiffStore = defineStore('diff', () => {
   function acceptFile(path) {
     const f = files.value.find(x => x.path === path)
     if (f) {
-      f.status = 'accepted'
+      f.status = f.modified === f.original && f.modified !== f.proposed ? 'rejected' : 'accepted'
       f.error = null
     }
   }
 
   function rejectFile(path) {
     const f = files.value.find(x => x.path === path)
-    if (f) {
+    if (f && !f.applied && !f.lifecycleResolved) {
       f.status = 'rejected'
       f.error = null
     }
   }
 
   function acceptAllFiles() {
-    files.value.forEach(f => {
-      f.status = 'accepted'
-      f.error = null
+    pendingFiles.value.forEach(f => {
+      acceptFile(f.path)
     })
   }
 
   function rejectAllFiles() {
-    files.value.forEach(f => {
-      f.status = 'rejected'
-      f.error = null
+    pendingFiles.value.forEach(f => {
+      if (f.applied) acceptFile(f.path)
+      else rejectFile(f.path)
     })
   }
 
@@ -130,8 +134,23 @@ export const useDiffStore = defineStore('diff', () => {
     const f = files.value.find(x => x.path === path)
     if (f && !f.applied && !f.lifecycleResolved) {
       f.status = 'pending'
+      f.modified = f.proposed
       f.error = null
     }
+  }
+
+  function updateBatchContent(path, content) {
+    const file = files.value.find(file => file.path === path)
+    if (file?.status === 'pending' && !file.applied) file.modified = content
+  }
+
+  function resolveBatchFile(path, content) {
+    const file = files.value.find(file => file.path === path)
+    if (!file || file.status !== 'pending' || file.applied) return false
+    updateBatchContent(path, content)
+    if (content === file.original) rejectFile(path)
+    else acceptFile(path)
+    return true
   }
 
   function markFileApplied(path) {
@@ -219,12 +238,13 @@ export const useDiffStore = defineStore('diff', () => {
   return {
     active, mode, isBatch,
     originalContent, modifiedContent, filePath, fileId,
-    proposalIds, batchId, reviewMeta, reviewError,
+    proposalIds, batchId, reviewMeta, reviewError, decision,
     focusedFile, isBatchFileFocused,
     files, pendingFiles, resolvedCount, allResolved,
     viewMode, layout, chunkCount, currentChunk, hasChunks,
     activate, activateBatch, deactivate,
     acceptFile, rejectFile, acceptAllFiles, rejectAllFiles, resetFile,
+    updateBatchContent, resolveBatchFile,
     markFileApplied, markFileLifecycleResolved, markFileFailed,
     focusBatchFile, clearBatchFocus,
     setViewMode, setLayout, setReviewError,

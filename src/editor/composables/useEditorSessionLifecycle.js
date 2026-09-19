@@ -1,4 +1,5 @@
 import { computed } from 'vue'
+import { useProjectHomeStore } from '../../stores/projectHome.js'
 import { loadSession, saveSession } from '../../services/session.js'
 import { createSessionPersist, createSessionSnapshot } from '../sessionPersist.js'
 import { loadSessionEntries, normalizeSessionEntries } from '../sessionRestore.js'
@@ -15,6 +16,8 @@ export function useEditorSessionLifecycle({
   flushEditorContent,
   onError,
 }) {
+  const home = useProjectHomeStore()
+  const homeDrafts = computed(() => home.drafts)
   const recentFiles = computed(() => fileManager.recentFiles)
   const zoomLevel = computed(() => getZoomLevel())
   let persist = null
@@ -28,6 +31,7 @@ export function useEditorSessionLifecycle({
   async function hydrate() {
     hydrationPromise = fileManager.hydrateSession(async () => {
       const session = await loadSession()
+      home.restore(session?.homeDrafts)
       if (session?.recentFiles?.length) fileManager.setRecentFiles(session.recentFiles)
       if (session?.openFiles?.length) await restoreSession(session)
       if (!fileManager.hasOpenFiles) fileManager.newFile()
@@ -106,6 +110,7 @@ export function useEditorSessionLifecycle({
     if (disposed || persist) return
     persist = createSessionPersist({
       openFiles,
+      homeDrafts,
       recentFiles,
       activeFileIndex,
       zoomLevel,
@@ -115,6 +120,7 @@ export function useEditorSessionLifecycle({
   function snapshot(discardedFiles = []) {
     return createSessionSnapshot({
       openFiles,
+      homeDrafts,
       recentFiles,
       activeFileIndex,
       zoomLevel,

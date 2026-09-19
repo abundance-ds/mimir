@@ -69,6 +69,7 @@ describe('Editor lifecycle controllers', () => {
       openFile: vi.fn(async (path, content, meta) => {
         files.value.push({ id: path, path, content, dirty: false, ...meta })
         activeFileIndex.value = files.value.length - 1
+        return currentFile.value
       }),
       setActiveTab: vi.fn(index => {
         activeFileIndex.value = index

@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
+import { rejectChunk } from '@codemirror/merge'
 import { useDiffStore } from '../../../stores/diff.js'
 import DiffView from './DiffView.vue'
 
@@ -42,6 +43,24 @@ describe('DiffView', () => {
     await vi.runAllTimersAsync()
 
     expect(wrapper.emitted('accept')).toEqual([['before\nsame']])
+    wrapper.unmount()
+  })
+
+  it.each(['unified', 'split'])('preserves CRLF when reading the resolved %s review', async layout => {
+    const { diff, wrapper } = mountActive({ original: 'before\r\nsame\r\n', modified: 'after\r\nsame\r\n' })
+    diff.setLayout(layout)
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe('after\r\nsame\r\n')
+    wrapper.unmount()
+  })
+
+  it('preserves CRLF when rejecting the last unified chunk', async () => {
+    const { wrapper } = mountActive({ original: 'before\r\nsame\r\n', modified: 'after\r\nsame\r\n' })
+    const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
+    vi.useFakeTimers()
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'before\nsame\n' } })
+    await vi.runAllTimersAsync()
+    expect(wrapper.emitted('accept')).toEqual([['before\r\nsame\r\n']])
     wrapper.unmount()
   })
 
@@ -97,6 +116,36 @@ describe('DiffView', () => {
     await flushPromises()
     expect(wrapper.find('.cm-editor').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('keeps partial batch decisions when switching the focused review layout', async () => {
+    const middle = Array.from({ length: 12 }, (_, i) => `same ${i}`).join('\n')
+    const diff = useDiffStore()
+    diff.activateBatch({ fileList: [{ path: '/a.md', original: `old A\n${middle}\nold B`, modified: `new A\n${middle}\nnew B` }] })
+    diff.focusBatchFile('/a.md')
+    const wrapper = mount(DiffView)
+    const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
+    rejectChunk(view, 0)
+    const expected = `old A\n${middle}\nnew B`
+    expect(diff.files[0].modified).toBe(expected)
+    diff.setLayout('split')
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe(expected)
+    diff.setViewMode('result')
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe(expected)
+    wrapper.unmount()
+  })
+
+  it('shows the committed result as read-only while its status can be retried', async () => {
+    const { diff, wrapper } = mountActive()
+    diff.decision = { status: 'applied', content: 'Reviewed subset', pending: false }
+    await flushPromises()
+    const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
+    expect(view.state.facet(EditorView.editable)).toBe(false)
+    expect(wrapper.vm.getResolvedContent()).toBe('Reviewed subset')
+    expect(wrapper.find('.cm-mergeButtons').exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -66,30 +66,28 @@ export function useDiffReview({
     return { ok: true }
   }
 
-  async function respondToDiffReview(status) {
-    const meta = diffStore.reviewMeta
-    const ids = proposalIdsFromReviewMeta(meta)
+  async function respondToDiffReview(decision) {
+    const ids = decision.ids.filter(id => !decision.reported.has(id))
     if (ids.length === 0) return { ok: true }
+    const { status, sessionId } = decision
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const results = await Promise.allSettled(
-        ids.map(id =>
-          invoke('proposal_respond', {
-            result: { id, sessionId: meta.sessionId, status, detail: status === 'applied' ? 'User accepted the change' : 'User rejected the change' },
+        ids.map(async id => {
+          await invoke('proposal_respond', {
+            result: { id, sessionId, status, detail: status === 'applied' ? 'User accepted the change' : 'User rejected the change' },
           })
-        )
+          decision.reported.add(id)
+        }),
       )
       const failure = results.find(result => result.status === 'rejected')
       if (failure) {
         const error = `The edit decision could not be reported: ${failure.reason?.message || failure.reason}`
-        diffStore.setReviewError?.(error)
         return { ok: false, error }
       }
-      diffStore.setReviewError?.('')
       return { ok: true }
     } catch (cause) {
       const error = `The edit decision could not be reported: ${cause?.message || cause}`
-      diffStore.setReviewError?.(error)
       return { ok: false, error }
     }
   }
@@ -233,10 +231,8 @@ export function useDiffReview({
         applyDiffResult(diffStore.modifiedContent, target)
         inlineAIState.value = null
       } else {
-        // Snapshot before the await: the proposals-changed broadcast that
-        // follows proposal_respond can deactivate the diff store mid-flight,
-        // and a post-await read would then apply reset ('') content.
-        const modified = diffStore.modifiedContent
+        // Commit the resolved review text before reporting the decision.
+        const modified = diffViewRef.value?.getResolvedContent?.() ?? diffStore.modifiedContent
         return completeReview(target, 'applied', modified)
       }
     }
@@ -272,7 +268,7 @@ export function useDiffReview({
       } else if (diffStore.reviewMeta?.type === 'inline-ai') {
         diffStore.deactivate()
       } else {
-        // Same pre-await snapshot rule as accept: see onDiffAcceptAll.
+        // Reject dismisses the proposal and retains the document's current text.
         const original = diffStore.originalContent
         return completeReview(target, 'rejected', original)
       }
@@ -282,9 +278,7 @@ export function useDiffReview({
   async function onDiffChunksResolved(content) {
     if (diffStore.isBatchFileFocused) {
       const path = diffStore.focusedFile
-      const file = diffStore.files.find(candidate => candidate.path === path)
-      if (file) file.modified = content
-      diffStore.acceptFile(path)
+      diffStore.resolveBatchFile(path, content)
       diffStore.clearBatchFocus()
       reviewTabActive.value = true
       if (diffStore.allResolved) await onBatchAllResolved()
@@ -301,16 +295,60 @@ export function useDiffReview({
     return applyDiffResult(content, target)
   }
 
-  async function completeReview(target, status, content) {
-    if (target.graph) target.reviewPending = true
-    try {
-      const lifecycle = await respondToDiffReview(status)
-      if (!lifecycle.ok) return lifecycle
-      fileManager.clearFileReviews(target)
-      return applyDiffResult(content, target)
-    } finally {
-      if (target.graph) target.reviewPending = false
+  function completeReview(target, status, content) {
+    let decision = target.reviewDecision
+    if (decision && decision !== diffStore.decision) {
+      return { ok: false, error: 'Finish the previous review decision before reviewing another change.' }
     }
+    if (decision && decision.status !== status) {
+      return { ok: false, error: 'This decision is already applied. Retry its status update.' }
+    }
+    if (!decision) {
+      const original = diffStore.originalContent
+      if (status === 'applied' && target.content !== original && target.content !== content) {
+        const error = 'The document changed after this review was created. Reopen the proposal against the latest text.'
+        diffStore.setReviewError(error)
+        return { ok: false, error }
+      }
+      diffStore.decision = {
+        targetId: target.id, original, content, status,
+        ids: proposalIdsFromReviewMeta(diffStore.reviewMeta),
+        sessionId: diffStore.reviewMeta?.sessionId,
+        reported: new Set(), pending: false, operation: null, error: '',
+      }
+      decision = diffStore.decision
+      target.reviewDecision = decision
+      target.reviewPending = true
+      // Commit once, before any asynchronous report. A receipt can never write
+      // text back into this document. Reject only dismisses the proposal.
+      if (status === 'applied' && target.content !== content) {
+        fileManager.updateContent(content, target)
+        if (currentFile.value === target) scheduleContentSync()
+      }
+    }
+    if (decision.operation) return decision.operation
+    decision.pending = true
+    decision.error = ''
+    target.reviewPending = true
+    decision.operation = (async () => {
+      const lifecycle = await respondToDiffReview(decision)
+      if (!lifecycle.ok) {
+        decision.error = lifecycle.error
+        if (diffStore.decision === decision) diffStore.setReviewError(lifecycle.error)
+        return lifecycle
+      }
+      const remaining = (target.reviews || []).filter(review => !decision.ids.includes(review.proposalId))
+      if (remaining.length) fileManager.setFileReviews(target, remaining)
+      else fileManager.clearFileReviews(target)
+      target.reviewDecision = null
+      if (diffStore.decision === decision) diffStore.deactivate()
+      return { ok: true }
+    })().finally(() => {
+      decision.pending = false
+      decision.operation = null
+      target.reviewPending = false
+    })
+    return decision.operation
   }
 
   function onDiffNavigateChunk(index) {

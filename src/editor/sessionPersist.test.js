@@ -32,6 +32,19 @@ describe('sessionPersist', () => {
     for (let i = 0; i < 8; i += 1) await Promise.resolve()
   }
 
+  it('persists Home drafts without an Editor tab and includes them in the close snapshot', async () => {
+    const homeDrafts = ref([])
+    const state = makeState({ homeDrafts })
+    const persist = createSessionPersist(state, save)
+    homeDrafts.value = [{ id: 'atlas', path: '/team/graph/atlas.md', base: '', canvas: 'My draft' }]
+    await nextTick()
+    vi.advanceTimersByTime(1000)
+    await flushMicrotasks()
+    expect(save.mock.calls.at(-1)[0].homeDrafts[0].canvas).toBe('My draft')
+    expect(createSessionSnapshot(state).homeDrafts).toEqual(homeDrafts.value)
+    await persist()
+  })
+
   it('saves after debounce when state changes', async () => {
     const state = makeState()
     createSessionPersist(state, save)
