@@ -59,7 +59,7 @@
             }"
             :data-sidebar-row="`tool:${tool.id}`"
             :label="tool.title"
-            :title="collapsed && meetingCapture && tool.id === 'app:scribe' ? `${tool.title} · ${meetingCaptureLabel}` : tool.title"
+            :title="toolTitle(tool)"
             :aria-label="collapsed && meetingCapture && tool.id === 'app:scribe' ? `${tool.title}, ${meetingCaptureLabel}` : ''"
             :collapsed="collapsed"
             :active="activeToolId === tool.id"
@@ -214,6 +214,7 @@ import SidebarActivities from './SidebarActivities.vue'
 import { iconFor } from '../activityIcons.js'
 import { usePointerReorder } from '../composables/usePointerReorder.js'
 import { useSidebarFilesSize, DEFAULT_SIDEBAR_FILES_HEIGHT } from '../composables/useSidebarFilesSize.js'
+import { SHORTCUTS, shortcutSequenceKeys } from '../../shared/shortcuts.js'
 const props = defineProps({
   collapsed: Boolean,
   filesCollapsed: Boolean,
@@ -230,6 +231,13 @@ const props = defineProps({
   activeToolId: { type: String, default: '' },
   meetingCapture: { type: Object, default: null },
 })
+
+function toolTitle(tool) {
+  const title = props.collapsed && props.meetingCapture && tool.id === 'app:scribe'
+    ? `${tool.title} · ${meetingCaptureLabel.value}` : tool.title
+  const binding = SHORTCUTS.find(item => item.scope === 'quick-open' && item.targetId === tool.id)
+  return binding ? `${title} (${shortcutSequenceKeys(binding).join(' ')})` : title
+}
 const emit = defineEmits([
   'toggleCollapse',
   'toggleFiles',

@@ -36,6 +36,7 @@ const DEFAULTS = {
   sidebarFilesCollapsed: false,
   sidebarFilesHeight: 240,
   showMainTabs: true,
+  quickOpenShortcutsMinimized: false,
   chatNotifications: true,
   workbenchFileFavorites: {},
   workbenchFileSort: {},

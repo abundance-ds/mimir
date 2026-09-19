@@ -28,6 +28,21 @@ export const SHORTCUTS = [
   { id: 'open-file', scope: 'editor', label: 'Open file', key: 'o' },
   { id: 'save', scope: 'editor', label: 'Save', key: 's' },
   { id: 'save-as', scope: 'editor', label: 'Save as', key: 's', shift: true },
+  { id: 'go-to-today', scope: 'quick-open', label: 'Today', key: 't', targetId: 'app:scratch' },
+  { id: 'go-to-graph', scope: 'quick-open', label: 'Graph', key: 'g', targetId: 'app:business-graph' },
+  { id: 'go-to-scribe', scope: 'quick-open', label: 'Scribe', key: 's', targetId: 'app:scribe' },
+  { id: 'go-to-scratchpad', scope: 'quick-open', label: 'Scratchpad', key: 'd', targetId: 'core:scratchpad' },
+  { id: 'go-to-routines', scope: 'quick-open', label: 'Routines', key: 'r', targetId: 'core:routines' },
+  { id: 'go-to-tracker', scope: 'quick-open', label: 'Tracker', key: 'l', targetId: 'app:tracker' },
+  { id: 'go-to-chats', scope: 'quick-open', label: 'Chats', key: 'j', targetId: 'core:chats' },
+  { id: 'go-to-files', scope: 'quick-open', label: 'Files', key: 'f', queryPrefix: 'f: ' },
+  { id: 'go-to-projects', scope: 'quick-open', label: 'Switch project', key: 'p', queryPrefix: 'p: ' },
+  { id: 'go-to-open-project', scope: 'quick-open', label: 'Open project folder…', key: 'o', resultType: 'project-open' },
+  ...Array.from({ length: 9 }, (_, index) => ({
+    id: `go-to-agent-${index + 1}`, scope: 'quick-open', label: `New AI agent ${index + 1}`,
+    key: String(index + 1), launcherKind: 'agent', launcherIndex: index,
+  })),
+  { id: 'go-to-terminal', scope: 'quick-open', label: 'New terminal', key: '0', launcherKind: 'terminal' },
 ]
 
 export function matchShortcut({ key = '', code = '', primary = false, alt = false, shift = false }, scopes = ['global', 'panel', 'editor']) {
@@ -50,6 +65,12 @@ export function shortcutKeys(binding) {
   const mac = platformKind() === 'macos'
   const displayKey = { ArrowLeft: '←', ArrowRight: '→' }[binding.key] || binding.key.toUpperCase()
   return [...(binding.alt ? [mac ? '⌥' : 'Alt'] : []), ...(binding.shift ? [mac ? '⇧' : 'Shift'] : []), mac ? '⌘' : 'Ctrl', displayKey]
+}
+
+export function shortcutSequenceKeys(binding) {
+  return binding.scope === 'quick-open'
+    ? [...shortcutKeys(SHORTCUTS.find(item => item.id === 'quick-open')), '→', ...shortcutKeys(binding)]
+    : shortcutKeys(binding)
 }
 
 export function editorKeyBinding(id) {

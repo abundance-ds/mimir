@@ -6,11 +6,13 @@
         ref="dialog"
         data-quick-open
         class="fixed inset-0 z-[240] flex justify-center bg-black/20 px-4 pt-6"
+        :class="{ 'quick-open-with-shortcuts': chordsEnabled && !settings.quickOpenShortcutsMinimized }"
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-open-title"
         @keydown.capture="preserveComposition"
         @keydown="onDialogKeydown"
+        @mimir-go-to-shortcut="onNativeShortcut"
       >
         <h2 id="quick-open-title" class="sr-only">{{ dialogTitle }}</h2>
         <button
@@ -203,6 +205,26 @@
             </span>
           </div>
         </div>
+        <aside v-if="chordsEnabled && !settings.quickOpenShortcutsMinimized" data-quick-open-shortcuts
+          aria-label="Go to shortcuts" class="quick-open-shortcuts absolute bottom-4 right-4 flex max-h-[calc(100dvh_-_32px)] w-[240px] max-w-[calc(100%_-_32px)] flex-col overflow-hidden rounded border border-rule bg-surface text-ink shadow-sm">
+          <div class="flex shrink-0 items-center justify-between pl-3 pr-1 py-1">
+            <span class="text-[11px] font-medium">Go to shortcuts</span>
+            <button type="button" data-quick-open-shortcuts-minimize class="pane-icon-button" aria-label="Minimize shortcut panel" title="Minimize shortcut panel" @click="setShortcutsMinimized(true)"><IconMinus :size="14" /></button>
+          </div>
+          <div class="shrink-0 px-3 pb-1 font-mono text-[10px] text-ink-3">{{ chordPrefix }} →</div>
+          <div class="min-h-0 overflow-y-auto">
+            <button v-for="binding in availableChords" :key="binding.id" type="button" :data-quick-open-chord="binding.id"
+              :aria-label="`${binding.label} (${shortcutSequenceKeys(binding).join(' ')})`"
+              class="flex min-h-7 w-full items-center justify-between gap-3 px-3 text-left text-[11px] hover:bg-chrome-mid focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-accent"
+              @click="activateChord(binding)">
+              <span>{{ binding.label }}</span><kbd class="shrink-0 font-mono text-[10px] text-ink-3">{{ shortcutKeys(binding).join(' ') }}</kbd>
+            </button>
+          </div>
+          <div class="mt-1 shrink-0 border-t border-rule px-3 py-2 text-[10px] text-ink-3">Active while Go to is open</div>
+        </aside>
+        <button v-else-if="chordsEnabled" type="button" data-quick-open-shortcuts-restore
+          class="absolute bottom-4 right-4 grid size-8 place-items-center rounded border border-rule bg-surface text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          aria-label="Show shortcut panel" title="Show Go to shortcuts" :aria-expanded="false" @click="setShortcutsMinimized(false)"><IconKeyboard :size="16" /></button>
       </div>
     </Transition>
   </Teleport>
@@ -222,7 +244,9 @@ import {
   IconFolderPlus,
   IconFocus2,
   IconHash,
+  IconKeyboard,
   IconMathPi,
+  IconMinus,
   IconPlus,
   IconRobot,
   IconSearch,
@@ -232,6 +256,8 @@ import {
   IconUser,
 } from '@tabler/icons-vue'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
+import { useSettingsStore } from '../../stores/settings.js'
+import { SHORTCUTS, matchShortcut, shortcutForEvent, shortcutKeys, shortcutSequenceKeys } from '../../shared/shortcuts.js'
 import { searchActivityHistory } from '../../services/activities.js'
 import IconProviderAnthropic from '../../shared/icons/IconProviderAnthropic.vue'
 import IconProviderOpenAI from '../../shared/icons/IconProviderOpenAI.vue'
@@ -259,6 +285,24 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'activate'])
 const files = useWorkspaceFilesStore()
+const settings = useSettingsStore()
+const chordsEnabled = computed(() => props.open && props.initialView === 'root')
+const chords = SHORTCUTS.filter(binding => binding.scope === 'quick-open')
+const chordPrefix = shortcutKeys(SHORTCUTS.find(binding => binding.id === 'quick-open')).join(' ')
+const availableChords = computed(() => {
+  if (!chordsEnabled.value) return []
+  const launchers = props.newActivity.filter(row => row.id.startsWith('preset:') && row.available !== false && row.enabled !== false)
+  const agents = launchers.filter(row => row.kind === 'agent')
+  const terminal = launchers.find(row => row.kind === 'terminal' && row.id === 'preset:terminal')
+    || launchers.find(row => row.kind === 'terminal')
+  return chords.flatMap(binding => {
+    if (binding.launcherKind) {
+      const launcher = binding.launcherKind === 'agent' ? agents[binding.launcherIndex] : terminal
+      return launcher ? [{ ...binding, label: `New ${launcher.title}`, targetId: launcher.id }] : []
+    }
+    return !binding.targetId || props.tools.some(tool => tool.id === binding.targetId && tool.available !== false) ? [binding] : []
+  })
+})
 const query = ref('')
 const input = ref(null)
 const dialog = ref(null)
@@ -530,7 +574,48 @@ function preserveComposition(event) {
   if (event.isComposing || event.keyCode === 229) event.stopPropagation()
 }
 
+async function setShortcutsMinimized(value) {
+  settings.set('quickOpenShortcutsMinimized', value)
+  await nextTick()
+  input.value?.focus()
+}
+
+async function activateChord(binding) {
+  binding = availableChords.value.find(item => item.id === binding.id)
+  if (!binding) return
+  if (binding.resultType) {
+    activate({ type: binding.resultType })
+    return
+  }
+  if (binding.targetId) {
+    activate({ type: binding.launcherKind ? 'new-activity' : 'tool', targetId: binding.targetId })
+    return
+  }
+  view.value = 'root'
+  query.value = binding.queryPrefix
+  onInput()
+  await nextTick()
+  input.value?.focus()
+  input.value?.setSelectionRange(query.value.length, query.value.length)
+}
+
+function onNativeShortcut(event) {
+  if (!chordsEnabled.value) return
+  const binding = matchShortcut({ key: event.detail?.key, primary: true }, ['quick-open'])
+  if (!binding) return
+  event.preventDefault()
+  void activateChord(binding)
+}
+
 function onDialogKeydown(event) {
+  if (!props.open || event.isComposing || event.keyCode === 229) return
+  const chord = chordsEnabled.value && shortcutForEvent(event, ['quick-open'])
+  if (chord) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!event.repeat) void activateChord(chord)
+    return
+  }
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -549,6 +634,8 @@ function onDialogKeydown(event) {
     dialog.value?.querySelector('[data-quick-open-back]'),
     input.value,
     dialog.value?.querySelector('[data-quick-open-row][tabindex="0"]'),
+    dialog.value?.querySelector('[data-quick-open-new-tab]'),
+    ...(dialog.value?.querySelectorAll('[data-quick-open-shortcuts] button, [data-quick-open-shortcuts-restore]') || []),
   ].filter(Boolean)
   if (!targets.length) return
   const current = targets.indexOf(document.activeElement)
@@ -603,6 +690,30 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Keep the current launcher geometry when the helper fits beside or below it.
+   In smaller windows, reserve a second row so the two surfaces never overlap. */
+@media (max-width: 1303px) {
+  .quick-open-with-shortcuts {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    justify-items: center;
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+  .quick-open-with-shortcuts [data-quick-open-panel] {
+    min-height: 0;
+    max-height: min(520px, 100%);
+  }
+  .quick-open-shortcuts {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    justify-self: end;
+    max-height: 45dvh;
+  }
+}
+
 .quick-open-enter-active,
 .quick-open-leave-active {
   transition: opacity 100ms ease;

@@ -91,6 +91,18 @@ describe('settings store', () => {
     expect(store.workbenchZoom).toBe(100)
   })
 
+  it('restores the minimized Go to shortcut panel from a saved snapshot', async () => {
+    const store = useSettingsStore()
+    await store.load()
+    expect(store.quickOpenShortcutsMinimized).toBe(false)
+    store.set('quickOpenShortcutsMinimized', true)
+    await store.flush()
+    setActivePinia(createPinia())
+    const restored = useSettingsStore()
+    await restored.load()
+    expect(restored.quickOpenShortcutsMinimized).toBe(true)
+  })
+
   it('normalizes persisted workbenchZoom during load', async () => {
     storage.set('mimir:editor:settings:v1', JSON.stringify({ workbenchZoom: 5 }))
     const store = useSettingsStore()

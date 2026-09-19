@@ -1064,12 +1064,16 @@ describe('WorkbenchApp', () => {
     ])
   })
 
-  it('opens Scratchpad in the Editor without changing the main tab', async () => {
+  it.each(['sidebar', 'chord'])('opens Scratchpad from its %s action without changing the main tab', async entry => {
     const wrapper = await render()
     const workbench = useWorkbenchStore()
     const active = workbench.activeActivityId
     const tabs = [...workbench.openTabIds]
-    await wrapper.get('[data-sidebar-row="tool:core:scratchpad"]').find('button').trigger('click')
+    if (entry === 'chord') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))
+      await flushPromises()
+      await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'd', metaKey: true })
+    } else await wrapper.get('[data-sidebar-row="tool:core:scratchpad"]').find('button').trigger('click')
     expect(editorScratchpad).toHaveBeenCalled()
     expect(workbench.activeActivityId).toBe(active)
     expect(workbench.openTabIds).toEqual(tabs)
@@ -1183,7 +1187,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toContain('/w')
   })
 
-  it('switches to the previous project with Cmd+Shift+P and Enter, then back again', async () => {
+  it.each(['direct', 'chord'])('switches to the previous project with the %s shortcut and Enter, then back again', async shortcut => {
     localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
       mimirWorkspaceFolder: '/w',
       recentWorkspaceFolders: ['/w', '/other/project', '/older/project'],
@@ -1192,7 +1196,9 @@ describe('WorkbenchApp', () => {
     useWorkbenchStore().setPaneState('sidebar', 'rail')
     fileApi.openWorkspaceIndex.mockClear()
     for (const path of ['/other/project', '/w']) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, shiftKey: shortcut === 'direct', bubbles: true, cancelable: true }))
+      await flushPromises()
+      if (shortcut === 'chord') await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'p', metaKey: true })
       await flushPromises()
       expect(wrapper.get('[data-quick-open-row][aria-selected="true"]').attributes('data-quick-open-key')).toBe(`project:${path}`)
       await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
@@ -1547,7 +1553,7 @@ describe('WorkbenchApp', () => {
     })
   })
 
-  it('launches a fresh Terminal Activity from the Activity plus menu', async () => {
+  it.each(['menu', 'chord'])('launches a fresh Terminal Activity from the %s', async entry => {
     const wrapper = await render({ workspace: '/w' })
     useLaunchersStore().presets.push({
       id: 'terminal',
@@ -1571,12 +1577,20 @@ describe('WorkbenchApp', () => {
     })
     await nextTick()
 
-    await wrapper.get('[data-new-main-tab]').trigger('click')
-    const menu = document.body.querySelector('[data-quick-open]')
-    const terminal = [...menu.querySelectorAll('[data-quick-open-row]')]
-      .find(option => option.textContent.includes('Terminal'))
-    expect(menu.textContent).toContain('Chats')
-    terminal.click()
+    if (entry === 'chord') {
+      useSettingsStore().set('workbenchZoom', 125)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))
+      await flushPromises()
+      await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: '0', metaKey: true })
+      expect(useSettingsStore().workbenchZoom).toBe(125)
+    } else {
+      await wrapper.get('[data-new-main-tab]').trigger('click')
+      const menu = document.body.querySelector('[data-quick-open]')
+      const terminal = [...menu.querySelectorAll('[data-quick-open-row]')]
+        .find(option => option.textContent.includes('Terminal'))
+      expect(menu.textContent).toContain('Chats')
+      terminal.click()
+    }
     await flushPromises()
 
     expect(activityApi.resolveLauncher).toHaveBeenLastCalledWith(
@@ -1597,6 +1611,24 @@ describe('WorkbenchApp', () => {
     )
     expect(useWorkbenchStore().activeActivityId).toMatch(/^terminal:/)
     expect(document.body.querySelector('[data-quick-open]')).toBeNull()
+    if (entry === 'chord') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '0', metaKey: true, bubbles: true }))
+      expect(useSettingsStore().workbenchZoom).toBe(100)
+    }
+  })
+
+  it('starts a fresh available AI launcher with Go to then Command 1', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))
+    await flushPromises()
+    expect(wrapper.get('[data-quick-open-chord="go-to-agent-1"]').text()).toContain('Review with Codex')
+    expect(wrapper.find('[data-quick-open-chord="go-to-agent-2"]').exists()).toBe(false)
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: '1', metaKey: true })
+    await flushPromises()
+    expect(activityApi.resolveLauncher).toHaveBeenCalledWith(expect.objectContaining({ id: 'review' }), '/w')
+    expect(activityApi.spawnActivity).toHaveBeenCalledOnce()
+    expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
   })
 
   it('opens returned routine runs as PTY surfaces and reruns the current routine definition', async () => {
@@ -1658,7 +1690,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-sidebar-row="tool:app:ledger"] button').attributes('aria-current')).toBe('page')
   })
 
-  it('lands keyboard focus inside the Business graph after its Tool row is clicked', async () => {
+  it.each(['sidebar', 'chord'])('lands keyboard focus inside the Business graph from its %s action', async entry => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps',
       diagnostics: [],
@@ -1680,7 +1712,11 @@ describe('WorkbenchApp', () => {
 
     // WebKit does not focus Sidebar buttons on click, so the click alone
     // leaves focus on <body>; selection must move it into the surface.
-    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    if (entry === 'chord') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))
+      await flushPromises()
+      await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'g', metaKey: true })
+    } else await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
     await vi.dynamicImportSettled()
     await flushPromises()
     await nextTick()
@@ -1688,6 +1724,15 @@ describe('WorkbenchApp', () => {
     expect(useWorkbenchStore().activeActivityId).toBe('app:business-graph')
     const surface = wrapper.get('[data-activity-surface="app:business-graph"]').element
     expect(surface.contains(document.activeElement)).toBe(true)
+    if (entry === 'chord') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))
+      await flushPromises()
+      await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'g', metaKey: true })
+      await flushPromises()
+      expect(appsApi.resolveAppLaunch).toHaveBeenCalledOnce()
+      expect(wrapper.get('[data-activity-surface="app:business-graph"]').element).toBe(surface)
+      expect(surface.contains(document.activeElement)).toBe(true)
+    }
   })
 
   it.each(['board', 'list', 'entries'])('opens a clicked Graph entry from %s through its Activity wrapper', async view => {

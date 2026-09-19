@@ -5,6 +5,15 @@ task scope.
 
 ## Open
 
+- Go to chords: native macOS verification of Cmd+P then Cmd+P, Cmd+O, Cmd+S, and
+  Cmd+F remains open. Renderer tests cover the native menu callbacks, and
+  browser checks cover the helper layout and saved minimized state. They do
+  not establish installed-app accelerator delivery.
+
+- Native Editor menu: Select All, Undo, and Redo call the Editor surface even
+  when a Go to search input has focus. Route these edit commands to the active
+  text control and verify them in macOS. Copy, Cut, and Paste use native roles.
+
 - Editor document changes need a native macOS verification record for sidebar
   opens, key routing, close decisions, and restart recovery. Follow
   [Editor verification](editor-system.md#verification) with disposable files;
@@ -75,9 +84,9 @@ task scope.
   Automated contracts are necessary evidence, not a substitute for those
   provider/recovery paths.
 
-- Business graph: final desktop screenshot critique (narrow/default/wide,
-  railed/expanded, reduced-motion states) is a manual runtime release check —
-  automated behavior and accessibility checks do not replace this review.
+- Business graph: UI audit fails on Project Home control IDs; `cargo fmt`
+  flags module order. Desktop screenshots (narrow/default/wide, rail and
+  reduced-motion states) remain a manual release check.
 
 - Terminal command-aware `working` status is a future specification candidate.
   The current truthful live-shell state is `idle`; any later implementation

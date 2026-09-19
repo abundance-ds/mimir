@@ -19,6 +19,22 @@ function run(action) {
   }
 }
 
+// macOS can deliver a menu accelerator without a webview keydown. Offer the
+// overlapping commands to the visible Go to dialog before the Editor.
+function withGoToShortcut(key, action) {
+  return () => {
+    const dialog = document.querySelector('[data-quick-open]')
+    if (dialog) {
+      const event = new CustomEvent('mimir-go-to-shortcut', {
+        detail: { key }, cancelable: true,
+      })
+      dialog.dispatchEvent(event)
+      if (event.defaultPrevented) return
+    }
+    return action?.()
+  }
+}
+
 function separator() {
   return { item: 'Separator' }
 }
@@ -94,18 +110,18 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
       items: [
         ...(actions.openQuickOpen
           ? [
-              item('workbench:go-to', 'Go to...', 'CmdOrCtrl+P', actions.openQuickOpen),
+              item('workbench:go-to', 'Go to...', 'CmdOrCtrl+P', withGoToShortcut('p', actions.openQuickOpen)),
               separator(),
             ]
           : []),
         item('editor:new-file', 'New File', 'CmdOrCtrl+N', actions.newFile),
-        item('editor:open-file', 'Open File...', 'CmdOrCtrl+O', actions.openFile),
+        item('editor:open-file', 'Open File...', 'CmdOrCtrl+O', withGoToShortcut('o', actions.openFile)),
         {
           text: 'Open Recent',
           items: recentMenuItems(recentFiles, actions),
         },
         separator(),
-        item('editor:save', 'Save', 'CmdOrCtrl+S', actions.save),
+        item('editor:save', 'Save', 'CmdOrCtrl+S', withGoToShortcut('s', actions.save)),
         item('editor:save-as', 'Save As...', 'CmdOrCtrl+Shift+S', actions.saveAs),
         separator(),
         item('editor:close-tab', 'Close Tab', 'CmdOrCtrl+W', actions.closeTab),
@@ -122,7 +138,7 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
         { item: 'Paste' },
         item('editor:select-all', 'Select All', 'CmdOrCtrl+A', () => actions.editCommand?.('select-all')),
         separator(),
-        item('editor:find', 'Find', 'CmdOrCtrl+F', () => actions.editCommand?.('find')),
+        item('editor:find', 'Find', 'CmdOrCtrl+F', withGoToShortcut('f', () => actions.editCommand?.('find'))),
         item('editor:rewrite-selection', 'Rewrite Selection', 'CmdOrCtrl+K', actions.rewriteSelection),
       ],
     },

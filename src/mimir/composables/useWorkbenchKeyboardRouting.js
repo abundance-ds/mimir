@@ -4,6 +4,7 @@ import { nextTick, ref } from 'vue'
 import { nextWorkbenchZoom, workbenchZoomKeyAction } from '../../shared/workbenchZoom.js'
 import { closeCurrentWindow } from '../../services/window.js'
 import { routeWorkbenchKey } from '../workbenchKeyboard.js'
+import { shortcutForEvent } from '../../shared/shortcuts.js'
 
 export function useWorkbenchKeyboardRouting({
   quickOpen,
@@ -28,7 +29,9 @@ export function useWorkbenchKeyboardRouting({
   function onKeydown(event) {
     if (event.isComposing || event.keyCode === 229) return
     const zoomAction = workbenchZoomKeyAction(event)
-    if (zoomAction) {
+    const terminalChord = quickOpen.value && quickOpenInitialView.value === 'root'
+      && shortcutForEvent(event, ['quick-open'])?.id === 'go-to-terminal'
+    if (zoomAction && !terminalChord) {
       consume(event)
       settings.set(
         'workbenchZoom',

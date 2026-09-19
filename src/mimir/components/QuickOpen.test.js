@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
+import { useSettingsStore } from '../../stores/settings.js'
+import { buildNativeEditorMenuItems } from '../../editor/nativeMenu.js'
 import QuickOpen from './QuickOpen.vue'
 import { buildQuickOpenResults } from '../quickOpenResults.js'
 
@@ -65,6 +67,8 @@ describe('QuickOpen', () => {
   let pinia
 
   beforeEach(() => {
+    localStorage.clear()
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
     pinia = createPinia()
     setActivePinia(pinia)
     vi.mocked(buildQuickOpenResults).mockClear()
@@ -102,6 +106,180 @@ describe('QuickOpen', () => {
       },
     })
   }
+
+  it.each([
+    ['t', 'app:scratch'], ['g', 'app:business-graph'], ['s', 'app:scribe'],
+    ['d', 'core:scratchpad'], ['r', 'core:routines'], ['l', 'app:tracker'], ['j', 'core:chats'],
+  ])('opens %s through the existing tool action, even when search has no results', async (key, targetId) => {
+    const wrapper = render(true, { props: { tools: [{ id: targetId, title: 'Tool', available: true }] } })
+    await flushPromises()
+    const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('no matching result')
+    await input.trigger('keydown', { key, metaKey: true })
+    expect(wrapper.emitted('activate')).toEqual([[{ type: 'tool', targetId }]])
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('keeps tool chords fixed across reordering and hides unavailable tools', async () => {
+    const graph = { id: 'app:business-graph', title: 'Graph' }
+    const wrapper = render(true, { props: { tools: [graph, ...tools] } })
+    const bindings = () => wrapper.findAll('[data-quick-open-chord]').map(row => row.attributes('data-quick-open-chord'))
+    const initial = bindings()
+    await wrapper.setProps({ tools: [...tools, graph] })
+    expect(bindings()).toEqual(initial)
+    expect(bindings()).not.toContain('go-to-tracker')
+    await wrapper.setProps({ tools: [{ ...graph, available: false }, ...tools] })
+    expect(bindings()).not.toContain('go-to-graph')
+    await wrapper.get('input').trigger('keydown', { key: 'g', metaKey: true })
+    expect(wrapper.emitted('activate')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  it('numbers only available AI presets in launcher order, caps at nine, and uses zero for Terminal', async () => {
+    const agents = Array.from({ length: 10 }, (_, index) => ({ id: `preset:agent-${index}`, title: `Agent ${index}`, kind: 'agent' }))
+    const wrapper = render(true, { props: { newActivity: [
+      { id: 'preset:missing', title: 'Missing', kind: 'agent', available: false },
+      { id: 'preset:disabled', title: 'Disabled', kind: 'agent', enabled: false },
+      { id: 'app:local', title: 'Local app', kind: 'agent' },
+      { id: 'preset:terminal', title: 'Terminal', kind: 'terminal' }, ...agents,
+    ] } })
+    expect(wrapper.get('[data-quick-open-chord="go-to-agent-1"]').text()).toContain('New Agent 0')
+    expect(wrapper.get('[data-quick-open-chord="go-to-agent-9"]').text()).toContain('New Agent 8')
+    expect(wrapper.find('[data-quick-open-chord="go-to-agent-10"]').exists()).toBe(false)
+    await wrapper.get('input').trigger('keydown', { key: '9', metaKey: true })
+    expect(wrapper.emitted('activate').at(-1)[0]).toEqual({ type: 'new-activity', targetId: 'preset:agent-8' })
+    await wrapper.get('[data-quick-open-chord="go-to-terminal"]').trigger('click')
+    expect(wrapper.emitted('activate').at(-1)[0]).toEqual({ type: 'new-activity', targetId: 'preset:terminal' })
+    await wrapper.setProps({ newActivity: [agents[1], agents[0]] })
+    await wrapper.get('input').trigger('keydown', { key: '1', metaKey: true })
+    expect(wrapper.emitted('activate').at(-1)[0].targetId).toBe('preset:agent-1')
+    await wrapper.get('input').trigger('keydown', { key: '9', metaKey: true })
+    await wrapper.get('input').trigger('keydown', { key: '0', metaKey: true })
+    expect(wrapper.emitted('activate')).toHaveLength(3)
+  })
+
+  it('opens a project folder from the chord and native Open menu action', async () => {
+    const wrapper = render(true, { attachTo: document.body })
+    await wrapper.get('input').trigger('keydown', { key: 'o', metaKey: true })
+    expect(wrapper.emitted('activate')[0][0]).toEqual({ type: 'project-open' })
+    const openFile = vi.fn()
+    const menu = buildNativeEditorMenuItems([], { openFile }).flatMap(section => section.items)
+    menu.find(item => item.id === 'editor:open-file').action()
+    await flushPromises()
+    expect(wrapper.emitted('activate')).toHaveLength(2)
+    expect(openFile).not.toHaveBeenCalled()
+    await wrapper.setProps({ open: false })
+    menu.find(item => item.id === 'editor:open-file').action()
+    await flushPromises()
+    expect(openFile).toHaveBeenCalledOnce()
+  })
+
+  it('switches to the project picker without waiting for a pending search', async () => {
+    const wrapper = render(true, { attachTo: document.body })
+    await flushPromises()
+    const input = wrapper.get('input')
+    await input.setValue('unrelated text')
+    const search = vi.spyOn(useWorkspaceFilesStore(), 'setQuery').mockImplementation(() => new Promise(() => {}))
+    await input.trigger('keydown', { key: 'p', metaKey: true, repeat: true })
+    expect(input.element.value).toBe('unrelated text')
+    await input.trigger('keydown', { key: 'p', metaKey: true })
+    expect(input.element.value).toBe('p: ')
+    expect(input.element.selectionStart).toBe(3)
+    expect(document.activeElement).toBe(input.element)
+    expect(wrapper.findAll('[data-quick-open-type="project"]')).toHaveLength(1)
+    expect(wrapper.get('[aria-selected="true"]').attributes('data-quick-open-key')).toBe('project:/work/other-project')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({ type: 'project', path: '/work/other-project' })
+    search.mockRestore()
+  })
+
+  it('opens Files search from a nested view and keeps all tool chords available', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-quick-open-new-tab]').trigger('click')
+    await wrapper.get('input').trigger('keydown', { key: 'f', metaKey: true })
+    expect(wrapper.get('input').element.value).toBe('f: ')
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Files')
+    expect(wrapper.find('[data-quick-open-back]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-chord="go-to-today"]').exists()).toBe(true)
+    expect(wrapper.emitted('activate')).toBeUndefined()
+  })
+
+  it.each(['tabs', 'projects', 'new-activity'])('does not enable tool chords from the %s entry point', async initialView => {
+    const wrapper = render(true, { props: { initialView } })
+    await wrapper.get('input').trigger('keydown', { key: 't', metaKey: true })
+    expect(wrapper.find('[data-quick-open-shortcuts]').exists()).toBe(false)
+    expect(wrapper.emitted('activate')).toBeUndefined()
+  })
+
+  it('leaves typing, text editing, modified keys, and IME input alone', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const input = wrapper.get('input')
+    await input.setValue('today')
+    for (const options of [
+      { key: 't' }, { key: 't', ctrlKey: true }, { key: 'T', metaKey: true, shiftKey: true },
+      { key: 't', metaKey: true, altKey: true }, { key: 't', metaKey: true, isComposing: true },
+      { key: 't', metaKey: true, keyCode: 229 },
+      ...['a', 'c', 'v', 'x', 'z'].map(key => ({ key, metaKey: true })),
+    ]) {
+      const event = new KeyboardEvent('keydown', { ...options, bubbles: true, cancelable: true })
+      input.element.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    expect(input.element.value).toBe('today')
+    expect(wrapper.emitted('activate')).toBeUndefined()
+  })
+
+  it('keeps minimized chords active and restores search focus without changing the query', async () => {
+    const wrapper = render(true, { attachTo: document.body })
+    await flushPromises()
+    const input = wrapper.get('input')
+    await input.setValue('draft')
+    await wrapper.get('[data-quick-open-shortcuts-minimize]').trigger('click')
+    expect(useSettingsStore().quickOpenShortcutsMinimized).toBe(true)
+    expect(wrapper.find('[data-quick-open-shortcuts]').exists()).toBe(false)
+    expect(document.activeElement).toBe(input.element)
+    expect(input.element.value).toBe('draft')
+    await input.trigger('keydown', { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(wrapper.get('[data-quick-open-shortcuts-restore]').element)
+    await wrapper.setProps({ open: false })
+    expect(wrapper.find('[data-quick-open-shortcuts-restore]').exists()).toBe(false)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.find('[data-quick-open-shortcuts-restore]').exists()).toBe(true)
+    await wrapper.get('[data-quick-open-shortcuts-restore]').trigger('click')
+    expect(wrapper.find('[data-quick-open-shortcuts]').exists()).toBe(true)
+    expect(document.activeElement).toBe(wrapper.get('input').element)
+    await wrapper.get('[data-quick-open-shortcuts-minimize]').trigger('click')
+    await wrapper.get('input').trigger('keydown', { key: 't', metaKey: true })
+    expect(wrapper.emitted('activate')[0][0]).toEqual({ type: 'tool', targetId: 'app:scratch' })
+  })
+
+  it('routes native Mac menu accelerators to Go to, then restores their normal actions', async () => {
+    const actions = { openQuickOpen: vi.fn(), save: vi.fn(), editCommand: vi.fn() }
+    const menu = buildNativeEditorMenuItems([], actions).flatMap(section => section.items)
+    const wrapper = render(true, { attachTo: document.body, props: { tools: [{ id: 'app:scribe', title: 'Scribe' }] } })
+    await flushPromises()
+    menu.find(item => item.id === 'workbench:go-to').action()
+    await flushPromises()
+    expect(wrapper.get('input').element.value).toBe('p: ')
+    menu.find(item => item.id === 'editor:find').action()
+    await flushPromises()
+    expect(wrapper.get('input').element.value).toBe('f: ')
+    menu.find(item => item.id === 'editor:save').action()
+    await flushPromises()
+    expect(wrapper.emitted('activate')[0][0]).toEqual({ type: 'tool', targetId: 'app:scribe' })
+    expect(actions.save).not.toHaveBeenCalled()
+    expect(actions.editCommand).not.toHaveBeenCalled()
+    expect(actions.openQuickOpen).not.toHaveBeenCalled()
+    await wrapper.setProps({ open: false })
+    for (const id of ['workbench:go-to', 'editor:find', 'editor:save']) menu.find(item => item.id === id).action()
+    await flushPromises()
+    expect(actions.openQuickOpen).toHaveBeenCalledOnce()
+    expect(actions.save).toHaveBeenCalledOnce()
+    expect(actions.editCommand).toHaveBeenCalledWith('find')
+  })
 
   it('does no result building while closed and reopens with the latest context', async () => {
     const files = useWorkspaceFilesStore()
@@ -312,6 +490,11 @@ describe('QuickOpen', () => {
     await input.trigger('keydown', { key: 'Tab' })
     expect(document.activeElement).toBe(wrapper.get('[data-quick-open-row]').element)
     await wrapper.get('[data-quick-open-row]').trigger('keydown', { key: 'Tab' })
+    expect(document.activeElement).toBe(wrapper.get('[data-quick-open-new-tab]').element)
+    input.element.focus()
+    await input.trigger('keydown', { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(wrapper.findAll('[data-quick-open-chord]').at(-1).element)
+    await wrapper.findAll('[data-quick-open-chord]').at(-1).trigger('keydown', { key: 'Tab' })
     expect(document.activeElement).toBe(input.element)
 
     await wrapper.setProps({ open: false })

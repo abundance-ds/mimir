@@ -681,6 +681,7 @@ const newActivityRows = computed(() => orderSidebarRows([
   ).map((preset) => ({
     id: `preset:${preset.id}`,
     title: preset.title,
+    kind: preset.kind,
     icon: launcherIcon(preset),
     shortcut: '',
     available: preset.available,

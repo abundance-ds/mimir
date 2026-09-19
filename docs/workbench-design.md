@@ -213,6 +213,58 @@ Cmd/Ctrl+P opens one grouped launcher near the window top.
 - Results are built only while the panel is open. Reopening uses current tabs,
   files, and workspace context without scanning them during closed-panel updates.
 
+### Go to chords
+
+Opening Go to with Cmd/Ctrl+P enables these second steps until the dialog
+closes. The primary modifier can stay held between keys. Ordinary text still
+searches; there is no chord timer. New Tab and the direct Switch project entry
+do not enable this mode.
+
+| Second step | Destination |
+|---|---|
+| Cmd/Ctrl+T | Today |
+| Cmd/Ctrl+G | Graph |
+| Cmd/Ctrl+S | Scribe |
+| Cmd/Ctrl+D | Scratchpad |
+| Cmd/Ctrl+R | Routines |
+| Cmd/Ctrl+L | Tracker |
+| Cmd/Ctrl+J | Chats |
+| Cmd/Ctrl+F | Files search (`f: `) |
+| Cmd/Ctrl+P | Switch project (`p: `) |
+| Cmd/Ctrl+O | Open a project folder |
+| Cmd/Ctrl+1–9 | Start the corresponding available AI launcher |
+| Cmd/Ctrl+0 | Start a new terminal |
+
+Tool chords use the Sidebar's existing open action. They reuse tool tabs and
+transfer focus to the destination. Files and Projects stay in Go to, clear the
+previous query, and focus the input after the scope prefix. Project order and
+selection match the direct Cmd/Ctrl+Shift+P entry.
+
+Numbers follow the available AI presets in New Activity order, up to nine.
+The helper shows each launcher's actual name. Disabled and unavailable presets
+and local apps do not take agent numbers. Zero uses the standard Terminal preset,
+or the first available terminal preset. Each launch creates a fresh Activity.
+Unused numbers do nothing. Outside this Go to mode, zero still resets zoom.
+
+The bottom-right shortcut panel shows enabled built-in tools, navigation, and
+available launchers. Tool assignments are fixed; disabled tools keep their keys reserved,
+and Sidebar reordering does not change them. Search results do not filter the
+shortcut panel. Each row is also a button. On smaller windows, the helper sits
+below the search panel and each panel can scroll without covering the other.
+
+Minimize reduces the helper to a keyboard button. Chords remain active, and
+`quickOpenShortcutsMinimized` persists through Settings. Minimize and restore
+retain the query and return focus to search. The helper and its button disappear
+when Go to closes. Both belong to the existing dialog's Tab sequence, along
+with its New tab button; they do not add another modal.
+
+The shared shortcut registry owns these bindings, Sidebar tooltips, and Settings labels.
+Only the Go to handler matches this scope. Text editing commands, IME input,
+and Editor commands outside Go to keep their existing behavior. Held-key repeat
+does not run a second step from a webview keydown. Native macOS Go to, Open, Save,
+and Find menu accelerators offer their input to the open dialog first because
+the OS can consume them before a webview keydown arrives.
+
 Workbench teardown snapshots layout and tab order before Settings flush.
 
 Workbench diagnostic toasts close after 25 seconds. Each new message starts

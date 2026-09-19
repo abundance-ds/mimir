@@ -5,19 +5,20 @@
       <div class="shortcuts-table">
         <div v-for="(binding, index) in group.items" :key="binding.id" class="shortcut-row" :class="{ last: index === group.items.length - 1 }">
           <span class="shortcut-action">{{ binding.label }}</span>
-          <span class="shortcut-keys"><span v-for="(key, i) in shortcutKeys(binding)" :key="i" class="kbd">{{ key }}</span></span>
+          <span class="shortcut-keys"><span v-for="(key, i) in shortcutSequenceKeys(binding)" :key="i" class="kbd">{{ key }}</span></span>
         </div>
       </div>
     </section>
-    <p class="mt-4 text-[11px] text-ink-3">Dialogs temporarily block commands for the panels behind them. Rename a session with F2 while its tab has focus. In Files, use ↑/↓ to select and Enter to open.</p>
+    <p class="mt-4 text-[11px] text-ink-3">Go to chords work while Go to is open. Only enabled tools appear in its shortcut panel. Dialogs temporarily block commands for the panels behind them. Rename a session with F2 while its tab has focus. In Files, use ↑/↓ to select and Enter to open.</p>
   </div>
 </template>
 <script setup>
-import { SHORTCUTS, shortcutKeys } from '../../shortcuts.js'
+import { SHORTCUTS, shortcutSequenceKeys } from '../../shortcuts.js'
 const groups = [
   { scope: 'global', title: 'App-wide' },
   { scope: 'panel', title: 'Focused panel' },
   { scope: 'editor', title: 'Editor' },
+  { scope: 'quick-open', title: 'Go to chords' },
 ].map(group => ({ ...group, items: SHORTCUTS.filter(binding => binding.scope === group.scope) }))
 </script>
 
