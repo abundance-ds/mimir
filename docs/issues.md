@@ -5,11 +5,6 @@ task scope.
 
 ## Open
 
-- Go to chords: native macOS verification of Cmd+P then Cmd+P, Cmd+O, Cmd+S, and
-  Cmd+F remains open. Renderer tests cover the native menu callbacks, and
-  browser checks cover the helper layout and saved minimized state. They do
-  not establish installed-app accelerator delivery.
-
 - Native Editor menu: Select All, Undo, and Redo call the Editor surface even
   when a Go to search input has focus. Route these edit commands to the active
   text control and verify them in macOS. Copy, Cut, and Paste use native roles.
@@ -24,10 +19,6 @@ task scope.
   with the resolved module URL. On macOS, `/tmp` versus `/private/tmp` reproduces
   this. Resolve both paths before comparison and test a symlink entry point.
 
-- Scribe tests: the reviewed-summary case in `ScribeApp.test.js` failed in a
-  full-suite run but passed when that file ran alone; investigate its
-  asynchronous completion check.
-
 - Scribe notification repair: real banner/RECORD behavior and repeated-call CPU
   observations need a record from the repaired app. A long run with call
   transitions and signed installed-app verification remain open. Automated
@@ -39,9 +30,9 @@ task scope.
   order, match navigation, separate panel queries, and the revised Files layout;
   see [files.md](files.md#verification).
 
-- Release 0.3.2: signed installed-app checks for launch/relaunch, file save,
-  one terminal Activity, and permission prompts have no new runtime record.
-  The Scribe and managed Git evidence gaps below also remain open.
+- Release 0.3.3: basic signed installed-app checks passed; see
+  [building.md](building.md#release-smoke). Capture permission prompts and
+  the Scribe and managed Git evidence gaps below remain open.
 
 - Image preview: verify physical pinch, default-app opening, and return-focus refresh in the installed macOS app.
 

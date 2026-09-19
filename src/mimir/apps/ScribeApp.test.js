@@ -1364,9 +1364,11 @@ describe('ScribeApp', () => {
       setProperties: { sourceSummaryHash: expect.stringMatching(/^[a-f0-9]{64}$/) },
     }))
     expect(updateMeeting).toHaveBeenCalledWith('m1', { summary: 'Reviewed replacement.' })
-    await flushPromises()
-    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Reviewed replacement.')
-    expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    // The summary watcher hashes through Web Crypto, beyond Vue's promise queue.
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Reviewed replacement.')
+      expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    })
     wrapper.unmount()
   })
 

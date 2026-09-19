@@ -125,6 +125,13 @@ must smoke the installed signed app for launch/relaunch, file save, one terminal
 Activity, expected permission prompts, and affected Scribe/GitHub paths. Record
 missing evidence in [issues.md](issues.md).
 
+The signed, notarized 0.3.3 build from `e7373ce` passed local installed-app
+checks on 2026-09-19: launch, guarded Quit, relaunch with saved tabs, LF and
+CRLF file saves, Undo/Redo in the CRLF file, and a terminal command followed
+by normal shell exit. The source-bound stage, code signature, and Gatekeeper
+assessment passed. These checks did not exercise capture permission prompts,
+live Scribe providers/recovery, or two-Mac GitHub sync.
+
 ## Dependencies and licenses
 
 After a lockfile, policy, or embedded-asset change:

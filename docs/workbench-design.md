@@ -265,6 +265,10 @@ does not run a second step from a webview keydown. Native macOS Go to, Open, Sav
 and Find menu accelerators offer their input to the open dialog first because
 the OS can consume them before a webview keydown arrives.
 
+On 2026-09-19, the signed installed 0.3.3 build from `e7373ce` passed native
+Cmd+P sequences for Projects (Cmd+P), Files (Cmd+F), the project-folder dialog
+(Cmd+O), Graph (Cmd+G), Scribe (Cmd+S), and a new terminal (Cmd+0).
+
 Workbench teardown snapshots layout and tab order before Settings flush.
 
 Workbench diagnostic toasts close after 25 seconds. Each new message starts
