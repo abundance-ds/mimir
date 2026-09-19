@@ -8,9 +8,9 @@ mod markdown;
 mod migration;
 mod model;
 mod ordering;
-pub(crate) mod project_home;
 #[cfg(test)]
 mod performance;
+pub(crate) mod project_home;
 mod references;
 pub(crate) mod runtime;
 mod source_sync;

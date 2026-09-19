@@ -7,13 +7,13 @@
     <div v-if="draft?.error" class="project-home-save-error" role="status">
       <p>{{ draft.error }}</p>
       <template v-if="draft.remote != null">
-        <details><summary>View saved canvas</summary><ProjectMarkdown :document="remoteDocument" @open="openLink" /></details>
-        <button type="button" @click="$emit('resolve', false)">Save my version</button>
-        <button type="button" @click="$emit('resolve', true)">Use saved version</button>
+        <details><summary data-graph-control="project-saved-canvas">View saved canvas</summary><ProjectMarkdown :document="remoteDocument" @open="openLink" /></details>
+        <button type="button" data-graph-control="project-save-local" @click="$emit('resolve', false)">Save my version</button>
+        <button type="button" data-graph-control="project-use-saved" @click="$emit('resolve', true)">Use saved version</button>
       </template>
-      <button v-else type="button" @click="$emit('save')">Retry save</button>
+      <button v-else type="button" data-graph-control="project-save-retry" @click="$emit('save')">Retry save</button>
     </div>
-    <button v-if="draft?.recovery != null" class="project-home-recover" type="button" @click="$emit('recover')">Restore my previous draft</button>
+    <button v-if="draft?.recovery != null" class="project-home-recover" type="button" data-graph-control="project-recover-draft" @click="$emit('recover')">Restore my previous draft</button>
     <div class="project-home-layout">
       <div class="project-home-content">
         <GraphMarkdownEditor :model-value="modelValue" :view-state="editorState" :framed="false" canvas-style open-links
@@ -22,8 +22,8 @@
           @update:model-value="$emit('update:modelValue', $event)" @save="$emit('save')"
           @open-file="$emit('openFile', $event)" @open-url="$emit('openUrl', $event)" @open-graph="$emit('openNode', $event)" />
         <details v-if="project.body?.trim()" class="project-home-project-context">
-          <summary><IconChevronRight :size="13" />Project context</summary>
-          <div class="project-home-section-heading"><span class="project-home-muted">Scope, methods, and agent instructions</span><button type="button" @click="$emit('editContext')">Edit context</button></div>
+          <summary data-graph-control="project-context"><IconChevronRight :size="13" />Project context</summary>
+          <div class="project-home-section-heading"><span class="project-home-muted">Scope, methods, and agent instructions</span><button type="button" data-graph-control="project-edit-context" @click="$emit('editContext')">Edit context</button></div>
           <ProjectMarkdown :document="contextDocument" @open="openLink" />
         </details>
       </div>

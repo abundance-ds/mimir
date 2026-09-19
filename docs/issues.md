@@ -84,8 +84,7 @@ task scope.
   Automated contracts are necessary evidence, not a substitute for those
   provider/recovery paths.
 
-- Business graph: UI audit fails on Project Home control IDs; `cargo fmt`
-  flags module order. Desktop screenshots (narrow/default/wide, rail and
+- Business graph: desktop screenshots (narrow/default/wide, rail and
   reduced-motion states) remain a manual release check.
 
 - Terminal command-aware `working` status is a future specification candidate.
