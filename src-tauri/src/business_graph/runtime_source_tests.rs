@@ -23,6 +23,7 @@ fn save(path: &str, content: &str, revision: &str) -> GraphSourceSaveRequest {
         path: path.into(),
         content: content.into(),
         expected_revision: revision.into(),
+        base_content: None,
     }
 }
 
@@ -430,4 +431,94 @@ fn same_id_and_revision_in_another_root_cannot_accept_stale_rich_saves_or_moves(
         .unwrap_err();
     assert!(error.to_string().contains("source location changed"));
     assert!(new_root.root.join("graph/source.md").is_file());
+}
+
+#[test]
+fn project_canvas_has_its_own_metadata_search_and_links() {
+    let (_temp, root) = root();
+    let path = write(
+        &root,
+        "atlas",
+        "---\nkind: project\ntitle: Atlas\n---\nStable context.",
+    );
+    write(&root, "jon", "---\nkind: person\ntitle: Jon\n---\n");
+    let runtime = GraphRuntime::from_roots(vec![root]);
+    let mut actor = GraphActor::human();
+    actor.label = "Anna".into();
+    let updated = runtime.update_as(GraphNodePatch { id: "atlas".into(), set_properties: serde_json::from_value(json!({"home": {"canvas": "A quokka [Jon](mimir://graph/jon)", "updatedAt": "fake"}})).unwrap(), ..Default::default() }, &actor).unwrap();
+    let home = updated.properties.get("home").unwrap().clone();
+    assert_ne!(home["updatedAt"], "fake");
+    assert_eq!(home["updatedBy"]["label"], "Anna");
+    let context_edit = runtime
+        .update(GraphNodePatch {
+            id: "atlas".into(),
+            body: Some("New stable context.".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(context_edit.properties["home"], home);
+    let backlinks = runtime
+        .references("jon", &BTreeSet::new())
+        .unwrap()
+        .backlinks;
+    assert_eq!(
+        backlinks[0].occurrences[0].source_field.as_deref(),
+        Some("home.canvas")
+    );
+    let store = runtime.store.read().unwrap();
+    assert_eq!(
+        store.search("quokka", &BTreeSet::new(), 25)[0].node.id,
+        "atlas"
+    );
+    drop(store);
+    let before = runtime.source(&path).unwrap().unwrap();
+    let content = before.content.replace("quokka", "wombat");
+    let saved = runtime
+        .source_save(save(&path, &content, &before.source_revision))
+        .unwrap();
+    assert_eq!(
+        saved.node.unwrap().properties["home"]["updatedBy"]["kind"],
+        "human"
+    );
+}
+
+#[test]
+fn source_context_edit_rebases_over_canvas_only_and_rejects_other_changes() {
+    let (_temp, root) = root();
+    let path = write(
+        &root,
+        "atlas",
+        "---\nkind: project\ntitle: Atlas\nhome:\n  canvas: Old canvas\n---\nStable context.",
+    );
+    let runtime = GraphRuntime::from_roots(vec![root]);
+    let before = runtime.source(&path).unwrap().unwrap();
+    runtime
+        .update(GraphNodePatch {
+            id: "atlas".into(),
+            set_properties: serde_json::from_value(json!({"home": {"canvas": "New canvas"}}))
+                .unwrap(),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut request = save(
+        &path,
+        &before.content.replace("Stable context.", "New context."),
+        &before.source_revision,
+    );
+    request.base_content = Some(before.content.clone());
+    let next = runtime.source_save(request).unwrap();
+    assert_eq!(next.node.as_ref().unwrap().body, "New context.");
+    assert_eq!(
+        next.node.as_ref().unwrap().properties["home"]["canvas"],
+        "New canvas"
+    );
+    let mut competing = save(
+        &path,
+        &before
+            .content
+            .replace("Stable context.", "Competing context."),
+        &before.source_revision,
+    );
+    competing.base_content = Some(before.content);
+    assert!(runtime.source_save(competing).is_err());
 }

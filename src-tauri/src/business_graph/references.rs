@@ -49,6 +49,8 @@ pub struct GraphLinkResolution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphBodyReference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_field: Option<String>,
     pub target_id: String,
     pub label: String,
     /// Complete Markdown occurrence bounds, in UTF-16 units of the body.
@@ -111,6 +113,7 @@ pub fn extract_graph_references(body: &str) -> Vec<GraphBodyReference> {
                     range.end
                 };
                 active = parse_graph_link_target(&dest_url).map(|id| GraphBodyReference {
+                    source_field: None,
                     target_id: id.to_string(),
                     label: String::new(),
                     from: range.start,

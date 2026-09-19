@@ -522,6 +522,22 @@ impl GraphRuntime {
     }
 
     pub fn update(&self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
+        self.update_as(
+            patch,
+            &GraphActor {
+                kind: GraphActorKind::Agent,
+                id: "agent".into(),
+                label: "Agent".into(),
+                ..GraphActor::default()
+            },
+        )
+    }
+
+    pub fn update_as(
+        &self,
+        patch: GraphNodePatch,
+        actor: &GraphActor,
+    ) -> Result<GraphNode, GraphMutationError> {
         let _mutation = self
             .mutation_gate
             .lock()
@@ -530,7 +546,7 @@ impl GraphRuntime {
             .store
             .write()
             .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
-            .update_node(patch)?;
+            .update_node_as(patch, actor)?;
         self.remember_source_revision(
             updated.provenance.source_path.clone(),
             Some(updated.provenance.source_revision.clone()),
@@ -539,6 +555,22 @@ impl GraphRuntime {
     }
 
     pub fn create(&self, create: GraphNodeCreate) -> Result<GraphNode, GraphMutationError> {
+        self.create_as(
+            create,
+            &GraphActor {
+                kind: GraphActorKind::Agent,
+                id: "agent".into(),
+                label: "Agent".into(),
+                ..GraphActor::default()
+            },
+        )
+    }
+
+    pub fn create_as(
+        &self,
+        create: GraphNodeCreate,
+        actor: &GraphActor,
+    ) -> Result<GraphNode, GraphMutationError> {
         let _mutation = self
             .mutation_gate
             .lock()
@@ -568,7 +600,7 @@ impl GraphRuntime {
             .store
             .write()
             .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
-            .create_node(&root, create)?;
+            .create_node_as(&root, create, actor)?;
         self.remember_source_revision(
             created.provenance.source_path.clone(),
             Some(created.provenance.source_revision.clone()),
@@ -1327,10 +1359,13 @@ pub async fn graph_update(
     tauri::async_runtime::spawn_blocking(move || {
         let runtime = app.state::<GraphRuntime>();
         let before = runtime.get(&patch.id)?;
-        let updated = runtime.update(patch).map_err(|error| error.to_string())?;
+        let actor = actor.unwrap_or_else(GraphActor::human);
+        let updated = runtime
+            .update_as(patch, &actor)
+            .map_err(|error| error.to_string())?;
         runtime.record_mutation(
             "graph.update",
-            actor.unwrap_or_else(GraphActor::human),
+            actor,
             before,
             Some(updated.clone()),
             updated.provenance.source_path.clone(),
@@ -1358,10 +1393,13 @@ pub async fn graph_create(
 ) -> Result<GraphNode, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let runtime = app.state::<GraphRuntime>();
-        let created = runtime.create(create).map_err(|error| error.to_string())?;
+        let actor = actor.unwrap_or_else(GraphActor::human);
+        let created = runtime
+            .create_as(create, &actor)
+            .map_err(|error| error.to_string())?;
         runtime.record_mutation(
             "graph.create",
-            actor.unwrap_or_else(GraphActor::human),
+            actor,
             None,
             Some(created.clone()),
             created.provenance.source_path.clone(),

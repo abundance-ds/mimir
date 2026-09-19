@@ -205,7 +205,16 @@ impl GraphStore {
     pub fn create_node(
         &mut self,
         root: &GraphSourceRoot,
+        create: GraphNodeCreate,
+    ) -> Result<GraphNode, GraphMutationError> {
+        self.create_node_as(root, create, &super::GraphActor::external())
+    }
+
+    pub fn create_node_as(
+        &mut self,
+        root: &GraphSourceRoot,
         mut create: GraphNodeCreate,
+        actor: &super::GraphActor,
     ) -> Result<GraphNode, GraphMutationError> {
         let kind = canonical_kind(&create.kind);
         let explicit_id = create.id.take();
@@ -251,6 +260,7 @@ impl GraphStore {
             let preferred_tags = (!node.tags.is_empty()).then(|| node.tags.clone());
             canonicalize_issue_labels(&mut node, preferred_tags);
         }
+        super::project_home::stamp(&mut node, None, actor).map_err(GraphMutationError::Invalid)?;
         validate_mutation(&node)?;
         let serialized =
             serialize_graph_markdown(&node).map_err(|error| GraphMutationError::Serialize {
@@ -332,6 +342,14 @@ impl GraphStore {
     }
 
     pub fn update_node(&mut self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
+        self.update_node_as(patch, &super::GraphActor::external())
+    }
+
+    pub fn update_node_as(
+        &mut self,
+        patch: GraphNodePatch,
+        actor: &super::GraphActor,
+    ) -> Result<GraphNode, GraphMutationError> {
         let tags_changed = patch.tags.is_some();
         let labels_changed = patch.set_properties.contains_key("labels")
             || patch
@@ -371,6 +389,7 @@ impl GraphStore {
             });
         }
         refresh_mutation_base(&mut node, &current_raw, &actual_revision)?;
+        let previous_home = node.properties.get("home").cloned();
 
         if let Some(kind) = patch.kind {
             let kind = canonical_kind(&kind);
@@ -415,6 +434,8 @@ impl GraphStore {
             node.properties.remove(&key);
         }
         node.properties.extend(patch.set_properties);
+        super::project_home::stamp(&mut node, previous_home.as_ref(), actor)
+            .map_err(GraphMutationError::Invalid)?;
         if node.kind == "issue" && (tags_changed || labels_changed) {
             let preferred_tags = tags_changed.then(|| node.tags.clone());
             canonicalize_issue_labels(&mut node, preferred_tags);
@@ -960,7 +981,9 @@ impl GraphStore {
             if old.title == node.title {
                 cached_title = title;
             }
-            if old.body == node.body {
+            if old.body == node.body
+                && super::project_home::canvas(old) == super::project_home::canvas(&node)
+            {
                 cached_references = references;
             }
         }
@@ -970,7 +993,16 @@ impl GraphStore {
             {
                 self.reference_parse_count += 1;
             }
-            extract_graph_references(&node.body)
+            let mut references = extract_graph_references(&node.body);
+            references.extend(
+                extract_graph_references(super::project_home::canvas(&node))
+                    .into_iter()
+                    .map(|mut reference| {
+                        reference.source_field = Some("home.canvas".into());
+                        reference
+                    }),
+            );
+            references
         });
         self.by_kind
             .entry(node.kind.clone())
@@ -1419,7 +1451,7 @@ fn search_score(node: &GraphNode, terms: &[String], query: &str) -> u32 {
     let id = node.id.to_lowercase();
     let title = node.title.to_lowercase();
     let summary = node.summary.to_lowercase();
-    let body = node.body.to_lowercase();
+    let body = format!("{}\n{}", node.body, super::project_home::canvas(node)).to_lowercase();
     let tags = node
         .tags
         .iter()

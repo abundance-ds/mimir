@@ -195,8 +195,17 @@ fn context_node(
         };
     }
 
+    let canvas = super::project_home::canvas(&node);
+    let text = if canvas.is_empty() {
+        node.body.clone()
+    } else {
+        format!(
+            "### Team canvas\n\n{canvas}\n\n### Project context\n\n{}",
+            node.body
+        )
+    };
     let (body_excerpt, truncated) =
-        bounded_excerpt(&node.body, (*body_budget).min(MAX_BODY_CHARS_PER_NODE));
+        bounded_excerpt(&text, (*body_budget).min(MAX_BODY_CHARS_PER_NODE));
     if truncated {
         *truncated_bodies += 1;
     }
@@ -246,7 +255,12 @@ fn bounded_excerpt(body: &str, limit: usize) -> (Option<String>, bool) {
 fn safe_properties(properties: Map<String, Value>) -> Map<String, Value> {
     properties
         .into_iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "sensitive" | "secret" | "token" | "apiKey"))
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "sensitive" | "secret" | "token" | "apiKey" | "home"
+            )
+        })
         .collect()
 }
 

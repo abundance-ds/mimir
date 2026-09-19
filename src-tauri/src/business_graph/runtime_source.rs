@@ -45,6 +45,8 @@ pub struct GraphSourceSaveRequest {
     pub path: String,
     pub content: String,
     pub expected_revision: String,
+    #[serde(default)]
+    pub base_content: Option<String>,
 }
 
 struct SourceLocation {
@@ -97,20 +99,49 @@ impl GraphRuntime {
             )
         })?;
         let actual = source_revision(&current);
+        let mut content = request.content;
         if actual != request.expected_revision {
-            return Err(GraphMutationError::Conflict {
-                id: source_id(&location.path).unwrap_or_default(),
-                expected: request.expected_revision,
-                actual,
+            let rebased = request
+                .base_content
+                .as_deref()
+                .filter(|base| source_revision(base) == request.expected_revision)
+                .and_then(|base| {
+                    crate::business_graph::project_home::rebase_context_source(
+                        &location.path,
+                        base,
+                        &content,
+                        &current,
+                    )
+                });
+            if let Some(rebased) = rebased {
+                content = rebased;
+            } else {
+                return Err(GraphMutationError::Conflict {
+                    id: source_id(&location.path).unwrap_or_default(),
+                    expected: request.expected_revision,
+                    actual,
+                }
+                .to_string());
             }
-            .to_string());
         }
-        let next =
-            GraphSourceDocument::from_source(&location.path, &location.root, request.content);
+        let mut next = GraphSourceDocument::from_source(&location.path, &location.root, content);
         if next.content == current {
             return Ok(next);
         }
         let before = GraphSourceDocument::from_source(&location.path, &location.root, current).node;
+        if let Some(node) = next.node.as_mut() {
+            let authored_home = node.properties.get("home").cloned();
+            crate::business_graph::project_home::stamp(
+                node,
+                before.as_ref().and_then(|node| node.properties.get("home")),
+                &GraphActor::human(),
+            )?;
+            if node.properties.get("home") != authored_home.as_ref() {
+                let content = crate::business_graph::serialize_graph_markdown(node)
+                    .map_err(|error| error.to_string())?;
+                next = GraphSourceDocument::from_source(&location.path, &location.root, content);
+            }
+        }
         // Preserve authored YAML, whitespace, and line endings. Structured Graph
         // saves and source saves share this gate and the same revision hash.
         persistence::write_bytes_atomic(&location.path, next.content.as_bytes()).map_err(

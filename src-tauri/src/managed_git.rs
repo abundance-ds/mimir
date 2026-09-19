@@ -1608,6 +1608,38 @@ fn merge_last_edit_wins(
             local_oid
         };
         replace_index_path_from_commit(repo, &mut index, path, winner)?;
+        if path.extension().and_then(|value| value.to_str()) == Some("md")
+            && path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                == Some("graph")
+        {
+            let read = |oid| -> Option<String> {
+                let tree = repo.find_commit(oid).ok()?.tree().ok()?;
+                let blob = repo.find_blob(tree.get_path(path).ok()?.id()).ok()?;
+                std::str::from_utf8(blob.content()).ok().map(str::to_owned)
+            };
+            if let (Some(base), Some(local), Some(remote)) =
+                (read(base_oid), read(local_oid), read(remote_oid))
+            {
+                if let Some(merged) = crate::business_graph::project_home::merge_sources(
+                    path,
+                    &base,
+                    &local,
+                    &remote,
+                    remote_time > local_time,
+                ) {
+                    if let Some(mut entry) = index.get_path(path, 0) {
+                        entry.id = repo
+                            .blob(merged.as_bytes())
+                            .map_err(|error| error.to_string())?;
+                        entry.file_size = merged.len() as u32;
+                        index.add(&entry).map_err(|error| error.to_string())?;
+                    }
+                }
+            }
+        }
     }
     if index.has_conflicts() {
         return Err("Mimir could not resolve a managed file conflict automatically.".into());
@@ -2654,6 +2686,48 @@ mod tests {
         sync_repository(&older_path, RepositoryKind::Team).unwrap();
         sync_repository(&newer_path, RepositoryKind::Team).unwrap();
         assert_eq!(head_file(&newer, "graph/shared.md"), b"newer");
+    }
+
+    #[test]
+    fn project_home_sync_preserves_context_and_both_canvas_versions() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let remote_path = remote_fixture(directory.path());
+        let seed_path = directory.path().join("seed-home");
+        let seed = clone_repository(&remote_path, &seed_path);
+        let source = |body: &str, canvas: &str| {
+            format!("---\nkind: project\ntitle: Atlas\nhome:\n  canvas: {canvas}\n---\n{body}")
+        };
+        managed_commit_at(
+            &seed,
+            "graph/atlas.md",
+            source("Context", "Old").as_bytes(),
+            2_000_000_000,
+        );
+        sync_repository(&seed_path, RepositoryKind::Team).unwrap();
+        let a_path = directory.path().join("home-a");
+        let b_path = directory.path().join("home-b");
+        let a = clone_repository(&remote_path, &a_path);
+        let b = clone_repository(&remote_path, &b_path);
+        let a_oid = managed_commit_at(
+            &a,
+            "graph/atlas.md",
+            source("New context", "Local canvas").as_bytes(),
+            2_000_000_100,
+        );
+        let b_oid = managed_commit_at(
+            &b,
+            "graph/atlas.md",
+            source("Context", "Remote canvas").as_bytes(),
+            2_000_000_200,
+        );
+        sync_repository(&b_path, RepositoryKind::Team).unwrap();
+        sync_repository(&a_path, RepositoryKind::Team).unwrap();
+        let merged = String::from_utf8(head_file(&a, "graph/atlas.md")).unwrap();
+        assert!(merged.contains("New context"));
+        assert!(merged.contains("Remote canvas"));
+        let head = a.head().unwrap().target().unwrap();
+        assert!(a.graph_descendant_of(head, a_oid).unwrap());
+        assert!(a.graph_descendant_of(head, b_oid).unwrap());
     }
 
     #[test]

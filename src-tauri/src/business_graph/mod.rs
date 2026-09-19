@@ -8,6 +8,7 @@ mod markdown;
 mod migration;
 mod model;
 mod ordering;
+pub(crate) mod project_home;
 #[cfg(test)]
 mod performance;
 mod references;
