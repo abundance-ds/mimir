@@ -132,6 +132,11 @@ by normal shell exit. The source-bound stage, code signature, and Gatekeeper
 assessment passed. These checks did not exercise capture permission prompts,
 live Scribe providers/recovery, or two-Mac GitHub sync.
 
+For 0.3.3, GitHub verification passed, but the runner's connection to Apple's
+notary service timed out before upload. Publication used that verified local
+stage. All eight uploaded file sizes and SHA-256 hashes matched the local
+files; no second macOS runner build was needed.
+
 ## Dependencies and licenses
 
 After a lockfile, policy, or embedded-asset change:
