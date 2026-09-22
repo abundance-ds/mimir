@@ -47,6 +47,14 @@ full-width wash from `markdownCodeBlocks.js`. The file store is the durable rend
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
 
+Live Preview renders inline Markdown in table headers and cells. File and web
+links use the Editor's open actions and retain the cursor position. Table links
+carry their destination because a block widget cannot map each cell through
+editor coordinates. Authored HTML stays text. Moving the cursor into a table
+shows its Markdown source. Empty header and body cells keep their column
+positions, including alignment; the Markdown syntax tree omits these cells,
+so preview maps its nodes through the complete row before rendering.
+
 ### Document model
 
 A tab displays one open document. A document owns its id, current text, saved

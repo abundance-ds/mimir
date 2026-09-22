@@ -108,17 +108,34 @@ filesystem work.
 
 ## Connections
 
-Connections are managed in Settings and update the live tool catalog without a
-restart.
+Discover setup with `mimir tools connections`; schemas own arguments.
 
-- GitHub uses installed `git` and the shared GitHub CLI login. It adds no agent
-  tools, and Mimir never reads or stores its token.
-- Google uses browser OAuth and can hold several accounts. Tool calls accept an
-  optional account email; omission selects the marked default.
-- Slack accepts a verified personal `xoxp-` token.
-- Granola accepts its supported public API key.
-- Mimir stores its provider credentials in the OS keychain. Agents cannot call
-  credential or connection-management commands.
+- `connections_list`: accounts, methods, tools, prerequisites, pending IDs.
+- `connections_connect` / `connections_check`: return IDs for
+  `connections_operation`; poll or cancel. Receipts expire on restart or after
+  the 64-receipt limit; operations time out after four minutes.
+- `connections_set_default`: Google account selection.
+- `connections_disconnect`: local removal, not provider revocation.
+
+A connection request authorizes setup and checks. Ask only for missing choices
+or provider consent. Pass credentials through `--stdin`; never read stored
+secrets or put them in arguments, logs, or files. Failed validation preserves
+existing credentials. Concurrent setup changes are rejected. Recheck GitHub
+status after cancellation: its CLI may already have saved login.
+
+| Provider | Setup |
+|---|---|
+| GitHub | Installed `git` and shared `gh` login; no Mimir token or data tools. Team setup is separate. |
+| Google | Browser OAuth requires a client ID; multiple accounts, default used when omitted. |
+| Slack | Browser OAuth with a client ID, or personal `xoxp-` token; one connection. |
+| Granola | Public API key; one connection. |
+
+Checks verify Google/Slack identity, compare reported Slack scopes, read Granola
+notes, or inspect GitHub CLI status. They do not prove every capability.
+
+Settings and agents share native validation and Keychain storage; changes
+refresh tools and Settings. Manual forms and feedback stay within their provider
+row; closing or switching clears secrets. AI, Scribe, and Chat setup is separate.
 
 ## Skills
 

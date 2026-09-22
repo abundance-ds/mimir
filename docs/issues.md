@@ -5,6 +5,13 @@ task scope.
 
 ## Open
 
+- Connection setup: automated tests cover public setup contracts, cancellation,
+  concurrent setup rejection, and inline credential forms. A signed installed
+  app still needs Slack/Granola Keychain setup, invalid-token replacement,
+  Google/Slack browser consent and cancellation, and GitHub child-process
+  cancellation checks. Slack OAuth availability reflects configuration, not
+  live verification. Capability checks explicitly report their limits.
+
 - Native Editor menu: Select All, Undo, and Redo call the Editor surface even
   when a Go to search input has focus. Route these edit commands to the active
   text control and verify them in macOS. Copy, Cut, and Paste use native roles.

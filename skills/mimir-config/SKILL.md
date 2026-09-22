@@ -37,5 +37,7 @@ roots. If Team is not set up, `--team` stays unavailable; these commands do not
 create or connect it.
 
 Do not edit `session.json`, `routines-state.json`, `activities/`, `app-data/`,
-graph event files, or credentials. Use graph tools for graph data. Credentials
-stay in the OS keychain.
+graph event files, or credential storage. Use graph tools for graph data.
+
+Use `mimir tools connections` for account setup. Complete the requested setup
+and report the verified result.

@@ -13,8 +13,13 @@ Comments are review threads stored directly in Markdown as protected pseudo-XML:
   `src/services/comments/parser.js`.
 - CodeMirror hides tags and renders the thread after its anchor. Resolve keeps
   the stored thread; delete unwraps it and preserves anchor text.
+- Table preview removes comment and reply tags before rendering cells. Anchor
+  text keeps its Markdown formatting and links. The stored source is unchanged.
 - Minimized state and resolved-thread visibility are renderer state, not
   Markdown.
+- Discussion block widgets must have no vertical margins. CodeMirror measures
+  their border boxes; external spacing makes cursor and mouse line positions
+  drift with each discussion. Use internal padding for spacing.
 - Hidden syntax needs replacement decorations, atomic ranges, change filters,
   and boundary key handlers. Deliberate changes carry `commentMutation`.
 - Public comment tools use this same representation; the definitive public

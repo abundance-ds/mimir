@@ -42,7 +42,13 @@ Click a `mimir://graph/<id>` link in terminal or agent output to open Graph
 Details in the Editor. Plain text, Markdown targets, and explicit CLI
 hyperlinks use the same action. Links remain active across visual line wraps
 and indented continuations after a slash. Graph targets use the same ID rules
-as Editor links. File links and web links retain their existing actions.
+as Editor links. Graph IDs split elsewhere by explicit newlines can also be
+recovered from up to two indented continuation lines. Continuation indentation
+must stay consistent. Recovery requires one matching ID in the loaded Graph
+records; a known complete first-line ID is kept. Unloaded records, ambiguous
+matches, and continuations with table borders are not recovered. This check uses
+a shared in-memory index and does not read files or request Graph data on hover.
+File links and web links retain their existing actions.
 
 ## Workspace projection
 

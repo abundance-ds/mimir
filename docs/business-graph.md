@@ -283,6 +283,52 @@ Set reminders, snooze dates, and tags remain visible beside its toggle.
 Project entries retain their Markdown editor and property controls in Details.
 The Project overview belongs to Home in Main.
 
+### Issue creation
+
+New issue uses a compact dialog with a title and an always-visible Markdown
+description. Project, status, owner, priority, and due date sit in a wrapping
+row below the description. Each control shows a symbol and its value, with a
+full accessible name. Empty owner and date controls show **Assign** and
+**Due date**. Project search uses the complete Project catalog, independently
+of the first entry page. **No project** is an explicit choice.
+
+The initial Project comes from the selected Project column, then the Work
+Project filter, then the workspace link. An unassigned column or filter means
+No project. A related issue starts with its source entry's Project. The
+submitted selection supplies the sole new Project assignment; creation never
+adds the old default as a second assignment. This does not change the workspace
+link or its default storage.
+
+The footer separates **Save to** storage from Project membership. Its Link
+button opens a search menu without editing the description. Selecting an
+entry inserts its Markdown link at the description cursor; cancelling changes
+nothing. `@` completion also works in the description and can extend beyond
+the dialog into the available window space. More issue options opens a
+separate menu for tags and **Create another**, without changing dialog size. Repeated creation
+keeps Project, owner, status, priority, and storage, but clears the title,
+description, tags, and due date. Title receives focus on open; Enter moves to
+the description. Cmd/Ctrl+Enter creates the issue from the title, description,
+or any open property menu, before an editor or menu can consume the shortcut.
+Escape first closes an open menu or an active `@` lookup. Otherwise it closes
+an empty issue. If the title, description, or tags contain text, Escape and
+the close button ask before discarding it. **Keep editing** receives focus;
+Escape from that confirmation keeps the draft and restores focus. Failed saves
+retain the draft and show an inline error.
+Outside clicks do not close an issue draft, and a pending save blocks close
+and repeated submission. Successful creation uses the existing Editor opening
+behaviour. Other entry kinds keep the general Graph creation form.
+
+`harness/issue-create.html` mounts the production dialog with fixture data.
+It does not read or write user Graph files. The standalone design comparison
+is `harness/issue-dialog-mockups.html`.
+
+Chrome checks on 2026-09-21 covered the production composer in light and dark
+themes, including a 375 × 400 px window. Title focus, stable dialog geometry
+when options open, link-search cancellation and insertion, and completion-menu
+window bounds passed. Component tests cover the submitted fields, project
+overrides, No project, repeat creation, failed saves, and link selection.
+These checks do not establish signed installed-app behaviour.
+
 ### Project home
 
 **Home** is the first top-level tab beside **Work**, **Graph**, and **Changes**.

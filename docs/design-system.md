@@ -77,7 +77,10 @@ rules that relate them.
   table has no row lines and uses 11.5 px type. Other projection rows use hairlines.
 - Tools and Activities rows are 24 px in the Sidebar and rail. File rows are 28 px.
 - Graph property controls are borderless at rest and gain a quiet hover wash
-  and focus ring. Visible labels explain editable values.
+  and focus ring. Visible labels explain editable values. The issue composer
+  uses compact bordered controls with a symbol and the current value. Empty
+  controls name the property or action; accessible names include the property
+  and value. Storage keeps the explicit **Save to** label.
 - Graph notes are unframed document text. Dialog fields can remain boxed.
 - Work rows: Board cards are 84 px `chrome-high` plates on a `chrome`
   column with a 1 px `rule-light` edge, a 2 px radius, and a 4 px gap; hover
