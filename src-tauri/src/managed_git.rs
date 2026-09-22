@@ -908,15 +908,21 @@ pub async fn github_connection_status() -> Result<GithubConnectionStatus, String
         .map_err(|error| format!("GitHub status task failed: {error}"))
 }
 
+static GITHUB_LOGIN_CHANGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tauri::command]
 pub async fn github_connect() -> Result<GithubConnectionStatus, String> {
-    tauri::async_runtime::spawn_blocking(connect_github_cli)
-        .await
-        .map_err(|error| format!("GitHub sign-in task failed: {error}"))?
+    let _guard = GITHUB_LOGIN_CHANGE
+        .try_lock()
+        .map_err(|_| "A GitHub login change is in progress.".to_string())?;
+    connect_github_cli().await
 }
 
 #[tauri::command]
 pub async fn github_disconnect() -> Result<GithubConnectionStatus, String> {
+    let _guard = GITHUB_LOGIN_CHANGE
+        .try_lock()
+        .map_err(|_| "A GitHub login change is in progress.".to_string())?;
     tauri::async_runtime::spawn_blocking(disconnect_github_cli)
         .await
         .map_err(|error| format!("GitHub sign-out task failed: {error}"))?
@@ -980,15 +986,15 @@ fn github_login_from_status(bytes: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn connect_github_cli() -> Result<GithubConnectionStatus, String> {
+async fn connect_github_cli() -> Result<GithubConnectionStatus, String> {
     crate::launchers::detect_binary("git").map_err(|_| {
         "Git is not installed. Install Git, then try GitHub sign-in again.".to_string()
     })?;
     let gh = crate::launchers::detect_binary("gh").map_err(|_| {
         "GitHub CLI is not installed. Install it from cli.github.com, then try again.".to_string()
     })?;
-    if !github_cli_status().connected {
-        let output = Command::new(&gh)
+    if !github_connection_status().await?.connected {
+        let output = tokio::process::Command::new(&gh)
             .args([
                 "auth",
                 "login",
@@ -1001,11 +1007,13 @@ fn connect_github_cli() -> Result<GithubConnectionStatus, String> {
                 "--scopes",
                 "repo",
             ])
+            .kill_on_drop(true)
             .output()
+            .await
             .map_err(|error| format!("Could not start GitHub sign-in: {error}"))?;
         require_command_success("GitHub sign-in failed", &output)?;
     }
-    let status = github_cli_status();
+    let status = github_connection_status().await?;
     if status.connected {
         Ok(status)
     } else {

@@ -71,7 +71,7 @@ impl ConnectionRuntime {
             .map_err(|error| format!("Google returned invalid JSON: {error}"))
     }
 
-    async fn google_access_token(&self, input: &Value) -> Result<String, String> {
+    pub(super) async fn google_access_token(&self, input: &Value) -> Result<String, String> {
         let store = google_store()?;
         let account = resolve_google_account(&store, string(input, "account").as_deref())?;
         let account_id = account.id.clone();

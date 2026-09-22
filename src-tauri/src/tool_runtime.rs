@@ -40,7 +40,61 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 51] = [
+    AgentToolSpec {
+        canonical_name: "connections.list",
+        public_name: "connections_list",
+        description: "List connections and setup methods.",
+        group: "connections",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "connections.connect",
+        public_name: "connections_connect",
+        description: "Start connection setup; return an operation ID.",
+        group: "connections",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "connections.check",
+        public_name: "connections_check",
+        description: "Check a connection; return an operation ID.",
+        group: "connections",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "connections.operation",
+        public_name: "connections_operation",
+        description: "Read or cancel a connection operation.",
+        group: "connections",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "connections.set_default",
+        public_name: "connections_set_default",
+        description: "Select the default Google account.",
+        group: "connections",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "connections.disconnect",
+        public_name: "connections_disconnect",
+        description: "Remove a specified connection.",
+        group: "connections",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -1591,7 +1645,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 45);
+        assert_eq!(AGENT_TOOLS.len(), 51);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1618,7 +1672,10 @@ mod tests {
                 spec.group,
                 "workbench" | "graph" | "meetings" | "chat" | "connections"
             ));
-            assert_eq!(spec.connection.is_some(), spec.group == "connections");
+            assert_eq!(
+                spec.connection.is_some(),
+                spec.group == "connections" && !spec.public_name.starts_with("connections_")
+            );
         }
     }
 

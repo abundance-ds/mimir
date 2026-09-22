@@ -1,9 +1,12 @@
 use super::*;
 
-#[tauri::command]
-pub async fn connections_connect_google(
-    manager: tauri::State<'_, ConnectionManager>,
+pub(super) async fn connect_google(
+    manager: &ConnectionManager,
 ) -> Result<ConnectionStatus, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     let client_id = configured_google_client_id().ok_or_else(|| {
         "This Mimir build has no Google sign-in client. Add MIMIR_GOOGLE_OAUTH_CLIENT_ID when you build the app."
             .to_string()
@@ -52,10 +55,7 @@ pub async fn connections_connect_google(
         .await
         .map_err(|error| format!("Google returned invalid sign-in data: {error}"))?;
     if !status.is_success() {
-        return Err(format!(
-            "Google sign-in failed with HTTP {status}{}",
-            remote_error_suffix(&value.to_string())
-        ));
+        return Err(format!("Google sign-in failed with HTTP {status}"));
     }
     let access_token = required_json_string(&value, "access_token")?;
     let identity = manager
@@ -126,10 +126,11 @@ pub async fn connections_connect_google(
     Ok(google_status())
 }
 
-#[tauri::command]
-pub async fn connections_connect_slack(
-    manager: tauri::State<'_, ConnectionManager>,
-) -> Result<ConnectionStatus, String> {
+pub(super) async fn connect_slack(manager: &ConnectionManager) -> Result<ConnectionStatus, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     let client_id = configured_slack_client_id().ok_or_else(|| {
         "This Mimir build has no Slack sign-in client. Add MIMIR_SLACK_CLIENT_ID when you build the app."
             .to_string()
@@ -201,11 +202,14 @@ pub async fn connections_connect_slack(
     Ok(slack_status())
 }
 
-#[tauri::command]
-pub async fn connections_connect_slack_token(
+pub(super) async fn connect_slack_token(
     token: String,
-    manager: tauri::State<'_, ConnectionManager>,
+    manager: &ConnectionManager,
 ) -> Result<ConnectionStatus, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     let token = slack_personal_token(&token)?;
     let response = manager
         .runtime
@@ -225,7 +229,10 @@ pub async fn connections_connect_slack_token(
             .get("error")
             .and_then(Value::as_str)
             .unwrap_or("invalid_auth");
-        return Err(format!("Slack rejected this personal token: {reason}"));
+        return Err(format!(
+            "Slack rejected this personal token: {}",
+            reason.replace(token, "[redacted]")
+        ));
     }
     let team = value
         .get("team")
@@ -252,11 +259,14 @@ pub async fn connections_connect_slack_token(
     Ok(slack_status())
 }
 
-#[tauri::command]
-pub async fn connections_connect_granola(
+pub(super) async fn connect_granola(
     api_key: String,
-    manager: tauri::State<'_, ConnectionManager>,
+    manager: &ConnectionManager,
 ) -> Result<ConnectionStatus, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     let api_key = api_key.trim();
     if !api_key.starts_with("grn_") {
         return Err("Enter a Granola API key that starts with grn_.".into());
@@ -276,10 +286,7 @@ pub async fn connections_connect_granola(
         .await
         .map_err(|error| format!("Granola returned invalid connection data: {error}"))?;
     if !status.is_success() {
-        return Err(format!(
-            "Granola rejected this API key with HTTP {status}{}",
-            remote_error_suffix(&value.to_string())
-        ));
+        return Err(format!("Granola rejected this API key with HTTP {status}"));
     }
     let account = value
         .pointer("/notes/0/owner/email")
@@ -295,12 +302,15 @@ pub async fn connections_connect_granola(
     Ok(granola_status())
 }
 
-#[tauri::command]
-pub fn connections_disconnect(
+pub(super) fn disconnect(
     provider: String,
     account: Option<String>,
-    manager: tauri::State<'_, ConnectionManager>,
+    manager: &ConnectionManager,
 ) -> Result<Vec<ConnectionStatus>, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     match provider.as_str() {
         "google" => {
             if let Some(account) = account.filter(|value| !value.trim().is_empty()) {
@@ -322,15 +332,65 @@ pub fn connections_disconnect(
     Ok(manager.statuses())
 }
 
-#[tauri::command]
-pub fn connections_set_google_default(
+pub(super) fn set_google_default(
     account: String,
-    manager: tauri::State<'_, ConnectionManager>,
+    manager: &ConnectionManager,
 ) -> Result<ConnectionStatus, String> {
+    let _mutation = manager
+        .mutation
+        .try_lock()
+        .map_err(|_| "Another connection change is in progress. Try again.".to_string())?;
     let mut store = google_store()?;
     let id = resolve_google_account(&store, Some(&account))?.id.clone();
     store.default_account = Some(id);
     write_google_store(&store)?;
     manager.refresh_provider("google")?;
     Ok(google_status())
+}
+
+#[tauri::command]
+pub async fn connections_connect_google(
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    connect_google(&manager).await
+}
+
+#[tauri::command]
+pub async fn connections_connect_slack(
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    connect_slack(&manager).await
+}
+
+#[tauri::command]
+pub async fn connections_connect_slack_token(
+    token: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    connect_slack_token(token, &manager).await
+}
+
+#[tauri::command]
+pub async fn connections_connect_granola(
+    api_key: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    connect_granola(api_key, &manager).await
+}
+
+#[tauri::command]
+pub fn connections_disconnect(
+    provider: String,
+    account: Option<String>,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<Vec<ConnectionStatus>, String> {
+    disconnect(provider, account, &manager)
+}
+
+#[tauri::command]
+pub fn connections_set_google_default(
+    account: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    set_google_default(account, &manager)
 }

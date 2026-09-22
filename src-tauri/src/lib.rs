@@ -1126,7 +1126,7 @@ pub fn run() {
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
             app.state::<connections::ConnectionManager>()
-                .install()
+                .install(app.handle())
                 .map_err(std::io::Error::other)?;
             app.state::<managed_git::ManagedGitRuntime>()
                 .install(app.handle());

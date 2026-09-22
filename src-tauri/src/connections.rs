@@ -17,6 +17,7 @@ mod oauth;
 mod registration;
 mod runtime_google;
 mod runtime_other;
+mod setup;
 mod status;
 
 pub use commands::*;
@@ -47,7 +48,11 @@ pub(crate) struct Secret {
     pub(crate) value: String,
 }
 
+#[derive(Clone)]
 pub struct ConnectionManager {
+    mutation: std::sync::Arc<tokio::sync::Mutex<()>>,
+    operations: setup::Operations,
+    app: std::sync::Arc<std::sync::OnceLock<tauri::AppHandle>>,
     registry: ToolRegistry,
     runtime: ConnectionRuntime,
 }
@@ -78,6 +83,9 @@ impl ConnectionManager {
     pub fn new(registry: ToolRegistry) -> Result<Self, String> {
         Ok(Self {
             registry,
+            mutation: Default::default(),
+            operations: Default::default(),
+            app: Default::default(),
             runtime: ConnectionRuntime {
                 http: Client::builder()
                     .timeout(Duration::from_secs(30))
@@ -88,7 +96,9 @@ impl ConnectionManager {
         })
     }
 
-    pub fn install(&self) -> Result<(), String> {
+    pub fn install(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        let _ = self.app.set(app.clone());
+        setup::install(self)?;
         for provider in ["google", "slack", "granola"] {
             self.refresh_provider(provider)?;
         }
@@ -122,6 +132,10 @@ impl ConnectionManager {
                 }
             }
             _ => return Err(format!("Unknown connection provider: {provider}")),
+        }
+        if let Some(app) = self.app.get() {
+            use tauri::Emitter;
+            let _ = app.emit("connections-changed", ());
         }
         Ok(())
     }

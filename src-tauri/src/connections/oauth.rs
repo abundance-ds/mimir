@@ -59,7 +59,7 @@ impl OauthLoopback {
             .collect::<std::collections::HashMap<_, _>>();
         let success = values.get("state") == Some(&self.state) && values.contains_key("code");
         let body = if success {
-            "<!doctype html><meta charset=\"utf-8\"><title>Mimir connected</title><p>Connected. You can close this page and return to Mimir.</p>"
+            "<!doctype html><meta charset=\"utf-8\"><title>Mimir connected</title><p>Sign-in response received. Return to Mimir to check completion.</p>"
         } else {
             "<!doctype html><meta charset=\"utf-8\"><title>Mimir sign-in stopped</title><p>Mimir could not complete sign-in. Return to Mimir and try again.</p>"
         };
