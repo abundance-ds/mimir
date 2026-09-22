@@ -1148,7 +1148,7 @@ function scopeName(value) {
 
 /* Issue creation uses one writing area and a compact property row. */
 .create-overlay:has(.issue-composer) { background: transparent; }
-.issue-composer { width: min(680px, 100%); border-radius: 3px; box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.issue-composer { width: min(680px, 100%); border-radius: 3px; box-shadow: none; }
 .issue-composer .create-header { min-height: 46px; padding: 6px 16px 6px 20px; border-bottom: 0; }
 .issue-composer .create-header h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-ink-3); text-transform: none; }
 .issue-composer .create-header > button { width: 28px; height: 28px; border-radius: 3px; }
@@ -1183,7 +1183,7 @@ function scopeName(value) {
   .issue-composer .create-title-field textarea { font-size: 17px; }
 }
 
-.issue-popover { position: fixed; z-index: 270; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.issue-popover { position: fixed; z-index: 270; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); }
 .issue-popover-label { display: block; font-size: 11px; font-weight: 550; color: var(--color-ink-3); }
 .issue-popover-label input { display: block; width: 100%; margin: 6px 0 8px; border: 1px solid var(--color-rule); border-radius: 3px; padding: 6px 8px; color: var(--color-ink); background: var(--color-surface); font-size: 12px; font-weight: 400; }
 .issue-popover-label input:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
@@ -1194,7 +1194,7 @@ function scopeName(value) {
 .issue-link-result:hover, .issue-link-result:focus-visible { outline: none; background: var(--color-accent-soft); }
 .issue-link-status { padding: 6px 0; color: var(--color-ink-3); font-size: 12px; }
 .discard-overlay { position: fixed; inset: 0; z-index: 280; display: grid; place-items: center; padding: 16px; background: transparent; }
-.discard-dialog { width: min(360px, 100%); padding: 20px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.discard-dialog { width: min(360px, 100%); padding: 20px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); }
 .discard-dialog h2 { font-size: 14px; font-weight: 600; }
 .discard-dialog p { margin-top: 8px; color: var(--color-ink-3); font-size: 12px; }
 .discard-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
