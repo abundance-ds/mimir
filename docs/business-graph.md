@@ -286,7 +286,11 @@ The Project overview belongs to Home in Main.
 ### Issue creation
 
 New issue uses a compact dialog with a title and an always-visible Markdown
-description. Project, status, owner, priority, and due date sit in a wrapping
+description. It is centred in the application window. The background stays
+unchanged, with no tint or blur. The dialog uses a thin rule, small corners,
+and a shallow shadow. Description text wraps, including long URLs; long drafts
+use the dialog body's vertical scroll area, without a separate editor scrollbar.
+Project, status, owner, priority, and due date sit in a wrapping
 row below the description. Each control shows a symbol and its value, with a
 full accessible name. Empty owner and date controls show **Assign** and
 **Due date**. Project search uses the complete Project catalog, independently
@@ -319,8 +323,9 @@ and repeated submission. Successful creation uses the existing Editor opening
 behaviour. Other entry kinds keep the general Graph creation form.
 
 `harness/issue-create.html` mounts the production dialog with fixture data.
-It does not read or write user Graph files. The standalone design comparison
-is `harness/issue-dialog-mockups.html`.
+It does not read or write user Graph files. `harness/shell.html?section=work&workbench`
+shows the production Graph inside the workbench panes with fixture data. The
+standalone design comparison is `harness/issue-dialog-mockups.html`.
 
 Chrome checks on 2026-09-21 covered the production composer in light and dark
 themes, including a 375 × 400 px window. Title focus, stable dialog geometry

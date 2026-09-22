@@ -27,3 +27,39 @@ Comments are review threads stored directly in Markdown as protected pseudo-XML:
 
 Renderer ownership is the comments service/store, comment composables, and
 `src/editor/codemirror/comments.js`.
+
+## Table discussions
+
+In Live Preview, each commented cell has a visible button with its thread count.
+The **Comments (N)** control below the table expands or collapses the discussion
+list. Counts refer to active threads, not replies. **Show resolved** includes
+resolved threads and their cell markers; the Editor's resolved visibility
+control also applies.
+
+Discussions appear in document order, with the column heading, row number, and
+an excerpt of the rendered anchor. Header comments use the label **header**.
+A cell can contain multiple independent discussions. Its button opens the list
+at the first visible discussion in that cell. Selecting a discussion highlights
+its exact anchor, including formatted text and links. Other tables retain their
+own open state.
+
+Reading, replying, resolving, reopening, and deleting use the existing comment
+controls without moving the text selection into the table. Column resizing and
+comment selection retain a pending reply draft and its focus. Clicking ordinary
+cell text still opens Markdown source. Source mode restores the ordinary inline
+discussion blocks; preview renders each discussion only once below its table.
+
+`tableComments.js` owns markers, anchor mapping, and the discussion list.
+`comments.js` supplies the shared thread renderer and actions. `livePreview.js`
+owns the table block and tells the comment renderer which threads it contains.
+Open lists and reply drafts are renderer state; they do not change Markdown.
+Table blocks use internal spacing, not vertical margins, for correct editor
+line measurements.
+
+Verification: `tableComments.test.js` covers multiple threads per cell, separate
+tables, exact anchors, pending drafts, failures, mutations, resolved visibility,
+source transitions, links, and resizing. `harness/table-comments.html` mounts
+the real editor and local comment mutations for browser checks. Chrome mouse
+and keyboard checks passed for opening/collapsing lists, anchor selection,
+reply, resolve/reopen, resizing, and line hit testing below a table. Wide and
+narrow layouts were inspected. Installed macOS verification remains required.

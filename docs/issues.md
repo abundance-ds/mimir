@@ -5,6 +5,13 @@ task scope.
 
 ## Open
 
+- Interactive sheets (deferred): Markdown tables lack easy cell editing and
+  live formulas for team discussions. Need copy/paste, undo, SUM, AVERAGE,
+  SUMIF, basic formatting, and saved sheets linked from notes. Options:
+  Jspreadsheet CE (first candidate), Univer Sheets, or Handsontable +
+  HyperFormula. Check size, formula support, and licenses. Real-time editing
+  by multiple users is separate scope.
+
 - Connection setup: automated tests cover public setup contracts, cancellation,
   concurrent setup rejection, and inline credential forms. A signed installed
   app still needs Slack/Granola Keychain setup, invalid-token replacement,
@@ -32,9 +39,10 @@ task scope.
   lifecycle tests do not establish these results; behavior belongs in
   [meetings.md](meetings.md).
 
-- Files sidebar: native file-drop and workspace-switch-during-search checks
-  remain open. The current development build has native evidence for search
-  order, match navigation, separate panel queries, and the revised Files layout;
+- Files sidebar: native file-drop, workspace-switch-during-search, and
+  click/Return rename-focus checks remain open. The current development build
+  has native evidence for search order, match navigation, separate panel
+  queries, and the revised Files layout;
   see [files.md](files.md#verification).
 
 - Release 0.3.3: basic signed installed-app checks passed; see

@@ -55,6 +55,20 @@ shows its Markdown source. Empty header and body cells keep their column
 positions, including alignment; the Markdown syntax tree omits these cells,
 so preview maps its nodes through the complete row before rendering.
 
+Markdown file previews in the Editor support column resizing. Drag a header's
+internal divider, or focus its handle and use Left/Right (8 px; Shift: 32 px).
+The divider transfers width between adjacent columns. The table fills the pane;
+column proportions follow pane width and cell text wraps. Resizing keeps a
+64 px minimum where space permits; fitting the pane takes priority.
+**Reset column widths** restores automatic layout. Escape cancels a drag.
+
+Widths live in CodeMirror document state, not in the Markdown or saved settings.
+They survive tab switches, Live Preview toggles, and cell text edits. Changing
+column count or replacing a table clears its widths. Closing the document or
+restarting discards them. Other embedded Markdown editors keep their existing
+controls. `tableResize.js` owns pointer and keyboard controls; `livePreview.js`
+owns width state and table rendering.
+
 ### Document model
 
 A tab displays one open document. A document owns its id, current text, saved

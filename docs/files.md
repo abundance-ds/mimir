@@ -12,6 +12,9 @@ main tab and sidebar structure belongs to
 - Project uses 28 px rows, 12 px indentation per folder, and subtle vertical
   guides without horizontal row separators. Names keep their extension visible when shortened. Git state uses a
   small marker; metadata columns and permanent star buttons are omitted.
+  Favorites have a muted 10 px filled star at the right edge in Project,
+  Recent, and compact search results. The star is a status marker, separate
+  from Git state. It stays visible without hover and is omitted in Favorites.
 - Recent and Favorites replace the tree with path-labelled lists. Each view
   retains selection and scroll while switching views. Project folder expansion
   and the chosen view are remembered across project switches in the app session.
@@ -44,7 +47,20 @@ main tab and sidebar structure belongs to
   Native drops apply only to an active file surface.
 - File previews and search matches open in the Editor without replacing the
   main session or collapsing a manually expanded sidebar. Content matches
-  reveal their line and column; a single click previews and a double click pins.
+  reveal their line and column. A single click or Space previews a file and
+  keeps keyboard focus in Files. A double-click opens the file, keeps its tab
+  open, and moves focus into the Editor. Editing a preview also keeps its tab
+  open. Later previews replace only an unchanged preview tab.
+- In Project, Recent, and Favorites, Return on macOS starts inline rename for
+  one selected file or folder. F2 and the context menu use the same rename
+  field. The filename is selected without its extension. Return saves the
+  name; Escape cancels. Both return focus to the row. Clicking elsewhere
+  confirms the name and retains focus at the clicked control. Losing window
+  focus or hiding the field does not confirm the name. Input composition and
+  repeated Return do not start or confirm rename.
+  Command+Down on macOS opens the selected file and focuses the Editor.
+  On other platforms, Enter opens and F2 renames. Search keeps Enter to open
+  the result. These rules apply to the sidebar and File Manager.
 - Open File Manager provides the wide ledger in a unique main tab for metadata
   comparison and file organization. Its Return control selects the session
   that was active before opening it. Both presentations use the same file
@@ -83,6 +99,10 @@ main tab and sidebar structure belongs to
   browsing. Files and Editor integration tests cover match locations and
   preview/pin behavior. Native `file_index` tests cover ranking, search limits,
   cancellation, and workspace changes.
+- `WorkbenchFiles.integration.test.js` mounts Files and the real Editor to
+  check click/Return focus, delayed previews, rename completion and failure,
+  search locations, and retention of opened or edited tabs. Native I/O is
+  mocked. Check the same focus sequence in the native macOS app before release.
 - `harness/files.html` mounts the real sidebar and File Manager with fixture
   native replies. Use it with the dev server to check 240, 280, and 400 px
   widths in light and dark themes. Search `alpha` or `beta` for matches,
