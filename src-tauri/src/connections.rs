@@ -436,6 +436,11 @@ fn granola_bundle() -> Result<Option<GranolaBundle>, String> {
 }
 
 pub(crate) fn read_secret(account: &str) -> Result<Option<Secret>, String> {
+    #[cfg(test)]
+    if let Ok(value) = verification::ENV.try_with(|env| env.secrets.borrow().get(account).cloned())
+    {
+        return Ok(value.map(|value| Secret { value }));
+    }
     let entry =
         keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
     match entry.get_password() {
@@ -446,6 +451,17 @@ pub(crate) fn read_secret(account: &str) -> Result<Option<Secret>, String> {
 }
 
 pub(crate) fn write_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if verification::ENV
+        .try_with(|env| {
+            env.secrets
+                .borrow_mut()
+                .insert(account.into(), value.into())
+        })
+        .is_ok()
+    {
+        return Ok(());
+    }
     keyring::Entry::new(service, account)
         .map_err(|error| error.to_string())?
         .set_password(value)
@@ -453,6 +469,13 @@ pub(crate) fn write_secret(service: &str, account: &str, value: &str) -> Result<
 }
 
 pub(crate) fn delete_secret(account: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if verification::ENV
+        .try_with(|env| env.secrets.borrow_mut().remove(account))
+        .is_ok()
+    {
+        return Ok(());
+    }
     let entry =
         keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
     match entry.delete_credential() {
@@ -463,3 +486,6 @@ pub(crate) fn delete_secret(account: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod verification;

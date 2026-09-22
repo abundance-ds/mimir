@@ -214,7 +214,7 @@ pub(super) async fn connect_slack_token(
     let response = manager
         .runtime
         .http
-        .post("https://slack.com/api/auth.test")
+        .post(setup_url("https://slack.com/api/auth.test"))
         .bearer_auth(token)
         .send()
         .await
@@ -274,7 +274,7 @@ pub(super) async fn connect_granola(
     let response = manager
         .runtime
         .http
-        .get(format!("{GRANOLA_API_ROOT}/notes"))
+        .get(setup_url(&format!("{GRANOLA_API_ROOT}/notes")))
         .bearer_auth(api_key)
         .query(&[("page_size", "1")])
         .send()
@@ -393,4 +393,12 @@ pub fn connections_set_google_default(
     manager: tauri::State<'_, ConnectionManager>,
 ) -> Result<ConnectionStatus, String> {
     set_google_default(account, &manager)
+}
+
+fn setup_url(url: &str) -> String {
+    #[cfg(test)]
+    if let Ok(base) = super::verification::ENV.try_with(|env| env.api_root.clone()) {
+        return format!("{base}{}", url::Url::parse(url).unwrap().path());
+    }
+    url.to_owned()
 }

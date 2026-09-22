@@ -16,12 +16,51 @@ pub(super) struct Operation {
 pub(super) fn install(manager: &ConnectionManager) -> Result<(), String> {
     let provider = json!({"type":"string","enum":["google","slack","granola","github"]});
     let definitions = [
-        ("list", "List accounts, setup methods, and pending operations.", object_schema(json!({}), &[])),
-        ("connect", "Connect an account; return an operation ID.", object_schema(json!({"provider":provider,"credential":{"type":"string","minLength":1,"maxLength":16384,"description":"Slack token or Granola key via --stdin. Omit for browser login."}}), &["provider"])),
-        ("check", "Check access without sending; return an operation ID.", object_schema(json!({"provider":provider,"account":{"type":"string"}}), &["provider"])),
-        ("set_default", "Set the default Google account.", object_schema(json!({"account":{"type":"string","minLength":1}}), &["account"])),
-        ("disconnect", "Disconnect locally. Google requires account; GitHub affects shared CLI login.", object_schema(json!({"provider":provider,"account":{"type":"string"},"shared_login":{"type":"boolean","description":"Required for shared GitHub sign-out."}}), &["provider"])),
-        ("operation", "Read progress or cancel pending setup.", object_schema(json!({"id":{"type":"string","minLength":1},"cancel":{"type":"boolean","default":false}}), &["id"])),
+        (
+            "list",
+            "List accounts, setup methods, and pending operations.",
+            object_schema(json!({}), &[]),
+        ),
+        (
+            "connect",
+            "Connect an account; return an operation ID.",
+            object_schema(
+                json!({"provider":provider,"credential":{"type":"string","minLength":1,"maxLength":16384,"description":"Slack token or Granola key via --stdin. Omit for browser login."}}),
+                &["provider"],
+            ),
+        ),
+        (
+            "check",
+            "Check access without sending; return an operation ID.",
+            object_schema(
+                json!({"provider":provider,"account":{"type":"string"}}),
+                &["provider"],
+            ),
+        ),
+        (
+            "set_default",
+            "Set the default Google account.",
+            object_schema(
+                json!({"account":{"type":"string","minLength":1}}),
+                &["account"],
+            ),
+        ),
+        (
+            "disconnect",
+            "Disconnect locally. Google requires account; GitHub affects shared CLI login.",
+            object_schema(
+                json!({"provider":provider,"account":{"type":"string"},"shared_login":{"type":"boolean","description":"Required for shared GitHub sign-out."}}),
+                &["provider"],
+            ),
+        ),
+        (
+            "operation",
+            "Read progress or cancel pending setup.",
+            object_schema(
+                json!({"id":{"type":"string","minLength":1},"cancel":{"type":"boolean","default":false}}),
+                &["id"],
+            ),
+        ),
     ];
     for (action, description, schema) in definitions {
         let manager = manager.clone();

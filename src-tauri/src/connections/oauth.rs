@@ -33,13 +33,15 @@ impl OauthLoopback {
     }
 
     pub(crate) async fn receive_code(&self) -> Result<String, String> {
-        let (mut stream, _) =
-            tokio::time::timeout(Duration::from_secs(180), self.listener.accept())
-                .await
-                .map_err(|_| "Sign-in timed out. Try Connect again.".to_string())?
-                .map_err(|error| {
-                    format!("Mimir could not receive the sign-in callback: {error}")
-                })?;
+        self.receive_code_with_timeout(Duration::from_secs(180))
+            .await
+    }
+
+    async fn receive_code_with_timeout(&self, timeout: Duration) -> Result<String, String> {
+        let (mut stream, _) = tokio::time::timeout(timeout, self.listener.accept())
+            .await
+            .map_err(|_| "Sign-in timed out. Try Connect again.".to_string())?
+            .map_err(|error| format!("Mimir could not receive the sign-in callback: {error}"))?;
         let mut request = vec![0u8; 8192];
         let length = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut request))
             .await
@@ -98,4 +100,81 @@ pub(crate) fn open_system_browser(url: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("Mimir could not open the sign-in page: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn callback(query: &str, valid_state: bool) -> (Result<String, String>, String) {
+        let oauth = OauthLoopback::new().await.unwrap();
+        let address = oauth.listener.local_addr().unwrap();
+        let state = if valid_state {
+            oauth.state.clone()
+        } else {
+            "wrong-state".into()
+        };
+        let request =
+            format!("GET /callback?state={state}&{query} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let client = async {
+            let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+            socket.write_all(request.as_bytes()).await.unwrap();
+            let mut response = vec![0; 4096];
+            let count = socket.read(&mut response).await.unwrap();
+            String::from_utf8(response[..count].to_vec()).unwrap()
+        };
+        tokio::join!(oauth.receive_code(), client)
+    }
+
+    #[tokio::test]
+    async fn callback_accepts_matching_state_and_does_not_echo_code() {
+        let (result, page) = callback("code=test-code", true).await;
+        assert_eq!(result.unwrap(), "test-code");
+        assert!(!page.contains("test-code"));
+        assert!(page.contains("check completion"));
+    }
+
+    #[tokio::test]
+    async fn callback_rejects_wrong_state_denial_and_missing_code() {
+        assert!(callback("code=test-code", false)
+            .await
+            .0
+            .unwrap_err()
+            .contains("security state"));
+        assert!(callback("error=access_denied", true)
+            .await
+            .0
+            .unwrap_err()
+            .contains("access_denied"));
+        assert!(callback("other=value", true)
+            .await
+            .0
+            .unwrap_err()
+            .contains("no authorization code"));
+    }
+
+    #[tokio::test]
+    async fn callback_times_out_without_browser_input() {
+        let oauth = OauthLoopback::new().await.unwrap();
+        assert!(oauth
+            .receive_code_with_timeout(Duration::from_millis(20))
+            .await
+            .unwrap_err()
+            .contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn cancellation_closes_callback_listener() {
+        let oauth = OauthLoopback::new().await.unwrap();
+        let address = oauth.listener.local_addr().unwrap();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            started.send(()).unwrap();
+            oauth.receive_code().await
+        });
+        ready.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    }
 }
