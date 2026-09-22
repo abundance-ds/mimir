@@ -994,31 +994,37 @@ async fn connect_github_cli() -> Result<GithubConnectionStatus, String> {
         "GitHub CLI is not installed. Install it from cli.github.com, then try again.".to_string()
     })?;
     if !github_connection_status().await?.connected {
-        let output = tokio::process::Command::new(&gh)
-            .args([
-                "auth",
-                "login",
-                "--hostname",
-                "github.com",
-                "--git-protocol",
-                "https",
-                "--web",
-                "--clipboard",
-                "--scopes",
-                "repo",
-            ])
-            .kill_on_drop(true)
-            .output()
-            .await
-            .map_err(|error| format!("Could not start GitHub sign-in: {error}"))?;
-        require_command_success("GitHub sign-in failed", &output)?;
+        let mut command = tokio::process::Command::new(&gh);
+        command.args([
+            "auth",
+            "login",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+            "--web",
+            "--clipboard",
+            "--scopes",
+            "repo",
+        ]);
+        run_github_login(command).await?;
     }
+
     let status = github_connection_status().await?;
     if status.connected {
         Ok(status)
     } else {
         Err("GitHub sign-in did not complete. Try again.".into())
     }
+}
+
+async fn run_github_login(mut command: tokio::process::Command) -> Result<(), String> {
+    let output = command
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|error| format!("Could not start GitHub sign-in: {error}"))?;
+    require_command_success("GitHub sign-in failed", &output)
 }
 
 fn disconnect_github_cli() -> Result<GithubConnectionStatus, String> {
@@ -2756,5 +2762,56 @@ mod tests {
         track.last_change = Some(now - Duration::from_secs(1));
         assert_eq!(due_actions(&track, true, false, now), (true, false));
         assert!(activation_requires_publish(false, true));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod login_process_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn github_login_reports_success_and_failure() {
+        let mut success = tokio::process::Command::new("/bin/sh");
+        success.args(["-c", "exit 0"]);
+        run_github_login(success).await.unwrap();
+        let mut failure = tokio::process::Command::new("/bin/sh");
+        failure.args(["-c", "echo test-login-failure >&2; exit 1"]);
+        assert!(run_github_login(failure)
+            .await
+            .unwrap_err()
+            .contains("test-login-failure"));
+    }
+
+    #[tokio::test]
+    async fn cancelling_github_login_terminates_the_child() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_path = directory.path().join("pid");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "echo $$ > \"$1\"; exec sleep 30", "test-login"])
+            .arg(&pid_path);
+        let task = tokio::spawn(run_github_login(command));
+        let pid: i32 = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(value) = std::fs::read_to_string(&pid_path) {
+                    if let Ok(pid) = value.trim().parse() {
+                        break pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Test login did not start");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // kill(pid, 0) checks existence; it sends no signal.
+            while unsafe { libc::kill(pid, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Cancelled login child is still running");
     }
 }
