@@ -1,9 +1,16 @@
-import { createApp, h } from 'vue'
+import { createApp, h, onUnmounted, ref } from 'vue'
 import { createPinia } from 'pinia'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
 import BusinessGraphApp from '../src/mimir/apps/BusinessGraphApp.vue'
+import GraphMarkdownEditor from '../src/mimir/apps/business-graph/GraphMarkdownEditor.vue'
+import WorkbenchShell from '../src/mimir/components/WorkbenchShell.vue'
+import WorkbenchSidebar from '../src/mimir/components/WorkbenchSidebar.vue'
+import PaneFrame from '../src/mimir/components/PaneFrame.vue'
+import AppHeader from '../src/editor/components/shell/AppHeader.vue'
+import PaneBand from '../src/shared/ui/chrome/PaneBand.vue'
+import { useWorkbenchStore } from '../src/stores/workbench.js'
 import { useBusinessGraphStore } from '../src/stores/businessGraph.js'
 import { loadWorkspaceConfig } from '../src/services/workspaceConfig.js'
 
@@ -176,9 +183,36 @@ window.__TAURI_INTERNALS__ = {
 const pinia = createPinia()
 const app = createApp({
   setup() {
-    return () => h(BusinessGraphApp, {
+    const graphApp = () => h(BusinessGraphApp, {
       workspacePath: '/work/atlas',
       active: true,
+    })
+    if (!params.has('workbench')) return graphApp
+
+    // Production panes around the Graph fixture, to review overlays in context.
+    const workbench = useWorkbenchStore()
+    workbench.setPaneWidth('sidebar', 220)
+    workbench.setPaneWidth('editor', 400)
+    const width = ref(innerWidth)
+    const resize = () => { width.value = innerWidth }
+    window.addEventListener('resize', resize)
+    onUnmounted(() => window.removeEventListener('resize', resize))
+    const notes = ref('# Evidence plan\n\n## This week\n\n- Confirm the comparator set\n- Review the utility inputs\n- Complete extraction QC\n\n## Review notes\n\nKeep the source links with each estimate. Record assumptions before the model review.')
+    return () => h(WorkbenchShell, { viewportWidth: width.value, activityTitle: 'Business graph', editorTitle: 'Notes.md' }, {
+      sidebar: ({ collapsed }) => h(WorkbenchSidebar, {
+        collapsed, workspaceName: 'Atlas', workspacePath: '/work/atlas',
+        activeToolId: 'graph',
+        tools: [{ id: 'today', title: 'Today', icon: 'calendar' }, { id: 'graph', title: 'Business graph', icon: 'graph' }, { id: 'scribe', title: 'Scribe', icon: 'microphone' }],
+        onToggleCollapse: () => workbench.togglePane('sidebar'),
+      }),
+      activity: () => h(PaneFrame, { pane: 'activity', title: 'Business graph' }, { default: graphApp }),
+      editor: () => h('div', { class: 'flex h-full min-h-0 flex-col bg-surface' }, [
+        h(AppHeader, { embedded: true, hideSidebar: true, tabs: [{ id: 'notes', name: 'Notes.md' }], activeTab: 0 }),
+        h('div', { class: 'min-h-0 flex-1 overflow-y-auto p-5' }, [
+          h(GraphMarkdownEditor, { canvasStyle: true, framed: false, modelValue: notes.value, 'onUpdate:modelValue': value => { notes.value = value } }),
+        ]),
+        h(PaneBand, { as: 'footer', kind: 'footer' }, () => 'Markdown'),
+      ]),
     })
   },
 })

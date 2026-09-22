@@ -1147,17 +1147,21 @@ function scopeName(value) {
 }
 
 /* Issue creation uses one writing area and a compact property row. */
-.issue-composer { width: min(680px, 100%); border-radius: 6px; }
+.create-overlay:has(.issue-composer) { background: transparent; }
+.issue-composer { width: min(680px, 100%); border-radius: 3px; box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
 .issue-composer .create-header { min-height: 46px; padding: 6px 16px 6px 20px; border-bottom: 0; }
 .issue-composer .create-header h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-ink-3); text-transform: none; }
-.issue-composer .create-header > button { width: 28px; height: 28px; }
-.issue-composer .create-scroll { padding: 6px 20px 12px; }
+.issue-composer .create-header > button { width: 28px; height: 28px; border-radius: 3px; }
+.issue-composer .create-scroll { overflow-x: hidden; overscroll-behavior: contain; padding: 6px 20px 12px; }
 .issue-composer .create-title-field { margin: 0 0 8px; }
 .issue-composer .create-title-field textarea { display: block; width: 100%; resize: none; overflow: hidden; border: 0; background: transparent; padding: 2px 0 5px; color: var(--color-ink); font: 600 18px/1.45 var(--font-sans); }
 .issue-composer .create-title-field textarea::placeholder { color: var(--color-ink-4); }
 .issue-composer .create-title-field textarea:focus-visible { outline: none; box-shadow: inset 0 -1px color-mix(in srgb, var(--color-accent) 50%, var(--color-rule)); }
 .issue-description { margin-bottom: 8px; }
-.issue-description :deep(.cm-content) { padding-bottom: 8px; }
+/* The dialog body owns scrolling. CodeMirror's auto/visible overflow pair
+   creates a second scroll container, including a native horizontal bar. */
+.issue-description :deep(.cm-scroller) { min-width: 0; overflow: visible; }
+.issue-description :deep(.cm-content) { min-width: 0; max-width: 100%; overflow-wrap: anywhere; padding-bottom: 8px; }
 .issue-description :deep(.graph-note-tools) { margin-bottom: 4px; }
 .issue-properties { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .issue-properties :deep(.graph-select-trigger), .issue-properties :deep(.date-picker-trigger) { min-height: 29px; max-width: 100%; padding: 0 8px; border: 1px solid var(--color-rule-light); background: var(--color-surface); font-size: 12px; font-weight: 500; }
@@ -1169,17 +1173,17 @@ function scopeName(value) {
 .issue-more:focus-visible { outline: 2px solid var(--color-accent); }
 .issue-composer .create-footer { min-height: 49px; padding: 8px 18px; background: var(--color-surface); }
 .issue-storage { min-width: 0; }
-.issue-composer .create-submit { min-height: 32px; margin-left: auto; flex-shrink: 0; font-size: 12px; }
+.issue-composer .create-submit { min-height: 32px; margin-left: auto; flex-shrink: 0; border-radius: 3px; font-size: 12px; }
 .issue-composer .create-details { padding-top: 12px; }
 .issue-composer .create-details .create-field { margin-top: 10px; }
 @media (max-width: 560px) {
   .create-overlay:has(.issue-composer) { padding: 12px; }
-  .issue-composer { height: auto; max-height: calc(100dvh - 24px); border: 1px solid var(--color-rule); border-radius: 6px; }
+  .issue-composer { height: auto; max-height: calc(100dvh - 24px); border: 1px solid var(--color-rule); }
   .issue-composer .create-scroll { padding-right: 16px; padding-left: 16px; }
   .issue-composer .create-title-field textarea { font-size: 17px; }
 }
 
-.issue-popover { position: fixed; z-index: 270; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 15%, transparent); }
+.issue-popover { position: fixed; z-index: 270; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
 .issue-popover-label { display: block; font-size: 11px; font-weight: 550; color: var(--color-ink-3); }
 .issue-popover-label input { display: block; width: 100%; margin: 6px 0 8px; border: 1px solid var(--color-rule); border-radius: 3px; padding: 6px 8px; color: var(--color-ink); background: var(--color-surface); font-size: 12px; font-weight: 400; }
 .issue-popover-label input:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
@@ -1189,8 +1193,8 @@ function scopeName(value) {
 .issue-link-result small { flex-shrink: 0; color: var(--color-ink-4); font-size: 10px; }
 .issue-link-result:hover, .issue-link-result:focus-visible { outline: none; background: var(--color-accent-soft); }
 .issue-link-status { padding: 6px 0; color: var(--color-ink-3); font-size: 12px; }
-.discard-overlay { position: fixed; inset: 0; z-index: 280; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--color-ink) 20%, transparent); }
-.discard-dialog { width: min(360px, 100%); padding: 20px; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 15%, transparent); }
+.discard-overlay { position: fixed; inset: 0; z-index: 280; display: grid; place-items: center; padding: 16px; background: transparent; }
+.discard-dialog { width: min(360px, 100%); padding: 20px; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 4px 16px color-mix(in srgb, var(--color-ink) 10%, transparent); }
 .discard-dialog h2 { font-size: 14px; font-weight: 600; }
 .discard-dialog p { margin-top: 8px; color: var(--color-ink-3); font-size: 12px; }
 .discard-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
