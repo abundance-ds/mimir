@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { openExternalUrl } from '../../../services/externalLinks.js'
@@ -196,4 +197,72 @@ describe('ConnectionsSettingsSection', () => {
     expect(invoke).toHaveBeenCalledWith('connections_connect_slack_token', { token: 'xoxp-test-token' })
     expect(wrapper.text()).toContain('Connected as Pirates · waqr')
   })
+  it('keeps setup inside its provider row and clears secrets when switching', async () => {
+    const wrapper = mount(ConnectionsSettingsSection)
+    await flushPromises()
+    const slack = wrapper.get('[data-connection-provider="slack"]')
+    const granola = wrapper.get('[data-connection-provider="granola"]')
+    await slack.get('.connection-action').trigger('click')
+    await slack.get('input').setValue('xoxp-private')
+    expect(granola.find('input').exists()).toBe(false)
+    await granola.get('.connection-action').trigger('click')
+    expect(slack.find('input').exists()).toBe(false)
+    expect(granola.get('input').element.value).toBe('')
+    await slack.get('.connection-action').trigger('click')
+    expect(slack.get('input').element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps rejection feedback in Slack and permits retry', async () => {
+    const original = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'connections_connect_slack_token'
+      ? Promise.reject(new Error('Slack rejected this personal token: invalid_auth'))
+      : original(command, args))
+    const wrapper = mount(ConnectionsSettingsSection)
+    await flushPromises()
+    const slack = wrapper.get('[data-connection-provider="slack"]')
+    await slack.get('.connection-action').trigger('click')
+    await slack.get('input').setValue('xoxp-invalid')
+    await slack.get('form').trigger('submit')
+    await flushPromises()
+    expect(slack.get('[role="alert"]').text()).toContain('invalid_auth')
+    expect(slack.find('input').exists()).toBe(true)
+    expect(slack.get('[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-connection-provider="granola"]').find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('clears a cancelled secret and restores focus to the setup control', async () => {
+    const wrapper = mount(ConnectionsSettingsSection, { attachTo: document.body })
+    await flushPromises()
+    const slack = wrapper.get('[data-connection-provider="slack"]')
+    const trigger = slack.get('.connection-action')
+    trigger.element.focus()
+    await trigger.trigger('click')
+    expect(document.activeElement).toBe(slack.get('input').element)
+    await slack.get('input').setValue('xoxp-private')
+    await slack.get('form .connection-cancel').trigger('click')
+    expect(document.activeElement).toBe(trigger.element)
+    await trigger.trigger('click')
+    expect(slack.get('input').element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('reloads status when an agent changes a connection and removes its listener', async () => {
+    const stop = vi.fn()
+    vi.mocked(listen).mockResolvedValueOnce(stop)
+    const wrapper = mount(ConnectionsSettingsSection)
+    await flushPromises()
+    const callback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'connections-changed').at(-1)[1]
+    const original = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'connections_status'
+      ? Promise.resolve(initialConnections.map(item => item.provider === 'slack' ? { ...item, state: 'connected', account: 'Team · User' } : item))
+      : original(command, args))
+    await callback()
+    await flushPromises()
+    expect(wrapper.get('[data-connection-provider="slack"]').text()).toContain('Team · User')
+    wrapper.unmount()
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
 })

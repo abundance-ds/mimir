@@ -126,94 +126,99 @@
             </button>
           </div>
         </div>
+        <form
+          v-if="activeSetup === connection.provider && credentialFields[connection.provider]"
+          class="credential-form"
+          @submit.prevent="connectCredential(connection.provider)"
+        >
+          <label :for="credentialFields[connection.provider].id" class="text-[10px] font-medium text-ink-2">
+            {{ credentialFields[connection.provider].label }}
+          </label>
+          <p class="mt-1 text-[9px] leading-relaxed text-ink-3">{{ credentialFields[connection.provider].help }}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              :id="credentialFields[connection.provider].id"
+              :ref="element => credentialInput = element"
+              v-model="credential"
+              class="credential-input"
+              type="password"
+              autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="credentialFields[connection.provider].placeholder"
+            />
+            <button type="submit" class="connection-action" :disabled="busyProvider !== '' || !credential.trim()">
+              {{ busyProvider === connection.provider ? 'Connecting…' : 'Connect' }}
+            </button>
+            <button type="button" class="connection-cancel" :disabled="busyProvider !== ''" @click="closeSetup">Cancel</button>
+          </div>
+        </form>
+
+        <p v-if="notice && feedbackProvider === connection.provider" class="mt-3 text-[10px] text-add" role="status">{{ notice }}</p>
+        <p v-if="error && feedbackProvider === connection.provider" class="mt-3 text-[10px] leading-relaxed text-rem" role="alert">{{ error }}</p>
       </article>
     </div>
 
-    <form v-if="showSlackToken" class="credential-form" @submit.prevent="connectSlackToken">
-      <label for="slack-personal-token" class="text-[10px] font-medium text-ink-2">Slack personal token</label>
-      <p class="mt-1 text-[9px] leading-relaxed text-ink-3">
-        Use an existing user token that starts with xoxp-. Mimir verifies it before saving it in Keychain.
-      </p>
-      <div class="mt-3 flex items-center gap-2">
-        <input
-          id="slack-personal-token"
-          ref="slackTokenInput"
-          v-model="slackToken"
-          class="credential-input"
-          type="password"
-          autocomplete="off"
-          autocapitalize="none"
-          spellcheck="false"
-          placeholder="xoxp-…"
-        />
-        <button type="submit" class="connection-action" :disabled="busyProvider !== '' || !slackToken.trim()">
-          Connect
-        </button>
-        <button type="button" class="connection-cancel" :disabled="busyProvider !== ''" @click="closeSlackToken">
-          Cancel
-        </button>
-      </div>
-    </form>
-
-    <form
-      v-if="showGranolaKey"
-      class="credential-form"
-      @submit.prevent="connectGranola"
-    >
-      <label for="granola-api-key" class="text-[10px] font-medium text-ink-2">Granola API key</label>
-      <p class="mt-1 text-[9px] leading-relaxed text-ink-3">
-        In Granola, go to Settings → Connectors → API keys. API access requires a Business or Enterprise workspace.
-      </p>
-      <div class="mt-3 flex items-center gap-2">
-        <input
-          id="granola-api-key"
-          ref="granolaKeyInput"
-          v-model="granolaKey"
-          class="credential-input"
-          type="password"
-          autocomplete="off"
-          autocapitalize="none"
-          spellcheck="false"
-          placeholder="grn_…"
-        />
-        <button type="submit" class="connection-action" :disabled="busyProvider !== '' || !granolaKey.trim()">
-          Connect
-        </button>
-        <button type="button" class="connection-cancel" :disabled="busyProvider !== ''" @click="closeGranolaKey">
-          Cancel
-        </button>
-      </div>
-    </form>
-
-    <p v-if="notice" class="mt-3 text-[10px] text-add" role="status">{{ notice }}</p>
-    <p v-if="error" class="mt-3 text-[10px] leading-relaxed text-rem" role="alert">{{ error }}</p>
+    <p v-if="error && !feedbackProvider" class="mt-3 text-[10px] text-rem" role="alert">{{ error }}</p>
   </section>
 </template>
 
 <script setup>
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { openExternalUrl } from '../../../services/externalLinks.js'
 
 const connections = ref([])
 const loading = ref(true)
 const busyProvider = ref('')
-const showGranolaKey = ref(false)
-const granolaKey = ref('')
-const granolaKeyInput = ref(null)
-const showSlackToken = ref(false)
-const slackToken = ref('')
-const slackTokenInput = ref(null)
+const activeSetup = ref('')
+const feedbackProvider = ref('')
+let setupTrigger = null
+let unlisten = null
+let disposed = false
+const credential = ref('')
+const credentialInput = ref(null)
+const credentialFields = {
+  slack: {
+    id: 'slack-personal-token', label: 'Slack personal token', placeholder: 'xoxp-…',
+    help: 'Use a user token that starts with xoxp-. Mimir verifies it before saving it in Keychain.',
+    command: 'connections_connect_slack_token', argument: 'token',
+  },
+  granola: {
+    id: 'granola-api-key', label: 'Granola API key', placeholder: 'grn_…',
+    help: 'In Granola, go to Settings → Connectors → API keys.',
+    command: 'connections_connect_granola', argument: 'apiKey',
+  },
+}
 const showGithubManagement = ref(false)
 const githubSignOutArmed = ref(false)
 const notice = ref('')
 const error = ref('')
 
-onMounted(() => {
-  void load()
-  window.addEventListener('focus', refreshGithub)
+onMounted(async () => {
+  const stop = await listen('connections-changed', refreshConnections)
+  if (disposed) { stop(); return }
+  unlisten = stop
+  await load()
+  if (disposed) return
+  window.addEventListener('focus', refreshConnections)
 })
-onUnmounted(() => window.removeEventListener('focus', refreshGithub))
+onUnmounted(() => {
+  disposed = true
+  unlisten?.()
+  window.removeEventListener('focus', refreshConnections)
+})
+
+async function refreshConnections() {
+  try {
+    const [value, github] = await Promise.all([invoke('connections_status'), invoke('github_connection_status')])
+    if (!disposed) connections.value = [githubConnection(github), ...(Array.isArray(value) ? value : [])]
+  } catch (cause) {
+    if (!disposed) { feedbackProvider.value = ''; error.value = errorMessage(cause) }
+  }
+}
 
 async function load() {
   loading.value = true
@@ -232,6 +237,7 @@ async function load() {
 }
 
 async function handleAction(connection) {
+  feedbackProvider.value = connection.provider
   error.value = ''
   notice.value = ''
   if (connection.provider === 'github' && connection.action.startsWith('install-')) {
@@ -258,9 +264,9 @@ async function handleAction(connection) {
     return
   }
   if (connection.provider === 'granola') {
-    showGranolaKey.value = true
+    openSetup('granola')
     await nextTick()
-    granolaKeyInput.value?.focus()
+    credentialInput.value?.focus()
     return
   }
   if (connection.provider === 'slack' && !connection.oauthAvailable) {
@@ -271,6 +277,7 @@ async function handleAction(connection) {
 }
 
 async function disconnectGithubCli() {
+  feedbackProvider.value = 'github'
   busyProvider.value = 'github'
   error.value = ''
   notice.value = ''
@@ -287,6 +294,7 @@ async function disconnectGithubCli() {
 }
 
 async function connectBrowserProvider(connection) {
+  feedbackProvider.value = connection.provider
   busyProvider.value = connection.provider
   try {
     const updated = connection.provider === 'github'
@@ -305,39 +313,40 @@ async function connectBrowserProvider(connection) {
   }
 }
 
+function openSetup(provider) {
+  setupTrigger = document.activeElement
+  credential.value = ''
+  error.value = ''
+  notice.value = ''
+  feedbackProvider.value = provider
+  activeSetup.value = provider
+}
+
+function closeSetup() {
+  credential.value = ''
+  activeSetup.value = ''
+  error.value = ''
+  notice.value = ''
+  nextTick(() => setupTrigger?.focus())
+}
+
 async function openSlackToken() {
-  showSlackToken.value = true
+  openSetup('slack')
   await nextTick()
-  slackTokenInput.value?.focus()
+  credentialInput.value?.focus()
 }
 
-async function connectSlackToken() {
-  busyProvider.value = 'slack'
+async function connectCredential(provider) {
+  const fields = credentialFields[provider]
+  busyProvider.value = provider
+  feedbackProvider.value = provider
   error.value = ''
   notice.value = ''
   try {
-    const updated = await invoke('connections_connect_slack_token', { token: slackToken.value.trim() })
+    const updated = await invoke(fields.command, { [fields.argument]: credential.value.trim() })
     replaceConnection(updated)
-    slackToken.value = ''
-    showSlackToken.value = false
-    notice.value = 'Slack is connected. Its tools are ready now.'
-  } catch (cause) {
-    error.value = errorMessage(cause)
-  } finally {
-    busyProvider.value = ''
-  }
-}
-
-async function connectGranola() {
-  busyProvider.value = 'granola'
-  error.value = ''
-  notice.value = ''
-  try {
-    const updated = await invoke('connections_connect_granola', { apiKey: granolaKey.value.trim() })
-    replaceConnection(updated)
-    granolaKey.value = ''
-    showGranolaKey.value = false
-    notice.value = 'Granola is connected. Its tools are ready now.'
+    closeSetup()
+    notice.value = `${updated.name || (provider === 'slack' ? 'Slack' : 'Granola')} is connected.`
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -346,6 +355,7 @@ async function connectGranola() {
 }
 
 async function disconnect(connection) {
+  feedbackProvider.value = connection.provider
   busyProvider.value = connection.provider
   try {
     const updated = await invoke('connections_disconnect', { provider: connection.provider })
@@ -359,6 +369,7 @@ async function disconnect(connection) {
 }
 
 async function disconnectGoogleAccount(account) {
+  feedbackProvider.value = 'google'
   busyProvider.value = 'google'
   error.value = ''
   notice.value = ''
@@ -380,6 +391,7 @@ function replaceProviderConnections(updated) {
 }
 
 async function setGoogleDefault(account) {
+  feedbackProvider.value = 'google'
   busyProvider.value = 'google'
   error.value = ''
   notice.value = ''
@@ -392,16 +404,6 @@ async function setGoogleDefault(account) {
   } finally {
     busyProvider.value = ''
   }
-}
-
-function closeGranolaKey() {
-  granolaKey.value = ''
-  showGranolaKey.value = false
-}
-
-function closeSlackToken() {
-  slackToken.value = ''
-  showSlackToken.value = false
 }
 
 function replaceConnection(updated) {
@@ -432,13 +434,6 @@ function githubConnection(status = {}) {
           ? 'GitHub CLI is not installed.'
           : 'Sign in with your existing GitHub CLI setup.',
   }
-}
-
-async function refreshGithub() {
-  if (loading.value || busyProvider.value) return
-  try {
-    replaceConnection(githubConnection(await invoke('github_connection_status')))
-  } catch { /* the visible state stays unchanged until the next explicit action */ }
 }
 
 function statusLabel(connection) {
@@ -638,9 +633,8 @@ function errorMessage(cause) {
 }
 
 .credential-form {
-  margin-top: 14px;
-  border-left: 2px solid var(--color-rule);
-  padding: 3px 0 3px 12px;
+  border-top: 1px solid var(--color-rule-light);
+  padding: 12px 0 14px 16px;
 }
 
 .credential-input {
