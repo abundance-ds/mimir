@@ -469,3 +469,63 @@
 .cm-comment-block.has-error .cm-comment-error {
   display: block;
 }
+
+/* Table discussions stay inside one measured CodeMirror block. */
+.cm-table-comments {
+  padding: 4px 0;
+  font: 12px/1.4 var(--font-sans);
+  color: var(--color-ink);
+  white-space: normal;
+}
+.cm-table-comment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  border-bottom: 1px solid var(--color-rule-light);
+}
+.cm-table-comment-marker,
+.cm-table-comment-toggle,
+.cm-table-comment-resolved,
+.cm-table-comment-location {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-2);
+  font: 11px/1.4 var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+}
+.cm-table-comment-marker {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-rule);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.cm-table-comment-marker[hidden],
+.cm-table-comment-list[hidden],
+.cm-table-comment-entry[hidden] { display: none; }
+.cm-table-comment-toggle { font-weight: 600; }
+.cm-table-comment-location {
+  display: block;
+  padding: 5px 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.cm-table-comment-entry { padding: 4px 0; }
+.cm-table-comment-entry + .cm-table-comment-entry { border-top: 1px solid var(--color-rule-light); }
+.cm-table-comment-entry .cm-comment-block {
+  width: 100%;
+  border-radius: 0;
+}
+.cm-table-comment-entry .cm-comment-block-actions { opacity: 1; }
+.cm-table-comment-marker:hover,
+.cm-table-comment-toggle:hover,
+.cm-table-comment-resolved:hover,
+.cm-table-comment-location:hover { background: var(--color-chrome-mid); }
+.cm-table-comment-marker:focus-visible,
+.cm-table-comments button:focus-visible {
+  outline: 1px solid var(--color-ink);
+  outline-offset: 2px;
+}

@@ -4,6 +4,8 @@ import { RangeSetBuilder, StateField, StateEffect, Prec } from '@codemirror/stat
 import { readBinaryFile } from '../../services/fileSystem.js'
 import { markdownLinkDestination } from './markdownLinks.js'
 import { stripCommentTags } from '../../services/comments/parser.js'
+import { commentTagField, commentWidgetConfig, tableCommentIds, setActiveComment, setResolvedCommentsVisible } from './comments.js'
+import { tableComments, appendCommentText, addTableComments, tableCommentsController } from './tableComments.js'
 
 import { addTableResizeControls, tableResizeController } from './tableResize.js'
 
@@ -94,7 +96,7 @@ class HrWidget extends WidgetType {
 }
 
 // Render parsed inline nodes with DOM methods. Never interpret authored HTML.
-function renderTableInline(parent, node, text, offset) {
+function renderTableInline(parent, node, text, offset, comments = []) {
   const raw = text.slice(node.from - offset, node.to - offset)
   const formats = {
     StrongEmphasis: ['strong', 'cm-lp-bold'],
@@ -107,7 +109,7 @@ function renderTableInline(parent, node, text, offset) {
     const url = node.name === 'URL' ? node : node.getChild('URL')
     const target = url && text.slice(url.from - offset, url.to - offset)
     if (!markdownLinkDestination(target)) {
-      parent.appendChild(document.createTextNode(raw))
+      appendCommentText(parent, raw, node.from - offset, comments)
       return
     }
     container = document.createElement('span')
@@ -116,7 +118,7 @@ function renderTableInline(parent, node, text, offset) {
     container.title = target
     parent.appendChild(container)
     if (node.name !== 'Link') {
-      container.textContent = target.replace(/^<|>$/g, '')
+      appendCommentText(container, target.replace(/^<|>$/g, ''), url.from - offset, comments)
       return
     }
   } else if (formats[node.name]) {
@@ -125,24 +127,24 @@ function renderTableInline(parent, node, text, offset) {
     container.className = className
     parent.appendChild(container)
   } else if (node.name === 'Escape') {
-    parent.appendChild(document.createTextNode(raw.slice(1)))
+    appendCommentText(parent, raw.slice(1), node.from + 1 - offset, comments)
     return
   } else if (node.name !== 'TableCell') {
-    parent.appendChild(document.createTextNode(raw))
+    appendCommentText(parent, raw, node.from - offset, comments)
     return
   }
   let position = node.from
   const end = node.name === 'Link' ? node.getChildren('LinkMark')[1].from : node.to
   for (let child = node.firstChild; child; child = child.nextSibling) {
     if (child.from >= end) break
-    container.appendChild(document.createTextNode(text.slice(position - offset, child.from - offset)))
+    appendCommentText(container, text.slice(position - offset, child.from - offset), position - offset, comments)
     if (!['EmphasisMark', 'StrikethroughMark', 'CodeMark', 'LinkMark', 'LinkTitle'].includes(child.name)
       && !(node.name === 'Link' && child.name === 'URL')) {
-      renderTableInline(container, child, text, offset)
+      renderTableInline(container, child, text, offset, comments)
     }
     position = child.to
   }
-  container.appendChild(document.createTextNode(text.slice(position - offset, end - offset)))
+  appendCommentText(container, text.slice(position - offset, end - offset), position - offset, comments)
 }
 
 function tableCellNodes(row, cells) {
@@ -183,19 +185,24 @@ export const tableWidthsField = StateField.define({
 })
 
 class TableWidget extends WidgetType {
-  constructor(text, node, resize = null) {
+  constructor(text, node, resize = null, discussions = null) {
     super()
     this.text = text
     this.node = node
     this.resize = resize
+    this.discussions = discussions
   }
 
   eq(other) {
     return this.text === other.text && this.resize?.from === other.resize?.from
       && this.resize?.to === other.resize?.to && this.resize?.widths === other.resize?.widths
       && Boolean(this.resize) === Boolean(other.resize)
+      && this.discussions?.raw === other.discussions?.raw
+      && this.discussions?.activeId === other.discussions?.activeId
+      && this.discussions?.resolvedVisible === other.discussions?.resolvedVisible
+      && this.discussions?.config === other.discussions?.config
   }
-  ignoreEvent(event) { return Boolean(event.target?.closest?.('.cm-lp-column-resize, .cm-lp-table-controls')) }
+  ignoreEvent(event) { return Boolean(event.target?.closest?.('.cm-lp-column-resize, .cm-lp-table-controls, .cm-table-comment-marker, .cm-table-comments')) }
 
   commit(view) {
     return widths => view.dispatch({ effects: setTableWidths.of({ ...this.resize, widths }) })
@@ -203,8 +210,10 @@ class TableWidget extends WidgetType {
 
   updateDOM(dom, view) {
     const controller = tableResizeController(dom)
-    if (!controller || dom.dataset.tableText !== this.text || !this.resize) return false
-    controller.update(this.resize.widths, this.commit(view))
+    if (dom.dataset.tableText !== this.text || dom._commentRaw !== this.discussions?.raw
+      || dom._commentConfig !== this.discussions?.config || Boolean(controller) !== Boolean(this.resize)) return false
+    controller?.update(this.resize.widths, this.commit(view))
+    tableCommentsController(dom)?.sync(this.discussions?.activeId, this.discussions?.resolvedVisible)
     return true
   }
 
@@ -219,6 +228,8 @@ class TableWidget extends WidgetType {
       return pre
     }
 
+    const comments = this.discussions?.comments || []
+    const cellEntries = []
     const table = document.createElement('table')
     table.className = 'cm-lp-table'
 
@@ -228,9 +239,10 @@ class TableWidget extends WidgetType {
     const rows = this.node.getChildren('TableRow')
     parsed.headers.forEach((cell, i) => {
       const th = document.createElement('th')
-      if (headers[i]) renderTableInline(th, headers[i], this.text, this.node.from)
+      if (headers[i]) renderTableInline(th, headers[i], this.text, this.node.from, comments)
       const align = parsed.alignments[i] || 'left'
       if (align !== 'left') th.style.textAlign = align
+      cellEntries.push({ cell: th, node: headers[i] && { from: headers[i].from - this.node.from, to: headers[i].to - this.node.from }, column: th.textContent || `Column ${i + 1}`, row: 0 })
       headerRow.appendChild(th)
     })
     thead.appendChild(headerRow)
@@ -243,9 +255,10 @@ class TableWidget extends WidgetType {
         const cells = tableCellNodes(rows[rowIndex], row)
         for (let i = 0; i < parsed.headers.length; i++) {
           const td = document.createElement('td')
-          if (cells[i]) renderTableInline(td, cells[i], this.text, this.node.from)
+          if (cells[i]) renderTableInline(td, cells[i], this.text, this.node.from, comments)
           const align = parsed.alignments[i] || 'left'
           if (align !== 'left') td.style.textAlign = align
+          cellEntries.push({ cell: td, node: cells[i] && { from: cells[i].from - this.node.from, to: cells[i].to - this.node.from }, column: headerRow.cells[i].textContent || `Column ${i + 1}`, row: rowIndex + 1 })
           tr.appendChild(td)
         }
         tbody.appendChild(tr)
@@ -256,8 +269,11 @@ class TableWidget extends WidgetType {
     const wrapper = document.createElement('div')
     wrapper.className = 'cm-lp-table-wrap'
     wrapper.appendChild(table)
+    wrapper.dataset.tableText = this.text
+    wrapper._commentRaw = this.discussions?.raw
+    wrapper._commentConfig = this.discussions?.config
+    addTableComments(wrapper, table, view, this.discussions, cellEntries)
     if (this.resize) {
-      wrapper.dataset.tableText = this.text
       addTableResizeControls(wrapper, table, view, this.resize.widths, this.commit(view))
     }
     return wrapper
@@ -579,7 +595,12 @@ function buildTableDecorations(state, isEnabled, resizableTables) {
             Decoration.replace({ widget: new TableWidget(text, tableNode, resizableTables() ? {
               from: node.from, to: node.to,
               widths: state.field(tableWidthsField).find(entry => entry.from === node.from && entry.to === node.to)?.widths || null,
-            } : null), block: true })
+            } : null, {
+              raw, comments: tableComments(raw),
+              activeId: state.field(commentTagField, false)?.activeId,
+              resolvedVisible: state.field(commentTagField, false)?.resolvedVisible,
+              config: state.facet(commentWidgetConfig),
+            }), block: true })
               .range(fromLine.from, toLine.to)
           )
         }
@@ -697,7 +718,7 @@ const livePreviewTheme = EditorView.baseTheme({
     display: 'block',
   },
   '.cm-lp-table-wrap': {
-    margin: '4px 0',
+    padding: '4px 0',
     overflowX: 'auto',
     display: 'block',
   },
@@ -724,15 +745,22 @@ const livePreviewTheme = EditorView.baseTheme({
   },
   '.cm-lp-table-sized th, .cm-lp-table-sized td': { overflowWrap: 'anywhere', whiteSpace: 'normal' },
   '.cm-lp-column-resize': {
-    position: 'absolute', right: '0', top: '0', bottom: '0', width: '8px',
-    borderRight: '1px solid var(--color-rule)', cursor: 'col-resize', touchAction: 'none',
+    position: 'absolute', right: '-4px', top: '0', bottom: '0', width: '9px',
+    zIndex: '1', cursor: 'col-resize', touchAction: 'none', outline: 'none',
   },
-  '.cm-lp-column-resize:hover, .cm-lp-column-resize:focus-visible': {
-    backgroundColor: 'var(--color-accent-soft)', outline: '1px solid var(--color-accent)',
+  '.cm-lp-column-resize::after': {
+    content: '""', position: 'absolute', left: '4px', top: '4px', bottom: '4px',
+    width: '1px', backgroundColor: 'var(--color-rule)', pointerEvents: 'none',
+  },
+  '.cm-lp-column-resize:hover::after, .cm-lp-column-resize:focus-visible::after': {
+    width: '2px', backgroundColor: 'var(--color-accent)',
+  },
+  '.cm-lp-column-resize:focus-visible::after': {
+    outline: '1px solid var(--color-accent)', outlineOffset: '2px',
   },
   '.cm-lp-table-controls': { height: '22px', display: 'flex', justifyContent: 'flex-end' },
   '.cm-lp-table-controls button': {
-    fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--color-ink-3)', cursor: 'pointer',
+    fontFamily: 'var(--font-sans)', fontSize: '11px', color: 'var(--color-ink-3)', cursor: 'pointer',
   },
   '.cm-lp-table-controls button:hover': { color: 'var(--color-ink)' },
   '.cm-lp-table-controls button:focus-visible': { outline: '1px solid var(--color-accent)' },
@@ -803,7 +831,7 @@ export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => 
       if (
         nowEnabled !== tableEnabled ||
         tr.docChanged ||
-        tr.effects.some(effect => effect.is(setTableWidths)) ||
+        tr.effects.some(effect => effect.is(setTableWidths) || effect.is(setActiveComment) || effect.is(setResolvedCommentsVisible)) ||
         tr.selection ||
         syntaxTree(tr.state) !== syntaxTree(tr.startState)
       ) {
@@ -812,7 +840,17 @@ export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => 
       }
       return value
     },
-    provide: f => EditorView.decorations.from(f),
+    provide: f => [
+      EditorView.decorations.from(f),
+      tableCommentIds.compute([f], state => {
+        const ids = []
+        for (let iter = state.field(f).iter(); iter.value; iter.next()) {
+          const data = iter.value.spec.widget?.discussions
+          if (data?.config) ids.push(...data.comments.map(comment => comment.id))
+        }
+        return ids
+      }),
+    ],
   })
 
   const tableNav = Prec.high(keymap.of([

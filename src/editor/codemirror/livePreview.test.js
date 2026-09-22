@@ -302,8 +302,8 @@ describe('livePreview', () => {
       const checkTable = () => {
         const table = view.dom.querySelector('table')
         expect(table).not.toBeNull()
-        expect([...table.querySelectorAll('th')].map(cell => cell.textContent)).toEqual(['Guide', 'Status'])
-        expect([...table.querySelectorAll('td')].map(cell => cell.textContent)).toEqual(['File', 'Ready', 'Resolved', '<b>literal</b>'])
+        expect([...table.querySelectorAll('th')].map(cell => cell.textContent)).toEqual(['Guide1 comment', 'Status'])
+        expect([...table.querySelectorAll('td')].map(cell => cell.textContent)).toEqual(['File1 comment', 'Ready', 'Resolved', '<b>literal</b>'])
         expect(table.querySelector('strong').textContent).toBe('Guide')
         expect(table.querySelector('em').textContent).toBe('Resolved')
         expect(table.querySelector('.cm-lp-link').dataset.markdownDestination).toBe('guide.md')

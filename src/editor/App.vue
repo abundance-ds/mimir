@@ -870,6 +870,7 @@ const editorExtensions = computed(() => [
     () => editorSettings.editorLivePreview,
     () => currentFile.value?.path,
     state => sourceGraphLinks.value?.references(state) || [],
+    { resizableTables: () => currentFile.value?.kind === 'text' && isMarkdownPath(currentFile.value?.path) },
   ),
   markdownLinkOpen({
     enabled: (view, event) => {
@@ -1100,7 +1101,7 @@ function restoreEditorFocus() {
     } else if (scratchpadHistoryVisible.value) {
       editorShellRef.value?.querySelector('[data-scratchpad-history]')?.focus({ preventScroll: true })
     } else if (isResourcePreview.value && !visibleDiffActive.value && !gitReviewVisible.value) {
-      editorShellRef.value?.querySelector('.image-viewport, [data-pdf-preview-viewport]')?.focus({ preventScroll: true })
+      editorShellRef.value?.querySelector('.image-viewport, [data-pdf-preview-viewport], [data-external-file-preview] [data-preview-open-native]')?.focus({ preventScroll: true })
     } else editorSurfaceRef.value?.focus?.()
   })
 }

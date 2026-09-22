@@ -1,4 +1,4 @@
-import { StateEffect, StateField, Prec, EditorState, Annotation } from '@codemirror/state'
+import { StateEffect, StateField, Prec, EditorState, Annotation, Facet } from '@codemirror/state'
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view'
 import { parseCommentTags, stripCommentTags } from '../../services/comments/parser.js'
 
@@ -7,6 +7,9 @@ import { parseCommentTags, stripCommentTags } from '../../services/comments/pars
 export const setActiveComment = StateEffect.define()
 export const setResolvedCommentsVisible = StateEffect.define()
 export const commentMutation = Annotation.define()
+// Table preview renders these threads inside its own block widget.
+export const tableCommentIds = Facet.define({ combine: values => new Set(values.flat()) })
+export const commentWidgetConfig = Facet.define({ combine: values => values[0] || null })
 
 // --- Incremental reparse guard ---
 //
@@ -615,18 +618,22 @@ function runWidgetAction({
     })
 }
 
-function createInlineCommentBlocks(onCommentClick, onCommentAction) {
-  const drafts = new Map()
-  return EditorView.decorations.compute([commentTagField], (state) => {
+function createInlineCommentBlocks(onCommentClick, onCommentAction, drafts) {
+  return EditorView.decorations.compute([commentTagField, tableCommentIds], (state) => {
     const { comments, activeId, resolvedVisible } = state.field(commentTagField)
     const liveIds = new Set(comments.map(comment => comment.id))
     for (const id of drafts.keys()) {
       if (!liveIds.has(id)) drafts.delete(id)
     }
+    const tables = state.facet(commentWidgetConfig)?.tables
+    for (const id of tables?.keys() || []) {
+      if (!liveIds.has(id)) tables.delete(id)
+    }
     const decos = []
     const docLen = state.doc.length
 
     for (const c of comments) {
+      if (state.facet(tableCommentIds).has(c.id)) continue
       if (c.contentFrom > docLen) continue
       if (c.status === 'resolved' && !resolvedVisible) continue
       const anchorPos = Math.min(c.contentTo, docLen)
@@ -643,8 +650,6 @@ function createInlineCommentBlocks(onCommentClick, onCommentAction) {
     return Decoration.set(decos.sort((a, b) => a.from - b.from || a.startSide - b.startSide))
   })
 }
-
-const inlineCommentBlocks = createInlineCommentBlocks()
 
 // --- Atomic ranges: make hidden tags behave as indivisible units for cursor/deletion ---
 
@@ -911,12 +916,19 @@ export function getCommentsFromState(state) {
 }
 
 export function commentsExtension({ onCommentClick, onCommentAction, onScroll, onGeometryChange, onCommentCreate } = {}) {
+  const drafts = new Map()
+  const tables = new Map()
   const ext = [
     commentTagField,
     commentDecorations,
-    onCommentAction || onCommentClick
-      ? createInlineCommentBlocks(onCommentClick, onCommentAction)
-      : inlineCommentBlocks,
+    commentWidgetConfig.of({
+      tables,
+      onCommentClick,
+      render: (comment, activeId, view, onSelect) => new CommentBlockWidget(
+        comment, activeId, id => { onSelect(id); onCommentClick?.(id) }, onCommentAction, drafts,
+      ).toDOM(view),
+    }),
+    createInlineCommentBlocks(onCommentClick, onCommentAction, drafts),
     commentAtomicRanges,
     commentChangeFilter,
     commentKeyHandlers,
