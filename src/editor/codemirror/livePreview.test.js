@@ -7,6 +7,7 @@ import { syntaxHighlighting, syntaxTree, ensureSyntaxTree } from '@codemirror/la
 import { livePreviewExtension, _buildDecorations, _parseMarkdownTable, _resolveImagePath } from './livePreview.js'
 import { markdownLinkOpen } from './markdownLinks.js'
 import { editorHighlightStyle } from './core.js'
+import { commentsExtension } from './comments.js'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -250,6 +251,123 @@ describe('livePreview', () => {
   })
 
   describe('rendered link interaction', () => {
+    it('keeps empty header and body cells in their original columns', () => {
+      const doc = '| Who | Item | Monthly | 12 months |\n| --- | --- | ---: | ---: |\n'
+        + '| General | Workspace Standard × 3 | €58 | €696 |\n'
+        + '| | GitHub Team × 4 | €18 | €216 |\n'
+        + '| | **General subtotal** | **€311** | **€3,732** |\n'
+        + '| **TOTAL** | | **€1,506** | **€23,312** |\n'
+        + '| | | [File](guide.md) | |\n\n'
+        + '| | Label | |\n| --- | --- | --- |\n| | value | |\n\nafter'
+      const view = new EditorView({
+        parent: document.body,
+        state: EditorState.create({
+          doc, selection: { anchor: doc.length },
+          extensions: [markdown({ base: markdownLanguage }), livePreviewExtension(() => true, () => '/work/README.md')],
+        }),
+      })
+      const tables = view.dom.querySelectorAll('table')
+      const rows = [...tables[0].querySelectorAll('tbody tr')]
+      expect(rows.map(row => [...row.cells].map(cell => cell.textContent))).toEqual([
+        ['General', 'Workspace Standard × 3', '€58', '€696'],
+        ['', 'GitHub Team × 4', '€18', '€216'],
+        ['', 'General subtotal', '€311', '€3,732'],
+        ['TOTAL', '', '€1,506', '€23,312'],
+        ['', '', 'File', ''],
+      ])
+      expect(rows[1].cells[2].style.textAlign).toBe('right')
+      expect(rows[3].cells[2].querySelector('strong').textContent).toBe('€1,506')
+      expect(rows[4].cells[2].querySelector('.cm-lp-link').dataset.markdownDestination).toBe('guide.md')
+      expect([...tables[1].querySelectorAll('th')].map(cell => cell.textContent)).toEqual(['', 'Label', ''])
+      expect([...tables[1].querySelectorAll('td')].map(cell => cell.textContent)).toEqual(['', 'value', ''])
+      view.destroy()
+    })
+
+    it('conceals table comments and replies while preserving cells, formatting, and source', () => {
+      const doc = 'before\n\n| <comment id="h" text="Header">**Guide**</comment> | Status |\n'
+        + '| --- | --- |\n'
+        + '| <comment id="c" text="Choose A | B">[File](guide.md)<reply id="r" text="Yes | agreed"/></comment> | Ready |\n'
+        + '| <comment id="done" status="resolved" text="Done">*Resolved*</comment> | <b>literal</b> |\n\nafter'
+      const view = new EditorView({
+        parent: document.body,
+        state: EditorState.create({
+          doc, selection: { anchor: doc.length },
+          extensions: [
+            markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+            livePreviewExtension(() => true, () => '/work/README.md'),
+            commentsExtension(),
+          ],
+        }),
+      })
+      const checkTable = () => {
+        const table = view.dom.querySelector('table')
+        expect(table).not.toBeNull()
+        expect([...table.querySelectorAll('th')].map(cell => cell.textContent)).toEqual(['Guide', 'Status'])
+        expect([...table.querySelectorAll('td')].map(cell => cell.textContent)).toEqual(['File', 'Ready', 'Resolved', '<b>literal</b>'])
+        expect(table.querySelector('strong').textContent).toBe('Guide')
+        expect(table.querySelector('em').textContent).toBe('Resolved')
+        expect(table.querySelector('.cm-lp-link').dataset.markdownDestination).toBe('guide.md')
+        expect(table.querySelector('b')).toBeNull()
+      }
+      checkTable()
+      view.dispatch({ selection: { anchor: doc.indexOf('Ready') } })
+      expect(view.dom.querySelector('table')).toBeNull()
+      const sourceLines = [...view.contentDOM.querySelectorAll('.cm-line')].map(line => line.textContent).join('\n')
+      expect(sourceLines).toContain('Ready')
+      expect(sourceLines).not.toContain('<comment')
+      expect(sourceLines).not.toContain('<reply')
+      view.dispatch({ selection: { anchor: doc.length } })
+      checkTable()
+      expect(view.state.doc.toString()).toBe(doc)
+      view.destroy()
+    })
+
+    it('renders table inline content and opens each cell destination without coordinate lookup', () => {
+      const doc = '| [**Guide**](guide.md "Title") | Format |\n| --- | --- |\n'
+        + '| [Web](https://example.com) | *italic* and `code` and ~~old~~ |\n'
+        + '| <https://example.org> | a\\|b |\n'
+        + '| [Unsafe](javascript:alert) | <img src=x onerror=alert(1)> |\n\nother'
+      const onOpenFile = vi.fn()
+      const onOpenUrl = vi.fn()
+      const view = new EditorView({
+        parent: document.body,
+        state: EditorState.create({
+          doc, selection: { anchor: doc.length },
+          extensions: [
+            markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+            livePreviewExtension(() => true, () => '/work/README.md'),
+            markdownLinkOpen({ selector: '.cm-lp-link', preserveRenderedLink: true, onOpenFile, onOpenUrl }),
+          ],
+        }),
+      })
+      const coords = vi.spyOn(view, 'posAtCoords').mockReturnValue(null)
+      const table = view.dom.querySelector('table')
+      expect(table.querySelector('th strong').textContent).toBe('Guide')
+      expect(table.querySelector('th .cm-lp-link').textContent).toBe('Guide')
+      expect(table.querySelector('em').textContent).toBe('italic')
+      expect(table.querySelector('code').textContent).toBe('code')
+      expect(table.querySelector('s').textContent).toBe('old')
+      expect(table.textContent).toContain('a|b')
+      expect(table.querySelector('img')).toBeNull()
+      expect(table.textContent).toContain('[Unsafe](javascript:alert)')
+      const links = table.querySelectorAll('.cm-lp-link')
+      expect(links).toHaveLength(3)
+      for (const link of links) {
+        const target = link.firstElementChild || link
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+        target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+      }
+      expect(onOpenFile).toHaveBeenCalledWith('guide.md')
+      expect(onOpenUrl.mock.calls).toEqual([['https://example.com/'], ['https://example.org/']])
+      expect(coords).not.toHaveBeenCalled()
+      expect(view.state.selection.main.head).toBe(doc.length)
+      view.dispatch({ selection: { anchor: doc.indexOf('Web') } })
+      expect(view.dom.querySelector('table')).toBeNull()
+      view.dispatch({ selection: { anchor: doc.length } })
+      expect(view.dom.querySelectorAll('table .cm-lp-link')).toHaveLength(3)
+      view.destroy()
+    })
+
     it('opens a rendered file link with one click without moving the caret', () => {
       const doc = '[Layout](layout-2.html)\n\nother'
       const cursor = doc.indexOf('other')

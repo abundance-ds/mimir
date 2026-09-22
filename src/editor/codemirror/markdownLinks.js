@@ -74,6 +74,10 @@ export function linkDestinationForClick(event, view, selector = '.cm-graph-link'
   ) {
     return null
   }
+  const rendered = event.target.closest(selector)
+  if (rendered.dataset?.markdownDestination) {
+    return markdownLinkDestination(rendered.dataset.markdownDestination)
+  }
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, true)
   return pos == null ? null : linkDestinationAt(view.state, pos)
 }

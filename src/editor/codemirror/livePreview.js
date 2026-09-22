@@ -1,8 +1,11 @@
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view'
-import { syntaxTree } from '@codemirror/language'
-import { RangeSetBuilder, StateField, Prec } from '@codemirror/state'
+import { language, syntaxTree } from '@codemirror/language'
+import { RangeSetBuilder, StateField, StateEffect, Prec } from '@codemirror/state'
 import { readBinaryFile } from '../../services/fileSystem.js'
 import { markdownLinkDestination } from './markdownLinks.js'
+import { stripCommentTags } from '../../services/comments/parser.js'
+
+import { addTableResizeControls, tableResizeController } from './tableResize.js'
 
 const imageCache = new Map()
 
@@ -90,16 +93,124 @@ class HrWidget extends WidgetType {
   ignoreEvent() { return false }
 }
 
+// Render parsed inline nodes with DOM methods. Never interpret authored HTML.
+function renderTableInline(parent, node, text, offset) {
+  const raw = text.slice(node.from - offset, node.to - offset)
+  const formats = {
+    StrongEmphasis: ['strong', 'cm-lp-bold'],
+    Emphasis: ['em', 'cm-lp-italic'],
+    Strikethrough: ['s', 'cm-lp-strike'],
+    InlineCode: ['code', 'cm-lp-code'],
+  }
+  let container = parent
+  if (node.name === 'Link' || node.name === 'Autolink' || node.name === 'URL') {
+    const url = node.name === 'URL' ? node : node.getChild('URL')
+    const target = url && text.slice(url.from - offset, url.to - offset)
+    if (!markdownLinkDestination(target)) {
+      parent.appendChild(document.createTextNode(raw))
+      return
+    }
+    container = document.createElement('span')
+    container.className = 'cm-lp-link'
+    container.dataset.markdownDestination = target
+    container.title = target
+    parent.appendChild(container)
+    if (node.name !== 'Link') {
+      container.textContent = target.replace(/^<|>$/g, '')
+      return
+    }
+  } else if (formats[node.name]) {
+    const [tag, className] = formats[node.name]
+    container = document.createElement(tag)
+    container.className = className
+    parent.appendChild(container)
+  } else if (node.name === 'Escape') {
+    parent.appendChild(document.createTextNode(raw.slice(1)))
+    return
+  } else if (node.name !== 'TableCell') {
+    parent.appendChild(document.createTextNode(raw))
+    return
+  }
+  let position = node.from
+  const end = node.name === 'Link' ? node.getChildren('LinkMark')[1].from : node.to
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.from >= end) break
+    container.appendChild(document.createTextNode(text.slice(position - offset, child.from - offset)))
+    if (!['EmphasisMark', 'StrikethroughMark', 'CodeMark', 'LinkMark', 'LinkTitle'].includes(child.name)
+      && !(node.name === 'Link' && child.name === 'URL')) {
+      renderTableInline(container, child, text, offset)
+    }
+    position = child.to
+  }
+  container.appendChild(document.createTextNode(text.slice(position - offset, end - offset)))
+}
+
+function tableCellNodes(row, cells) {
+  // The Markdown tree omits empty cells. Keep their column slots when
+  // matching the remaining syntax nodes to the parsed row.
+  const nodes = row?.getChildren('TableCell') || []
+  let index = 0
+  return cells.map(cell => cell === '' ? null : nodes[index++])
+}
+
+// Stable across feature reconfiguration; each document owns its own value.
+export const setTableWidths = StateEffect.define()
+export const tableWidthsField = StateField.define({
+  create: () => [],
+  update(entries, tr) {
+    let next = entries
+    if (tr.docChanged) {
+      next = entries.flatMap(entry => {
+        let replaced = false
+        tr.changes.iterChangedRanges((from, to) => {
+          if (from <= entry.from && to >= entry.to) replaced = true
+        })
+        if (replaced) return []
+        const from = tr.changes.mapPos(entry.from, 1)
+        const to = tr.changes.mapPos(entry.to, -1)
+        const parsed = parseMarkdownTable(stripCommentTags(tr.state.sliceDoc(from, to)))
+        return parsed?.headers.length === entry.widths.length ? [{ ...entry, from, to }] : []
+      })
+    }
+    for (const effect of tr.effects) {
+      if (!effect.is(setTableWidths)) continue
+      const { from, to, widths } = effect.value
+      next = next.filter(entry => entry.from !== from)
+      if (widths) next = [...next, { from, to, widths }]
+    }
+    return next
+  },
+})
+
 class TableWidget extends WidgetType {
-  constructor(text) {
+  constructor(text, node, resize = null) {
     super()
     this.text = text
+    this.node = node
+    this.resize = resize
   }
 
-  eq(other) { return this.text === other.text }
-  ignoreEvent() { return false }
+  eq(other) {
+    return this.text === other.text && this.resize?.from === other.resize?.from
+      && this.resize?.to === other.resize?.to && this.resize?.widths === other.resize?.widths
+      && Boolean(this.resize) === Boolean(other.resize)
+  }
+  ignoreEvent(event) { return Boolean(event.target?.closest?.('.cm-lp-column-resize, .cm-lp-table-controls')) }
 
-  toDOM() {
+  commit(view) {
+    return widths => view.dispatch({ effects: setTableWidths.of({ ...this.resize, widths }) })
+  }
+
+  updateDOM(dom, view) {
+    const controller = tableResizeController(dom)
+    if (!controller || dom.dataset.tableText !== this.text || !this.resize) return false
+    controller.update(this.resize.widths, this.commit(view))
+    return true
+  }
+
+  destroy(dom) { tableResizeController(dom)?.destroy() }
+
+  toDOM(view) {
     const parsed = parseMarkdownTable(this.text)
     if (!parsed) {
       const pre = document.createElement('pre')
@@ -113,9 +224,11 @@ class TableWidget extends WidgetType {
 
     const thead = document.createElement('thead')
     const headerRow = document.createElement('tr')
+    const headers = tableCellNodes(this.node.getChild('TableHeader'), parsed.headers)
+    const rows = this.node.getChildren('TableRow')
     parsed.headers.forEach((cell, i) => {
       const th = document.createElement('th')
-      th.textContent = cell
+      if (headers[i]) renderTableInline(th, headers[i], this.text, this.node.from)
       const align = parsed.alignments[i] || 'left'
       if (align !== 'left') th.style.textAlign = align
       headerRow.appendChild(th)
@@ -125,11 +238,12 @@ class TableWidget extends WidgetType {
 
     if (parsed.rows.length > 0) {
       const tbody = document.createElement('tbody')
-      parsed.rows.forEach(row => {
+      parsed.rows.forEach((row, rowIndex) => {
         const tr = document.createElement('tr')
+        const cells = tableCellNodes(rows[rowIndex], row)
         for (let i = 0; i < parsed.headers.length; i++) {
           const td = document.createElement('td')
-          td.textContent = row[i] || ''
+          if (cells[i]) renderTableInline(td, cells[i], this.text, this.node.from)
           const align = parsed.alignments[i] || 'left'
           if (align !== 'left') td.style.textAlign = align
           tr.appendChild(td)
@@ -142,6 +256,10 @@ class TableWidget extends WidgetType {
     const wrapper = document.createElement('div')
     wrapper.className = 'cm-lp-table-wrap'
     wrapper.appendChild(table)
+    if (this.resize) {
+      wrapper.dataset.tableText = this.text
+      addTableResizeControls(wrapper, table, view, this.resize.widths, this.commit(view))
+    }
     return wrapper
   }
 }
@@ -193,7 +311,7 @@ class ImageWidget extends WidgetType {
   }
 }
 
-function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => []) {
+function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => [], { resizableTables = () => false } = {}) {
   const enabled = isEnabled()
   const { state } = view
 
@@ -422,7 +540,7 @@ function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => []) {
   return builder.finish()
 }
 
-function buildTableDecorations(state, isEnabled) {
+function buildTableDecorations(state, isEnabled, resizableTables) {
   if (!isEnabled()) return Decoration.none
 
   const cursorLines = new Set()
@@ -449,9 +567,19 @@ function buildTableDecorations(state, isEnabled) {
           if (cursorLines.has(l)) { cursorInTable = true; break }
         }
         if (!cursorInTable) {
-          const text = state.sliceDoc(node.from, node.to)
+          const raw = state.sliceDoc(node.from, node.to)
+          const text = stripCommentTags(raw)
+          // The widget owns its DOM, so editor tag decorations cannot hide tags
+          // inside it. Parse the visible text again to keep cell/node offsets
+          // correct, including pipes and newlines in comment attributes.
+          const tableNode = text === raw ? node.node
+            : state.facet(language)?.parser.parse(text).topNode.getChild('Table')
+          if (!tableNode) return false
           decos.push(
-            Decoration.replace({ widget: new TableWidget(text), block: true })
+            Decoration.replace({ widget: new TableWidget(text, tableNode, resizableTables() ? {
+              from: node.from, to: node.to,
+              widths: state.field(tableWidthsField).find(entry => entry.from === node.from && entry.to === node.to)?.widths || null,
+            } : null), block: true })
               .range(fromLine.from, toLine.to)
           )
         }
@@ -534,6 +662,11 @@ const livePreviewTheme = EditorView.baseTheme({
   '.cm-lp-strike': {
     textDecoration: 'line-through',
   },
+  '.cm-lp-code': {
+    fontFamily: 'var(--font-mono)',
+    backgroundColor: 'var(--inline-code-bg)',
+    color: 'var(--code)',
+  },
   '.cm-lp-link': {
     color: 'var(--color-accent)',
     cursor: 'pointer',
@@ -575,7 +708,13 @@ const livePreviewTheme = EditorView.baseTheme({
     fontFamily: 'var(--font-mono)',
     color: 'var(--color-ink)',
   },
+  '.cm-lp-table td': {
+    padding: '4px 12px',
+    borderBottom: '1px solid var(--color-rule)',
+    color: 'var(--color-ink-2)',
+  },
   '.cm-lp-table th': {
+    position: 'relative',
     fontWeight: '600',
     backgroundColor: 'var(--color-chrome-mid)',
     borderBottom: '2px solid var(--color-rule)',
@@ -583,11 +722,21 @@ const livePreviewTheme = EditorView.baseTheme({
     textAlign: 'left',
     color: 'var(--color-ink)',
   },
-  '.cm-lp-table td': {
-    padding: '4px 12px',
-    borderBottom: '1px solid var(--color-rule)',
-    color: 'var(--color-ink-2)',
+  '.cm-lp-table-sized th, .cm-lp-table-sized td': { overflowWrap: 'anywhere', whiteSpace: 'normal' },
+  '.cm-lp-column-resize': {
+    position: 'absolute', right: '0', top: '0', bottom: '0', width: '8px',
+    borderRight: '1px solid var(--color-rule)', cursor: 'col-resize', touchAction: 'none',
   },
+  '.cm-lp-column-resize:hover, .cm-lp-column-resize:focus-visible': {
+    backgroundColor: 'var(--color-accent-soft)', outline: '1px solid var(--color-accent)',
+  },
+  '.cm-lp-table-controls': { height: '22px', display: 'flex', justifyContent: 'flex-end' },
+  '.cm-lp-table-controls button': {
+    fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--color-ink-3)', cursor: 'pointer',
+  },
+  '.cm-lp-table-controls button:hover': { color: 'var(--color-ink)' },
+  '.cm-lp-table-controls button:focus-visible': { outline: '1px solid var(--color-accent)' },
+  '.cm-lp-table-resizing, .cm-lp-table-resizing *': { cursor: 'col-resize', userSelect: 'none' },
   '.cm-lp-table tbody tr:hover': {
     backgroundColor: 'var(--color-line-soft)',
   },
@@ -612,15 +761,21 @@ const livePreviewTheme = EditorView.baseTheme({
   },
 })
 
-export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => []) {
+export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => [], { resizableTables = () => false } = {}) {
   const plugin = ViewPlugin.fromClass(
     class {
       constructor(view) {
+        this.view = view
         this._enabled = isEnabled()
         this.decorations = buildDecorations(view, isEnabled, getFilePath, ownedLinks)
       }
 
+      destroy() {
+        this.view.dom.querySelectorAll('.cm-lp-table-wrap').forEach(dom => tableResizeController(dom)?.cancel())
+      }
+
       update(update) {
+        if (update.docChanged) this.destroy()
         const nowEnabled = isEnabled()
         if (
           nowEnabled !== this._enabled ||
@@ -641,18 +796,19 @@ export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => 
   let tableEnabled = isEnabled()
   const tableField = StateField.define({
     create(state) {
-      return buildTableDecorations(state, isEnabled)
+      return buildTableDecorations(state, isEnabled, resizableTables)
     },
     update(value, tr) {
       const nowEnabled = isEnabled()
       if (
         nowEnabled !== tableEnabled ||
         tr.docChanged ||
+        tr.effects.some(effect => effect.is(setTableWidths)) ||
         tr.selection ||
         syntaxTree(tr.state) !== syntaxTree(tr.startState)
       ) {
         tableEnabled = nowEnabled
-        return buildTableDecorations(tr.state, isEnabled)
+        return buildTableDecorations(tr.state, isEnabled, resizableTables)
       }
       return value
     },
@@ -664,7 +820,7 @@ export function livePreviewExtension(isEnabled, getFilePath, ownedLinks = () => 
     { key: 'ArrowUp', run: view => navigateIntoTable(view, 'up', isEnabled) },
   ]))
 
-  return [plugin, tableField, tableNav, livePreviewTheme]
+  return [tableWidthsField, plugin, tableField, tableNav, livePreviewTheme]
 }
 
 export { buildDecorations as _buildDecorations, parseMarkdownTable as _parseMarkdownTable, resolveImagePath as _resolveImagePath }

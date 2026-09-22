@@ -31,7 +31,13 @@ function measureBounds(view) {
   const height = visual?.height || document.documentElement.clientHeight || window.innerHeight
   const viewport = { left, top, right: left + width, bottom: top + height }
   const pane = (view.dom.closest('[data-graph-inspector], [role="dialog"], [data-pane-content]') || view.dom).getBoundingClientRect()
-  return graphCompletionBounds({ viewport, pane: pane.width > 0 && pane.height > 0 ? pane : viewport })
+  // A compact composer must not restrict a portaled menu to its short body.
+  // Keep its horizontal bounds, but use the window's vertical space.
+  const bounds = pane.width > 0 && pane.height > 0 ? pane : viewport
+  const completionPane = view.dom.closest('[data-graph-completion-viewport]')
+    ? { left: bounds.left, right: bounds.right, top: viewport.top, bottom: viewport.bottom }
+    : bounds
+  return graphCompletionBounds({ viewport, pane: completionPane })
 }
 
 export function graphCompletionPopup() {

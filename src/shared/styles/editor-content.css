@@ -172,7 +172,8 @@
 }
 .cm-comment-block {
   width: min(560px, calc(100% - 16px));
-  margin: 2px 0 4px 0;
+  /* CodeMirror measures block widget bounds without external margins. */
+  margin: 0;
   padding: 4px 7px 5px;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--color-rule) 50%, transparent);
