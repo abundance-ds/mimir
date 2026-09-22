@@ -28,6 +28,10 @@ const api = vi.hoisted(() => ({
   write: vi.fn(),
 }))
 
+vi.mock('../../stores/businessGraph.js', () => ({
+  useBusinessGraphStore: () => ({ loadedNodeIds: new Set() }),
+}))
+
 vi.mock('@xterm/xterm', () => ({
   Terminal: class MockTerminal {
     constructor(options) {

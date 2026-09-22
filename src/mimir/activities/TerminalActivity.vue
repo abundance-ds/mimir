@@ -117,6 +117,7 @@ import {
   resizeActivity,
   writeActivity,
 } from '../../services/activities.js'
+import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { getDataDir } from '../../services/dataDir.js'
 import {
   eventActivityId,
@@ -132,6 +133,8 @@ import { createTerminalResizeAnchor } from './terminalResizeAnchor.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
 import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
 import { parentPath } from '../../shared/utils/path.js'
+
+const graph = useBusinessGraphStore()
 
 const props = defineProps({
   activity: { type: Object, required: true },
@@ -274,6 +277,7 @@ async function initialize() {
       homeDirectory: () => terminalHomeDirectory,
       onOpenFile: reference => emit('open-file', reference),
       onOpenUrl: openTerminalUrl,
+      hasGraphNode: id => graph.loadedNodeIds.has(id),
     }))
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalUrl(uri)))

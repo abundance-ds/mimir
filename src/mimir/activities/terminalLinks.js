@@ -89,6 +89,7 @@ export function createTerminalLinkProvider(terminal, {
   homeDirectory = '',
   onOpenFile = () => {},
   onOpenUrl = () => {},
+  hasGraphNode = () => false,
 } = {}) {
   return {
     provideLinks(bufferLineNumber, callback) {
@@ -104,7 +105,11 @@ export function createTerminalLinkProvider(terminal, {
 
       // Full continuation candidates have priority over a shorter reference
       // that happens to be valid on one physical line.
-      for (const candidate of [...candidates, ...groups.map(candidateFromGroup)]) {
+      for (const candidate of [
+        ...graphContinuationCandidates(groups, hasGraphNode),
+        ...candidates,
+        ...groups.map(candidateFromGroup),
+      ]) {
         for (const reference of findTerminalGraphReferences(candidate.text)) {
           addReferenceLinks(links, terminal, bufferLineNumber, candidate, reference, () => {
             onOpenUrl(reference.text)
@@ -276,6 +281,43 @@ function wrappedGroupAt(buffer, lineIndex) {
     text.push(buffer.getLine(index).translateToString(true))
   }
   return { start, end, text: text.join('') }
+}
+
+// Hard newlines lose the CLI's layout metadata. Only recover a bounded,
+// indented Graph continuation when the loaded records give one clear match.
+function graphContinuationCandidates(groups, hasGraphNode) {
+  const candidates = []
+  for (let start = 0; start < groups.length - 1; start++) {
+    const first = groups[start]
+    if (!first.text.includes('mimir://graph/')) continue
+    const match = /(?:^|[\s([<`])(mimir:\/\/graph\/[a-z0-9][a-z0-9-]{0,119})\s*$/.exec(first.text)
+    if (!match) continue
+    let text = match[1]
+    const initialId = graphLinkId(text)
+    if (initialId && hasGraphNode(initialId)) continue
+    const sourceStart = match.index + match[0].indexOf(text)
+    const pieces = [pieceForGroup(first, 0, sourceStart, text.length)]
+    const matches = []
+    let expectedIndent = null
+    for (let index = start + 1; index < groups.length && index <= start + 2; index++) {
+      const group = groups[index]
+      const part = /^(\s+)([a-z0-9-]+)(.*)$/.exec(group.text)
+      if (!part) break
+      const indent = part[1].length
+      if (expectedIndent !== null && indent !== expectedIndent) break
+      expectedIndent = indent
+      // Reject URL suffixes, table borders, and other non-ID characters.
+      if (part[3] && !/^(?:\s|[)\]},.;!`>])/.test(part[3])) break
+      pieces.push(pieceForGroup(group, text.length, indent, part[2].length))
+      text += part[2]
+      if (text.length > 'mimir://graph/'.length + 120) break
+      const id = graphLinkId(text)
+      if (id && hasGraphNode(id)) matches.push({ text, pieces: [...pieces] })
+      if (part[3].trim()) break
+    }
+    if (matches.length === 1) candidates.push(matches[0])
+  }
+  return candidates
 }
 
 function continuationCandidates(groups) {
