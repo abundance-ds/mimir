@@ -99,6 +99,12 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const selectedScopes = computed(() => (
     scopes.value.filter(scope => activeScopeIds.value.includes(scope.id))
   ))
+  // Shared lazy index: terminal hover never queries native Graph storage.
+  const loadedNodeIds = computed(() => new Set([
+    ...nodes.value, ...graphProjects.value, ...workProjectItems.value,
+    ...graphItems.value, ...searchResults.value, ...selectedNeighbors.value,
+    ...(selectedNode.value ? [selectedNode.value] : []),
+  ].map(node => node.id)))
   const workIndex = computed(() => workSearchIndex([...nodes.value, ...graphProjects.value, ...workProjectItems.value]))
   const graphFilters = computed(() => {
     if (section.value !== 'all' || (view.value === 'changes' && !searchQuery.value.trim())) return {}
@@ -537,6 +543,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (
       create.kind === 'issue'
       && workspaceProjectId.value
+      && !Array.isArray(create.relations)
       && !relations.some(edge => edge.relation === 'part_of')
     ) {
       relations.push({
@@ -820,6 +827,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   return {
     status,
     changedSources,
+    loadedNodeIds,
     nodes,
     diagnostics,
     events,

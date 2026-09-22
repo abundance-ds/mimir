@@ -22,6 +22,7 @@
     <div
       v-if="open"
       ref="popover"
+      data-modal-portal
       data-date-picker-popover
       data-graph-date-popover
       class="date-picker-popover graph-date-popover"

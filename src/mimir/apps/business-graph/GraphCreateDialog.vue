@@ -4,27 +4,32 @@
       v-if="open"
       data-graph-create-dialog
       class="create-overlay"
-      @click.self="$emit('close')"
+      @click.self="draft.kind !== 'issue' && close()"
     >
       <form
         ref="dialog"
+        :inert="discardOpen"
         class="create-dialog"
+        :class="{ 'issue-composer': draft.kind === 'issue' }"
+        :data-graph-completion-viewport="draft.kind === 'issue' ? '' : undefined"
         role="dialog"
         aria-modal="true"
         aria-labelledby="graph-create-title"
         @submit.prevent="submit"
         @keydown.esc="onEscape"
         @keydown.tab="trapFocus"
+        @keydown="onKeydown"
       >
         <header class="create-header">
           <div>
-            <span>Add to the graph</span>
-            <h2 id="graph-create-title">Create {{ human(draft.kind) }}</h2>
+            <span v-if="draft.kind !== 'issue'">Add to the graph</span>
+            <h2 id="graph-create-title">{{ draft.kind === 'issue' ? 'New issue' : `Create ${human(draft.kind)}` }}</h2>
           </div>
           <button
             type="button"
             data-graph-control="create-close"
             aria-label="Close create dialog"
+            :disabled="saving"
             @click="close"
           >
             <IconX :size="16" />
@@ -37,7 +42,7 @@
         </div>
 
         <div class="create-scroll">
-          <div class="create-routing">
+          <div v-if="draft.kind !== 'issue'" class="create-routing">
             <label>
               <span>Kind</span>
               <GraphSelect
@@ -67,8 +72,23 @@
           </div>
 
           <label class="create-title-field">
-            <span>Title</span>
+            <span v-if="draft.kind !== 'issue'">Title</span>
+            <textarea
+              v-if="draft.kind === 'issue'"
+              ref="titleInput"
+              v-model="draft.title"
+              data-create-title
+              data-graph-control="create-title"
+              aria-label="Issue title"
+              placeholder="Issue title"
+              rows="1"
+              required
+              :disabled="saving"
+              @input="resizeTitle"
+              @keydown.enter="onTitleEnter"
+            />
             <input
+              v-else
               ref="titleInput"
               v-model="draft.title"
               data-create-title
@@ -82,30 +102,48 @@
             />
           </label>
 
-          <div v-if="draft.kind === 'issue'" class="create-issue-properties">
-            <label>
-              <span>Status</span>
-              <GraphSelect
-                v-model="draft.status"
-                data-create-status
-                data-graph-control="create-status"
-                variant="property"
-                aria-label="Initial issue status"
-                :options="statuses"
-              />
-            </label>
-            <label>
-              <span>Priority</span>
-              <GraphSelect
-                v-model="draft.priority"
-                data-create-priority
-                data-graph-control="create-priority"
-                variant="property"
-                aria-label="Initial issue priority"
-                :options="priorities"
-              />
-            </label>
-          </div>
+          <template v-if="draft.kind === 'issue'">
+            <GraphMarkdownEditor
+              ref="issueEditor"
+              :show-tools="false"
+              v-model="draft.body"
+              data-create-body
+              data-graph-control="create-working-note"
+              class="issue-description"
+              :min-height="72"
+              :framed="false"
+              :scope-ids="scopeIds"
+              :graph-revision="graphRevision"
+              :disabled="saving"
+              control-id="create-working-note"
+              aria-label="Issue description"
+              placeholder="Add context, source links, or expected output…"
+            />
+            <div class="issue-properties">
+              <GraphSelect v-model="draft.projectId" data-create-project variant="property"
+                :aria-label="`Project: ${projectLabel}`" title="Change project"
+                :options="timeProjects" :menu-min-width="260" searchable search-placeholder="Find a project" :disabled="saving">
+                <template #trigger="{ option }"><span class="issue-value"><IconLayoutGrid :size="14" />{{ option?.label || 'No project' }}</span></template>
+              </GraphSelect>
+              <GraphSelect v-model="draft.status" data-create-status data-graph-control="create-status" variant="property"
+                :aria-label="`Status: ${statusLabel}`" title="Change status" :options="statuses" :disabled="saving">
+                <template #trigger="{ option }"><span class="issue-value"><IconCircleDashed :size="14" />{{ option?.label }}</span></template>
+              </GraphSelect>
+              <GraphSelect v-model="draft.personId" data-create-owner variant="property"
+                :aria-label="`Owner: ${personLabel}`" title="Change owner"
+                :options="timePeople" :menu-min-width="220" searchable search-placeholder="Find a person" :disabled="saving">
+                <template #trigger="{ option }"><span class="issue-value"><IconUser :size="14" />{{ option?.value ? option.label : 'Assign' }}</span></template>
+              </GraphSelect>
+              <GraphSelect v-model="draft.priority" data-create-priority data-graph-control="create-priority" variant="property"
+                :aria-label="`Priority: ${draft.priority}`" title="Change priority" :options="priorities" :disabled="saving">
+                <template #trigger="{ option }"><span class="issue-value"><component :is="priorityIcons[draft.priority]" :size="14" :class="{ 'text-rem': draft.priority === 'urgent' }" />{{ option?.label }}</span></template>
+              </GraphSelect>
+              <GraphDatePicker v-model="draft.dueDate" data-create-due variant="quiet"
+                :aria-label="`Due date: ${draft.dueDate || 'Not set'}`" title="Change due date" placeholder="Due date" :disabled="saving" />
+              <button type="button" class="issue-more" data-graph-control="create-more" data-create-more :aria-expanded="issuePopover === 'options'" aria-haspopup="dialog"
+                aria-label="More issue options" title="More issue options" :disabled="saving" @click="toggleIssuePopover('options', $event)"><IconDots :size="15" /></button>
+            </div>
+          </template>
 
           <div v-else-if="draft.kind === 'project'" class="create-kind-properties">
             <label>
@@ -179,6 +217,7 @@
 
           <button
             type="button"
+            v-if="draft.kind !== 'issue'"
             data-graph-control="create-toggle-context"
             class="create-context-toggle"
             :aria-expanded="detailsOpen"
@@ -191,7 +230,7 @@
             <IconChevronDown :size="15" :class="{ 'rotate-180': detailsOpen }" />
           </button>
 
-          <div v-if="detailsOpen" class="create-details">
+          <div v-if="detailsOpen && draft.kind !== 'issue'" class="create-details">
             <label v-if="draft.kind !== 'issue'" class="create-field">
               <span>Retrieval summary</span>
               <input
@@ -209,6 +248,7 @@
               <span>Tags <small>comma separated</small></span>
               <input
                 v-model="draft.tags"
+                :disabled="saving"
                 data-create-tags
                 data-graph-control="create-tags"
                 type="text"
@@ -219,7 +259,7 @@
               />
             </label>
 
-            <div class="create-note">
+            <div v-if="draft.kind !== 'issue'" class="create-note">
               <span>Working note <small>Markdown</small></span>
               <GraphMarkdownEditor
                 v-model="draft.body"
@@ -238,7 +278,15 @@
         </div>
 
         <footer class="create-footer">
+          <GraphSelect v-if="draft.kind === 'issue'" v-model="draft.scopeId" data-create-scope
+            class="issue-storage" variant="quiet" :aria-label="`Save to: ${scopeOptions.find(option => option.value === draft.scopeId)?.label || 'Choose storage'}`"
+            :options="scopeOptions" :disabled="saving">
+            <template #trigger="{ option }"><span class="issue-value"><IconArchive :size="14" />Save to {{ option?.label || '…' }}</span></template>
+          </GraphSelect>
+          <button v-if="draft.kind === 'issue'" type="button" class="issue-more" data-graph-control="create-insert-link" data-graph-insert-link
+            aria-label="Insert graph link" title="Insert graph link" aria-haspopup="dialog" :aria-expanded="issuePopover === 'link'" :disabled="saving" @mousedown.prevent @click="toggleIssuePopover('link', $event)"><IconLink :size="15" /></button>
           <GraphCheckbox
+            v-if="draft.kind !== 'issue'"
             v-model="createAnother"
             data-create-another
             data-graph-control="create-another"
@@ -247,6 +295,7 @@
           </GraphCheckbox>
           <button
             type="button"
+            v-if="draft.kind !== 'issue'"
             data-graph-control="create-cancel"
             class="create-cancel"
             @click="close"
@@ -260,27 +309,66 @@
             class="create-submit"
             :disabled="saving || !draft.title.trim() || !draft.scopeId"
           >
-            <span>{{ saving ? 'Creating…' : `Create ${human(draft.kind)}` }}</span>
-            <kbd v-if="!saving">↵</kbd>
+            <span>{{ saving ? 'Creating…' : draft.kind === 'issue' ? 'Create' : `Create ${human(draft.kind)}` }}</span>
+            <kbd v-if="!saving">{{ draft.kind === 'issue' ? '⌘ ↵' : '↵' }}</kbd>
           </button>
         </footer>
       </form>
     </div>
+    <div v-if="open && discardOpen" class="discard-overlay" data-create-discard-confirmation>
+      <section ref="discardDialog" class="discard-dialog" role="alertdialog" aria-modal="true"
+        aria-labelledby="discard-issue-title" aria-describedby="discard-issue-copy" @keydown.tab="trapDiscardFocus">
+        <h2 id="discard-issue-title">Discard this issue?</h2>
+        <p id="discard-issue-copy">The text you entered has not been saved.</p>
+        <div class="discard-actions">
+          <button ref="keepEditingButton" type="button" data-graph-control="create-keep-editing" @click="keepEditing">Keep editing</button>
+          <button type="button" data-graph-control="create-discard" @click="discardIssue">Discard issue</button>
+        </div>
+      </section>
+    </div>
+    <section v-if="open && issuePopover" ref="issuePopoverElement" data-modal-portal data-issue-popover
+      class="issue-popover" :style="issuePopoverStyles" role="dialog"
+      :aria-label="issuePopover === 'link' ? 'Insert graph link' : 'More issue options'"
+      @keydown="onIssuePopoverKeydown">
+      <template v-if="issuePopover === 'options'">
+        <label class="issue-popover-label">Tags
+          <input v-model="draft.tags" data-create-tags data-graph-control="create-tags"
+            placeholder="Separate tags with commas" :disabled="saving" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <GraphCheckbox v-model="createAnother" data-create-another :disabled="saving">Create another</GraphCheckbox>
+      </template>
+      <template v-else>
+        <label class="issue-popover-label">Link to an entry
+          <input v-model="linkQuery" data-graph-control="create-link-search" type="search" placeholder="Find a note, project, or person…"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @keydown.enter.prevent="chooseFirstLink" />
+        </label>
+        <p v-if="linkLoading || linkError || !linkResults.length" class="issue-link-status" role="status">{{ linkLoading ? 'Searching…' : linkError || 'No matching entries' }}</p>
+        <button v-if="linkError" type="button" class="issue-link-result" data-graph-control="create-link-retry" @click="searchLinks">Try again</button>
+        <div v-if="!linkLoading && !linkError" class="issue-link-results" aria-label="Matching entries">
+          <button v-for="node in linkResults" :key="node.id" type="button" class="issue-link-result" data-graph-control="create-link-result"
+            @click="chooseLink(node)"><span>{{ node.title }}</span><small>{{ human(node.kind) }}</small></button>
+        </div>
+      </template>
+    </section>
   </Teleport>
 </template>
 
 <script setup>
-import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { IconAlertTriangle, IconChevronDown, IconX } from '@tabler/icons-vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { IconAlertTriangle, IconChevronDown, IconX, IconLayoutGrid, IconCircleDashed, IconUser, IconAntennaBars5, IconAntennaBars3, IconAntennaBars2, IconExclamationMark, IconArchive, IconDots, IconLink } from '@tabler/icons-vue'
 import GraphCheckbox from './GraphCheckbox.vue'
+import GraphDatePicker from './GraphDatePicker.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphSelect from './GraphSelect.vue'
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue'
+import { lookupGraph } from '../../../services/businessGraph.js'
 import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   scopes: { type: Array, default: () => [] },
   nodes: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] },
   initialProjectId: { type: String, default: '' },
   selfPersonId: { type: String, default: '' },
   scopeIds: { type: Array, default: () => [] },
@@ -294,9 +382,103 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'create'])
 const dialog = ref(null)
+const issueEditor = ref(null)
 const titleInput = ref(null)
 const createAnother = ref(false)
+const discardOpen = ref(false)
+const discardDialog = ref(null)
+const keepEditingButton = ref(null)
+let discardReturnFocus = null
+let forwardingMenuEscape = false
 const detailsOpen = ref(false)
+const issuePopover = ref('')
+const issuePopoverTrigger = ref(null)
+const issuePopoverElement = ref(null)
+const linkQuery = ref('')
+const linkResults = ref([])
+const linkLoading = ref(false)
+const linkError = ref('')
+let linkRequest = 0
+let linkSearchTimer
+const { floatingStyles: issuePopoverStyles } = useFloating(issuePopoverTrigger, issuePopoverElement, {
+  placement: 'top-start', strategy: 'fixed',
+  middleware: [offset(6), flip(), shift({ padding: 8, crossAxis: true })],
+  whileElementsMounted: autoUpdate,
+})
+
+async function toggleIssuePopover(kind, event) {
+  if (issuePopover.value === kind) { closeIssuePopover(true); return }
+  issuePopoverTrigger.value = event.currentTarget
+  issuePopover.value = kind
+  if (kind === 'link') { linkQuery.value = ''; void searchLinks() }
+  await nextTick()
+  issuePopoverElement.value?.querySelector('input')?.focus()
+}
+
+function closeIssuePopover(restoreFocus = false) {
+  issuePopover.value = ''
+  linkRequest += 1
+  clearTimeout(linkSearchTimer)
+  if (restoreFocus) issuePopoverTrigger.value?.focus()
+}
+
+async function searchLinks() {
+  const request = ++linkRequest
+  linkLoading.value = true
+  linkError.value = ''
+  try {
+    const results = await lookupGraph(linkQuery.value, { scopeIds: props.scopeIds, limit: 12 })
+    if (request === linkRequest && issuePopover.value === 'link') linkResults.value = results || []
+  } catch {
+    if (request === linkRequest) { linkResults.value = []; linkError.value = 'Link search failed.' }
+  } finally {
+    if (request === linkRequest) linkLoading.value = false
+  }
+}
+
+watch(linkQuery, () => {
+  clearTimeout(linkSearchTimer)
+  linkRequest += 1
+  linkLoading.value = true
+  linkSearchTimer = setTimeout(() => { if (issuePopover.value === 'link') void searchLinks() }, 120)
+})
+watch(() => props.scopeIds.join('\0'), () => { if (issuePopover.value === 'link') void searchLinks() })
+
+function chooseFirstLink(event) {
+  if (event?.isComposing || event?.keyCode === 229) return
+  if (!linkLoading.value && !linkError.value && linkResults.value.length) chooseLink(linkResults.value[0])
+}
+function chooseLink(node) {
+  closeIssuePopover()
+  issueEditor.value?.insertReference(node)
+}
+function onIssuePopoverKeydown(event) {
+  if (!issuePopoverElement.value) return
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Escape') {
+    event.preventDefault(); event.stopPropagation(); closeIssuePopover(true); return
+  }
+  const items = [...issuePopoverElement.value.querySelectorAll('input, button:not(:disabled)')]
+  const index = items.indexOf(document.activeElement)
+  if (['ArrowDown', 'ArrowUp'].includes(event.key) && issuePopover.value === 'link') {
+    event.preventDefault()
+    items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+  } else if (event.key === 'Tab') {
+    event.preventDefault()
+    items[(index + (event.shiftKey ? items.length - 1 : 1)) % items.length]?.focus()
+  }
+}
+function dismissIssuePopover(event) {
+  if (issuePopover.value && !issuePopoverElement.value?.contains(event.target) && !issuePopoverTrigger.value?.contains(event.target)) closeIssuePopover()
+}
+onMounted(() => document.addEventListener('pointerdown', dismissIssuePopover, true))
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', dismissIssuePopover, true)
+  closeIssuePopover()
+})
+watch(() => props.open, open => { if (!open) closeIssuePopover() })
+watch(() => props.saving, saving => { if (saving) closeIssuePopover() })
+
 const kinds = Object.freeze([
   { id: 'issue', label: 'Task', hint: 'Operational work and next actions' },
   { id: 'project', label: 'Project', hint: 'Client or internal delivery context' },
@@ -318,6 +500,7 @@ const statuses = Object.freeze([
   { id: 'review', label: 'Review' },
   { id: 'done', label: 'Done' },
 ])
+const priorityIcons = Object.freeze({ urgent: IconExclamationMark, high: IconAntennaBars5, normal: IconAntennaBars3, low: IconAntennaBars2 })
 const priorities = Object.freeze([
   { id: 'urgent', label: 'Urgent' },
   { id: 'high', label: 'High' },
@@ -354,12 +537,22 @@ const entityStatuses = Object.freeze([
 ])
 const draft = reactive(emptyDraft())
 const timePeople = computed(() => [{ value: '', label: 'Unassigned' }, ...props.nodes.filter(node => node.kind === 'person').map(node => ({ value: node.id, label: node.title }))])
-const timeProjects = computed(() => [{ value: '', label: 'No project' }, ...props.nodes.filter(node => node.kind === 'project').map(node => ({ value: node.id, label: node.title }))])
+const timeProjects = computed(() => {
+  const projects = [...new Map([...props.nodes.filter(node => node.kind === 'project'), ...props.projects].map(node => [node.id, node])).values()]
+  const options = [{ value: '', label: 'No project' }, ...projects.map(node => ({ value: node.id, label: node.title }))]
+  if (draft.projectId && !projects.some(node => node.id === draft.projectId)) options.push({ value: draft.projectId, label: 'Unavailable project', disabled: true })
+  return options
+})
+const projectLabel = computed(() => timeProjects.value.find(option => option.value === draft.projectId)?.label || 'No project')
+const personLabel = computed(() => timePeople.value.find(option => option.value === draft.personId)?.label || 'Unassigned')
+const statusLabel = computed(() => statuses.find(option => option.id === draft.status)?.label || draft.status)
 const scopeOptions = computed(() => props.scopes.map(scope => ({
   value: scope.id,
   label: scopeName(scope.kind),
   hint: scopeHint(scope),
 })))
+
+let restoreFocusTo = null
 
 watch(() => props.open, async open => {
   if (!open) {
@@ -367,11 +560,13 @@ watch(() => props.open, async open => {
     return
   }
   rememberDialogFocus()
+  discardOpen.value = false
   Object.assign(draft, emptyDraft())
   detailsOpen.value = false
   await nextTick()
+  resizeTitle()
   titleInput.value?.focus()
-})
+}, { immediate: true })
 
 watch(() => props.initialKind, kind => {
   if (props.open && kinds.some(option => option.id === kind)) draft.kind = kind
@@ -402,7 +597,8 @@ function emptyDraft() {
     companyRole: '',
     entityStatus: 'active',
     teamMember: false,
-    personId: props.selfPersonId,
+    personId: props.initialKind === 'timesheet' ? props.selfPersonId : '',
+    dueDate: '',
     projectId: props.initialProjectId,
   }
 }
@@ -428,16 +624,17 @@ function submit() {
     body: draft.body,
     tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
     properties,
-    ...(draft.kind === 'timesheet' ? { relations: [
+    ...(['issue', 'timesheet'].includes(draft.kind) ? { relations: [
       ...(draft.projectId ? [{ relation: 'part_of', target: draft.projectId }] : []),
       ...(draft.personId ? [{ relation: 'assigned_to', target: draft.personId }] : []),
     ] } : {}),
   }, {
     another: createAnother.value,
     reset() {
-      const { kind, scopeId, status, priority } = draft
-      Object.assign(draft, emptyDraft(), { kind, scopeId, status, priority })
+      const { kind, scopeId, status, priority, projectId, personId } = draft
+      Object.assign(draft, emptyDraft(), { kind, scopeId, status, priority, projectId, personId })
       detailsOpen.value = false
+      closeIssuePopover()
       void nextTick(() => titleInput.value?.focus())
     },
   })
@@ -446,7 +643,7 @@ function submit() {
 function createProperties() {
   if (draft.kind === 'timesheet') return { entries: [] }
   if (draft.kind === 'issue') {
-    return { status: draft.status, priority: draft.priority }
+    return { status: draft.status, priority: draft.priority, ...(draft.dueDate ? { dueDate: draft.dueDate } : {}) }
   }
   if (draft.kind === 'project') {
     return {
@@ -465,8 +662,6 @@ function createProperties() {
   }
   return {}
 }
-
-let restoreFocusTo = null
 
 function rememberDialogFocus() {
   restoreFocusTo = document.activeElement instanceof HTMLElement
@@ -488,13 +683,108 @@ function onEscape(event) {
 }
 
 function close() {
+  if (props.saving) return
+  if (draft.kind === 'issue' && [draft.title, draft.body, draft.tags].some(value => value.trim())) {
+    discardReturnFocus = document.activeElement
+    closeIssuePopover()
+    discardOpen.value = true
+    void nextTick(() => keepEditingButton.value?.focus())
+    return
+  }
   emit('close')
+}
+
+function keepEditing() {
+  discardOpen.value = false
+  void nextTick(() => {
+    if (discardReturnFocus?.isConnected) discardReturnFocus.focus()
+    else titleInput.value?.focus()
+  })
+}
+
+function discardIssue() {
+  discardOpen.value = false
+  emit('close')
+}
+
+function trapDiscardFocus(event) {
+  const buttons = [...discardDialog.value.querySelectorAll('button')]
+  if (event.shiftKey && document.activeElement === buttons[0]) {
+    event.preventDefault(); buttons.at(-1).focus()
+  } else if (!event.shiftKey && document.activeElement === buttons.at(-1)) {
+    event.preventDefault(); buttons[0].focus()
+  }
+}
+
+// Capture before CodeMirror's Mod-Enter/selection keymaps and the Workbench
+// router. Teleported menus and WebKit's body focus are part of this modal.
+function onIssueShortcut(event) {
+  if (!props.open || draft.kind !== 'issue' || forwardingMenuEscape || event.isComposing || event.keyCode === 229) return
+  const create = (event.key === 'Enter' || event.key === 'Return') && (event.metaKey || event.ctrlKey) && !event.altKey
+  if (event.key !== 'Escape' && !create) return
+  const modals = [...document.querySelectorAll('[aria-modal="true"]')]
+  if (![dialog.value, discardDialog.value].includes(modals.at(-1))) return
+  const consume = () => { event.preventDefault(); event.stopImmediatePropagation() }
+  if (props.saving || event.repeat) { consume(); return }
+  if (discardOpen.value) {
+    consume()
+    if (event.key === 'Escape') keepEditing()
+    return
+  }
+  if (create) {
+    consume()
+    closeIssuePopover()
+    submit()
+    return
+  }
+  if (issuePopover.value) { consume(); closeIssuePopover(true); return }
+  const menu = document.querySelector('[data-graph-select-menu], [data-graph-date-popover]')
+  if (menu) {
+    // Let the menu's own handler restore its trigger focus. Forward only when
+    // WebKit left focus on the body or on a trigger outside the portal.
+    if (menu.contains(event.target)) return
+    consume()
+    forwardingMenuEscape = true
+    try { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }
+    finally { forwardingMenuEscape = false }
+    return
+  }
+  consume()
+  if (issueEditor.value?.dismissCompletion()) return
+  close()
+}
+onMounted(() => window.addEventListener('keydown', onIssueShortcut, true))
+onUnmounted(() => window.removeEventListener('keydown', onIssueShortcut, true))
+
+onMounted(() => window.addEventListener('resize', resizeTitle))
+onUnmounted(() => window.removeEventListener('resize', resizeTitle))
+watch(() => draft.title, () => nextTick(resizeTitle))
+
+function resizeTitle() {
+  if (titleInput.value?.tagName !== 'TEXTAREA') return
+  titleInput.value.style.height = 'auto'
+  titleInput.value.style.height = `${titleInput.value.scrollHeight}px`
+}
+
+function onTitleEnter(event) {
+  if (event.isComposing || event.keyCode === 229 || event.metaKey || event.ctrlKey) return
+  event.preventDefault()
+  issueEditor.value?.focus()
+}
+
+function onKeydown(event) {
+  if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+  if (draft.kind === 'issue' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault()
+    event.stopPropagation()
+    submit()
+  }
 }
 
 function trapFocus(event) {
   const focusable = [...(dialog.value?.querySelectorAll(
     'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-  ) || [])]
+  ) || [])].filter(element => !element.closest('[hidden]'))
   if (!focusable.length) return
   const first = focusable[0]
   const last = focusable.at(-1)
@@ -513,7 +803,7 @@ function scopeHint(scope) {
     project: 'Stored with this workspace',
     team: 'Shared across the team',
   }[scope.kind] || 'Graph source'
-  return `${meaning} · ${scope.root}`
+  return meaning
 }
 
 function human(value) {
@@ -855,4 +1145,57 @@ function scopeName(value) {
     transition: none;
   }
 }
+
+/* Issue creation uses one writing area and a compact property row. */
+.issue-composer { width: min(680px, 100%); border-radius: 6px; }
+.issue-composer .create-header { min-height: 46px; padding: 6px 16px 6px 20px; border-bottom: 0; }
+.issue-composer .create-header h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-ink-3); text-transform: none; }
+.issue-composer .create-header > button { width: 28px; height: 28px; }
+.issue-composer .create-scroll { padding: 6px 20px 12px; }
+.issue-composer .create-title-field { margin: 0 0 8px; }
+.issue-composer .create-title-field textarea { display: block; width: 100%; resize: none; overflow: hidden; border: 0; background: transparent; padding: 2px 0 5px; color: var(--color-ink); font: 600 18px/1.45 var(--font-sans); }
+.issue-composer .create-title-field textarea::placeholder { color: var(--color-ink-4); }
+.issue-composer .create-title-field textarea:focus-visible { outline: none; box-shadow: inset 0 -1px color-mix(in srgb, var(--color-accent) 50%, var(--color-rule)); }
+.issue-description { margin-bottom: 8px; }
+.issue-description :deep(.cm-content) { padding-bottom: 8px; }
+.issue-description :deep(.graph-note-tools) { margin-bottom: 4px; }
+.issue-properties { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.issue-properties :deep(.graph-select-trigger), .issue-properties :deep(.date-picker-trigger) { min-height: 29px; max-width: 100%; padding: 0 8px; border: 1px solid var(--color-rule-light); background: var(--color-surface); font-size: 12px; font-weight: 500; }
+.issue-properties :deep(.graph-select-trigger:hover), .issue-properties :deep(.date-picker-trigger:hover) { background: var(--color-chrome-mid); }
+.issue-value { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.issue-value svg { flex-shrink: 0; color: var(--color-ink-4); }
+.issue-more { display: grid; place-items: center; min-width: 29px; min-height: 29px; color: var(--color-ink-3); }
+.issue-more:hover { background: var(--color-chrome-mid); }
+.issue-more:focus-visible { outline: 2px solid var(--color-accent); }
+.issue-composer .create-footer { min-height: 49px; padding: 8px 18px; background: var(--color-surface); }
+.issue-storage { min-width: 0; }
+.issue-composer .create-submit { min-height: 32px; margin-left: auto; flex-shrink: 0; font-size: 12px; }
+.issue-composer .create-details { padding-top: 12px; }
+.issue-composer .create-details .create-field { margin-top: 10px; }
+@media (max-width: 560px) {
+  .create-overlay:has(.issue-composer) { padding: 12px; }
+  .issue-composer { height: auto; max-height: calc(100dvh - 24px); border: 1px solid var(--color-rule); border-radius: 6px; }
+  .issue-composer .create-scroll { padding-right: 16px; padding-left: 16px; }
+  .issue-composer .create-title-field textarea { font-size: 17px; }
+}
+
+.issue-popover { position: fixed; z-index: 270; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 15%, transparent); }
+.issue-popover-label { display: block; font-size: 11px; font-weight: 550; color: var(--color-ink-3); }
+.issue-popover-label input { display: block; width: 100%; margin: 6px 0 8px; border: 1px solid var(--color-rule); border-radius: 3px; padding: 6px 8px; color: var(--color-ink); background: var(--color-surface); font-size: 12px; font-weight: 400; }
+.issue-popover-label input:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
+.issue-link-results { max-height: min(228px, calc(100dvh - 140px)); overflow: auto; }
+.issue-link-result { display: flex; width: 100%; gap: 12px; align-items: center; justify-content: space-between; padding: 7px 5px; text-align: left; font-size: 12px; border-radius: 3px; }
+.issue-link-result span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.issue-link-result small { flex-shrink: 0; color: var(--color-ink-4); font-size: 10px; }
+.issue-link-result:hover, .issue-link-result:focus-visible { outline: none; background: var(--color-accent-soft); }
+.issue-link-status { padding: 6px 0; color: var(--color-ink-3); font-size: 12px; }
+.discard-overlay { position: fixed; inset: 0; z-index: 280; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--color-ink) 20%, transparent); }
+.discard-dialog { width: min(360px, 100%); padding: 20px; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-surface); color: var(--color-ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 15%, transparent); }
+.discard-dialog h2 { font-size: 14px; font-weight: 600; }
+.discard-dialog p { margin-top: 8px; color: var(--color-ink-3); font-size: 12px; }
+.discard-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.discard-actions button { padding: 6px 10px; border: 1px solid var(--color-rule); border-radius: 3px; font-size: 12px; }
+.discard-actions button:hover { background: var(--color-chrome-mid); }
+.discard-actions button:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 2px; }
+.discard-actions button:last-child { color: var(--color-rem); }
 </style>

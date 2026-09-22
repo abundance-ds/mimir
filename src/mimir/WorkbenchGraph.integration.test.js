@@ -97,6 +97,45 @@ describe('Graph Details through Workbench', () => {
     vi.unstubAllGlobals()
   })
 
+  it('routes issue Escape and Cmd+Return through the real Workbench and Markdown editor', async () => {
+    const fallback = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'graph_create') return structuredClone(source.node)
+      return fallback(command, args)
+    })
+    wrapper = mount(WorkbenchApp, { attachTo: document.body, global: { plugins: [pinia],
+      stubs: { EmbeddedAppHost: true, SettingsDialog: true, NewTabPage: true, InlineAI: true, GitDiffView: true },
+    } })
+    await flushPromises()
+    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    await wrapper.get('[data-graph-create]').trigger('click')
+    await flushPromises()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(document.querySelector('[data-graph-create-dialog]')).toBeNull()
+    await wrapper.get('[data-graph-create]').trigger('click')
+    await flushPromises()
+    const title = document.querySelector('[data-create-title]')
+    title.value = 'Check the evidence'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    const editor = EditorView.findFromDOM(document.querySelector('[data-create-body] .cm-editor'))
+    editor.dispatch({ changes: { from: 0, insert: 'Keep the method unchanged.' } })
+    editor.focus()
+    editor.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(document.querySelector('[data-create-discard-confirmation]')).not.toBeNull()
+    document.querySelector('[data-graph-control="create-keep-editing"]').click()
+    await flushPromises()
+    editor.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, bubbles: true, cancelable: true }))
+    await flushPromises()
+    const creates = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'graph_create')
+    expect(creates).toHaveLength(1)
+    expect(creates[0][1].create).toMatchObject({ title: 'Check the evidence', body: 'Keep the method unchanged.' })
+    expect(document.querySelector('[data-graph-create-dialog]')).toBeNull()
+  })
+
   it('opens Home in Main without touching Editor and retains it while a task opens', async () => {
     const fallback = vi.mocked(invoke).getMockImplementation()
     const project = {

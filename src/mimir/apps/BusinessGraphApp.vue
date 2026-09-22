@@ -115,6 +115,8 @@
 
     <GraphCreateDialog
       :nodes="graph.nodes"
+      :projects="graph.projects"
+      :initial-project-id="createProject"
       :self-person-id="settings.businessGraphSelfPersonId || ''"
       :scope-ids="graph.activeScopeIds"
       :graph-revision="graph.status?.graphRevision || 0"
@@ -285,6 +287,7 @@ const {
   createError,
   createFromBoard,
   createKind,
+  createProject,
   createNode,
   createOpen,
   createStatus,

@@ -209,6 +209,47 @@ describe('document navigation after graph mutations', () => {
     ])
   })
 
+  it('prefers the Work project and respects explicit unassigned columns', () => {
+    graph.workProjectId = 'project-beta'
+    actions.openCreate('issue')
+    expect(actions.createProject.value).toBe('project-beta')
+    actions.createFromBoard({ columnId: '__unassigned__', groupBy: 'project' })
+    expect(actions.createProject.value).toBe('')
+    graph.workProjectId = '__unassigned__'
+    actions.openCreate('issue')
+    expect(actions.createProject.value).toBe('')
+  })
+
+  it('saves only the selected project and preserves related-entry links', async () => {
+    actions.openRelatedCreate({ kind: 'issue', parent: { id: 'decision', relations: [{ relation: 'part_of', target: 'project-alpha' }] } })
+    await actions.createNode({ kind: 'issue', title: 'Review', relations: [
+      { relation: 'part_of', target: 'project-beta' }, { relation: 'assigned_to', target: 'anna' },
+    ] }, { another: false })
+    expect(graph.create.mock.calls[0][0]).toMatchObject({
+      properties: { legacyProject: 'project-beta' },
+      relations: [{ relation: 'related_to', target: 'decision', legacy: false },
+        { relation: 'part_of', target: 'project-beta' }, { relation: 'assigned_to', target: 'anna' }],
+    })
+  })
+
+  it('does not restore a default project after No project is selected', async () => {
+    actions.openCreate('issue')
+    await actions.createNode({ kind: 'issue', title: 'Unassigned', relations: [] }, { another: false })
+    expect(graph.create.mock.calls[0][0].relations).toEqual([])
+    expect(graph.create.mock.calls[0][0].properties?.legacyProject).toBeUndefined()
+  })
+
+  it('does not create twice while the first save is pending', async () => {
+    let finish
+    graph.create.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    actions.openCreate('issue')
+    const pending = actions.createNode({ kind: 'issue', title: 'Once', relations: [] }, { another: false })
+    await actions.createNode({ kind: 'issue', title: 'Once', relations: [] }, { another: false })
+    expect(graph.create).toHaveBeenCalledOnce()
+    finish({ id: 'created' })
+    await pending
+  })
+
   it('keeps Create another in its form until the user finishes creation', async () => {
     actions.openCreate('issue')
     const reset = vi.fn()

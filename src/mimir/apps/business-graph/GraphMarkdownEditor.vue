@@ -1,6 +1,6 @@
 <template>
   <div class="graph-note-input" :style="canvasTypography">
-    <div v-if="!canvasStyle" class="graph-note-tools">
+    <div v-if="!canvasStyle && showTools" class="graph-note-tools">
       <button
         type="button"
         data-graph-insert-link
@@ -13,7 +13,7 @@
       ><IconLink :size="13" /><span>Link</span></button>
       <span v-if="linkError" role="status">{{ linkError }}</span>
     </div>
-    <p v-if="canvasStyle && linkError" role="status" class="text-ink-3 text-xs">{{ linkError }}</p>
+    <p v-if="(canvasStyle || !showTools) && linkError" role="status" class="text-ink-3 text-xs">{{ linkError }}</p>
     <div
       ref="host"
       data-graph-markdown-editor
@@ -33,6 +33,7 @@ import {
   ref,
   watch,
 } from 'vue'
+import { closeCompletion, completionStatus } from '@codemirror/autocomplete'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder as editorPlaceholder } from '@codemirror/view'
 import { defaultKeymap, history, historyField, historyKeymap } from '@codemirror/commands'
@@ -40,7 +41,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
 import { IconLink } from '@tabler/icons-vue'
 import { graphLinks } from '../../../editor/codemirror/graphLinks.js'
-import { referenceSelection } from '../../../editor/codemirror/graphLinkSyntax.js'
+import { referenceSelection, graphLinkMarkdown, graphMentionAt } from '../../../editor/codemirror/graphLinkSyntax.js'
 import { lookupGraph, graphLinkTargets } from '../../../services/businessGraph.js'
 import { markdownListKeymap } from '../../../editor/codemirror/markdownLists.js'
 import { markdownLinkOpen } from './markdownLinkOpen.js'
@@ -55,6 +56,7 @@ import { graphMarkdownStyles } from './graphMarkdownStyles.js'
 
 const props = defineProps({
   canvasStyle: { type: Boolean, default: false },
+  showTools: { type: Boolean, default: true },
   modelValue: { type: String, default: '' },
   viewState: { type: Object, default: null },
   ariaLabel: { type: String, default: 'Markdown working note' },
@@ -170,6 +172,23 @@ function insertLink() {
   links.insert(view)
 }
 
+function dismissCompletion() {
+  if (!view || !completionStatus(view.state)) return false
+  // CodeMirror briefly reports pending completion after ordinary typing too.
+  // Only an actual @ lookup should consume Escape before closing the dialog.
+  const linkMenu = Boolean(graphMentionAt(view.state, view.state.selection.main.head))
+  closeCompletion(view)
+  return linkMenu
+}
+
+function insertReference(node) {
+  if (!view || view.state.readOnly || view.composing) return
+  const { from, to } = view.state.selection.main
+  const insert = graphLinkMarkdown(node)
+  view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input' })
+  view.focus()
+}
+
 function revealReference(request, sourceRevision) {
   if (!view) return
   const selection = referenceSelection(view.state, request, sourceRevision, { sourceBody: props.modelValue })
@@ -203,7 +222,7 @@ function setValue(value) {
   })
 }
 
-defineExpose({ focus, getValue, setValue, insertLink, revealReference })
+defineExpose({ focus, getValue, setValue, insertLink, insertReference, dismissCompletion, revealReference })
 
 onUnmounted(() => {
   if (view && props.viewState) props.viewState.note = view.state.toJSON({ history: historyField })

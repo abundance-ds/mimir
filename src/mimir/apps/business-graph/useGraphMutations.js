@@ -1,6 +1,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
-import { isClosedIssue, workProjectId } from './workRow.js'
+import { isClosedIssue, workProjectId, UNASSIGNED } from './workRow.js'
 
 export function useGraphMutations({ graph, boardIssues, diagnostic, restoreGraphFocus, openNode = () => {} }) {
   const createOpen = ref(false)
@@ -82,19 +82,26 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, restoreGraph
     createKind.value = kind
     createStatus.value = status
     createProject.value = projectId === null && kind === 'issue'
-      ? graph.workspaceProjectId
+      ? (graph.workProjectId === UNASSIGNED ? '' : graph.workProjectId || graph.workspaceProjectId || '')
       : String(projectId || '')
     createRelations.value = relations
     createOpen.value = true
   }
 
   async function createNode(create, controls) {
+    if (creating.value) return
     creating.value = true
     createError.value = ''
     try {
-      const projectId = create.kind === 'issue' ? createProject.value : ''
+      // An explicit empty relation list means No project. Never restore the
+      // workspace default after the user changes or clears the selection.
+      const projectId = create.kind === 'issue'
+        ? (Array.isArray(create.relations)
+            ? create.relations.find(edge => edge.relation === 'part_of')?.target || ''
+            : createProject.value)
+        : ''
       const relations = uniqueRelations([
-        ...(create.kind === 'timesheet' ? [] : createRelations.value),
+        ...(create.kind === 'timesheet' ? [] : createRelations.value.filter(edge => create.kind !== 'issue' || edge.relation !== 'part_of')),
         ...(create.relations || []),
         ...(projectId ? [{ relation: 'part_of', target: projectId, legacy: false }] : []),
       ])
@@ -132,9 +139,9 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, restoreGraph
       return
     }
     if (kind !== 'issue') return
-    const projectId = parent.relations?.find(edge => edge.relation === 'part_of')?.target
+    const projectId = parent.kind === 'project' ? parent.id : (parent.relations?.find(edge => edge.relation === 'part_of')?.target
       || parent.properties?.legacyProject
-      || ''
+      || '')
     openCreate('issue', 'plan', projectId, [
       { relation: 'related_to', target: parent.id, legacy: false },
     ])
@@ -312,6 +319,7 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, restoreGraph
     createError,
     createFromBoard,
     createKind,
+    createProject,
     createNode,
     createOpen,
     createStatus,

@@ -36,7 +36,8 @@
     </div>
     <GraphCreateDialog
       :nodes="graph.nodes"
-      :initial-project-id="file.graph?.node?.kind === 'project' ? file.graph.node.id : ''"
+      :projects="graph.projects"
+      :initial-project-id="createKind === 'timesheet' && file.graph?.node?.kind === 'project' ? file.graph.node.id : createProject"
       :self-person-id="settings.businessGraphSelfPersonId || ''"
       :open="createOpen"
       :scopes="graph.scopes"
@@ -107,7 +108,7 @@ watch(() => [props.file.graph?.node?.id, graph.status?.graphRevision, graph.acti
   }
 }, { immediate: true })
 
-const { createOpen, createKind, createStatus, creating, createError, createNode, openRelatedCreate } = useGraphMutations({
+const { createOpen, createKind, createProject, createStatus, creating, createError, createNode, openRelatedCreate } = useGraphMutations({
   graph,
   boardIssues: computed(() => []),
   diagnostic: message => emit('diagnostic', message),

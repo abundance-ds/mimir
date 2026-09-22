@@ -1464,7 +1464,8 @@ describe('BusinessGraphApp', () => {
 
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'n' })
     const dialog = document.querySelector('[data-graph-create-dialog]')
-    expect(dialog.querySelector('[data-create-kind]').getAttribute('role')).toBe('combobox')
+    expect(dialog.querySelector('[data-create-kind]')).toBeNull()
+    expect(dialog.querySelector('[data-create-project]').getAttribute('role')).toBe('combobox')
     expect(dialog.querySelector('[data-create-scope]').getAttribute('role')).toBe('combobox')
     expect(document.querySelector('select, datalist')).toBeNull()
     wrapper.unmount()

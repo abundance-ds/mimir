@@ -98,6 +98,23 @@ describe('business graph store', () => {
 
   afterEach(() => useBusinessGraphStore().stop())
 
+  it('keeps a cached terminal link index current as loaded records change', () => {
+    const store = useBusinessGraphStore()
+    store.nodes = [{ id: 'issue-a' }]
+    store.searchResults = [{ id: 'issue-b' }]
+    store.selectedNode = { id: 'issue-c' }
+    const index = store.loadedNodeIds
+    expect([...index].sort()).toEqual(['issue-a', 'issue-b', 'issue-c'])
+    expect(store.loadedNodeIds).toBe(index)
+    store.nodes = []
+    expect(store.loadedNodeIds.has('issue-a')).toBe(false)
+    expect(store.loadedNodeIds.has('issue-b')).toBe(true)
+    store.searchResults = []
+    store.selectedNode = null
+    expect(store.loadedNodeIds.size).toBe(0)
+    expect(queryGraph).not.toHaveBeenCalled()
+  })
+
   it('loads all selected Project tasks without reducing the general catalog and keeps them through refresh', async () => {
     const store = useBusinessGraphStore()
     const tasks = Array.from({ length: 501 }, (_, i) => ({ id: `task-${i}`, kind: 'issue', title: `Task ${i}`, projectId: 'project-alpha' }))
@@ -396,6 +413,18 @@ describe('business graph store', () => {
     expect(restoreGraphNode).toHaveBeenCalledWith('undo')
     expect(getGraphNode).not.toHaveBeenCalled()
     expect(store.selectedNode).toBeNull()
+  })
+
+  it('preserves explicit No project while keeping defaults for callers without relations', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.setWorkspaceConfiguration({ project: 'project-alpha' })
+    await store.create({ kind: 'issue', title: 'No project', relations: [] })
+    expect(createGraphNode.mock.calls[0][0].relations).toEqual([])
+    await store.create({ kind: 'issue', title: 'Default project' })
+    expect(createGraphNode.mock.calls[1][0].relations).toEqual([
+      { relation: 'part_of', target: 'project-alpha', legacy: false },
+    ])
   })
 
   it('preserves explicit source identity and revision guards on deletion', async () => {
