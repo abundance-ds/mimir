@@ -288,7 +288,7 @@ The Project overview belongs to Home in Main.
 New issue uses a compact dialog with a title and an always-visible Markdown
 description. It is centred in the application window. The background stays
 unchanged, with no tint or blur. The dialog uses a thin rule, small corners,
-and a shallow shadow. Description text wraps, including long URLs; long drafts
+and no shadow. Description text wraps, including long URLs; long drafts
 use the dialog body's vertical scroll area, without a separate editor scrollbar.
 Project, status, owner, priority, and due date sit in a wrapping
 row below the description. Each control shows a symbol and its value, with a
@@ -333,6 +333,14 @@ when options open, link-search cancellation and insertion, and completion-menu
 window bounds passed. Component tests cover the submitted fields, project
 overrides, No project, repeat creation, failed saves, and link selection.
 These checks do not establish signed installed-app behaviour.
+
+Chrome and WebKit checks on 2026-09-22 covered the composer over the workbench
+panes in light and dark themes. Empty descriptions, long URLs, code, and long
+drafts had no horizontal overflow, including at 375 × 400 px. The dialog body
+scrolled to the cursor while the footer stayed visible. Cmd+Enter submitted
+the complete text; Escape closed an empty issue and preserved a draft when
+discard was cancelled. The focused dialog/editor tests and production build
+also passed. These browser fixtures do not establish installed-app behaviour.
 
 ### Project home
 

@@ -12,12 +12,11 @@ task scope.
   HyperFormula. Check size, formula support, and licenses. Real-time editing
   by multiple users is separate scope.
 
-- Connection setup: automated tests cover public setup contracts, cancellation,
-  concurrent setup rejection, and inline credential forms. A signed installed
-  app still needs Slack/Granola Keychain setup, invalid-token replacement,
-  Google/Slack browser consent and cancellation, and GitHub child-process
-  cancellation checks. Slack OAuth availability reflects configuration, not
-  live verification. Capability checks explicitly report their limits.
+- Connection setup: automated coverage includes credential replacement, OAuth
+  callbacks/timeouts/cancellation, login subprocess termination, and inline forms.
+  Remaining: signed-app checks with real Google/Slack consent, Slack/Granola
+  Keychain storage, and GitHub login. Agent owns execution; user only supplies
+  required login/consent. Slack OAuth configuration is not live verification.
 
 - Native Editor menu: Select All, Undo, and Redo call the Editor surface even
   when a Go to search input has focus. Route these edit commands to the active
