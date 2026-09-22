@@ -710,6 +710,93 @@ describe('FilesActivity', () => {
     })
   })
 
+  describe('file rename keys', () => {
+    let wrapper
+    beforeEach(() => vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel'))
+    afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks() })
+
+    it.each([true, false].flatMap(compact => ['project', 'recent', 'favorites'].map(mode => ({ compact, mode }))))(
+      'renames with Return in $mode (compact=$compact) and returns focus on Escape', async ({ compact, mode }) => {
+        useFileStore().recentFiles = ['/w/new.md']
+        useSettingsStore().workbenchFileFavorites = { '/w': [{ relativePath: 'new.md', isDirectory: false }] }
+        wrapper = render({ compact })
+        document.body.appendChild(wrapper.element)
+        await wrapper.get(`[data-files-mode="${mode}"]`).trigger('click')
+        const row = wrapper.get('[data-file-row="/w/new.md"] button')
+        await row.trigger('click')
+        expect(document.activeElement).toBe(row.element)
+        expect(wrapper.emitted('openFile').at(-1)[0]).toMatchObject({ preview: true, focus: false })
+        await row.trigger('keydown', { key: 'Enter' })
+        const input = wrapper.get('[data-files-inline-name]')
+        expect(document.activeElement).toBe(input.element)
+        expect([input.element.selectionStart, input.element.selectionEnd]).toEqual([0, 3])
+        await input.trigger('keydown', { key: 'Escape' })
+        await flushPromises()
+        expect(document.activeElement).toBe(wrapper.get('[data-file-row="/w/new.md"] button').element)
+        expect(operations.renameWorkspaceEntry).not.toHaveBeenCalled()
+      },
+    )
+
+    it('renames a selected folder and shows Return in the context menu', async () => {
+      wrapper = render({ compact: true })
+      document.body.appendChild(wrapper.element)
+      await wrapper.get('[data-file-row="/w/docs"] button').trigger('click')
+      await wrapper.get('[data-file-row="/w/docs"]').trigger('contextmenu', { clientX: 20, clientY: 20 })
+      expect(wrapper.get('[data-file-action="rename"]').text()).toContain('↩')
+      await wrapper.get('[data-files-context-menu]').trigger('keydown', { key: 'Escape' })
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'Enter' })
+      const input = wrapper.get('[data-files-inline-name]')
+      expect(input.element.value).toBe('docs')
+      expect([input.element.selectionStart, input.element.selectionEnd]).toEqual([0, 4])
+    })
+
+    it('leaves modified keys, composition, repeated Return, and multiple selection out of rename', async () => {
+      wrapper = render()
+      const list = wrapper.get('[data-files-list]')
+      await list.trigger('keydown', { key: 'Enter' })
+      expect(wrapper.find('[data-files-inline-name]').exists()).toBe(false)
+      await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+      for (const extra of [{ shiftKey: true }, { altKey: true }, { metaKey: true }, { ctrlKey: true }, { isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+        await list.trigger('keydown', { key: 'Enter', ...extra })
+        expect(wrapper.find('[data-files-inline-name]').exists()).toBe(false)
+      }
+      await wrapper.get('[data-file-row="/w/chart.png"] button').trigger('click', { metaKey: true })
+      for (const key of ['Enter', 'F2']) {
+        await list.trigger('keydown', { key })
+        expect(wrapper.find('[data-files-inline-name]').exists()).toBe(false)
+      }
+    })
+
+    it('does not submit a rename for a repeated Return or IME confirmation', async () => {
+      wrapper = render()
+      await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'Enter' })
+      const input = wrapper.get('[data-files-inline-name]')
+      await input.setValue('renamed.md')
+      for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
+        await input.trigger('keydown', { key: 'Enter', ...extra })
+        expect(operations.renameWorkspaceEntry).not.toHaveBeenCalled()
+      }
+      await input.trigger('keydown', { key: 'Escape', isComposing: true })
+      expect(wrapper.find('[data-files-inline-name]').exists()).toBe(true)
+    })
+
+    it('opens with Command+Down and keeps Enter to open on other platforms', async () => {
+      wrapper = render()
+      await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'ArrowDown', metaKey: true })
+      expect(wrapper.emitted('openFile').at(-1)[0]).toMatchObject({ path: '/w/new.md', preview: false, focus: true })
+      wrapper.unmount()
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+      wrapper = render()
+      await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'Enter' })
+      expect(wrapper.emitted('openFile').at(-1)[0]).toMatchObject({ path: '/w/new.md', preview: false, focus: true })
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'F2' })
+      expect(wrapper.get('[data-files-inline-name]').element.value).toBe('new.md')
+    })
+  })
+
   it('invokes the selected row menu from Shift+F10 and copies an absolute path', async () => {
     const wrapper = render()
     await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')

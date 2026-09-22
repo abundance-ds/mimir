@@ -312,6 +312,10 @@
           <span class="flex min-w-0 items-center gap-2 text-[12px] text-ink-2">
             <span class="min-w-0 flex-1 truncate"><template v-for="(part, partIndex) in fileMatchParts(match.matchKind === 'content' ? match.relativePath : match.name || basename(match.path), query)" :key="partIndex"><mark v-if="part.match" class="bg-accent-soft text-ink">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
             <span v-if="match.matchKind === 'content'" class="shrink-0 font-mono text-[10px] text-ink-4">{{ match.line }}:{{ match.column }}</span>
+            <span v-if="compact" class="grid w-4 shrink-0 place-items-center text-ink-3">
+              <span v-if="isFavorite(match)" class="sr-only">Favorite</span>
+              <IconStarFilled v-if="isFavorite(match)" data-file-favorite-marker :size="10" aria-hidden="true" />
+            </span>
           </span>
           <span class="block truncate font-mono text-[10px] text-ink-3"><template v-for="(part, partIndex) in fileMatchParts(match.matchKind === 'content' ? match.excerpt : match.relativePath, query)" :key="partIndex"><mark v-if="part.match" class="bg-accent-soft text-ink">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
         </button>
@@ -346,6 +350,7 @@
             :active="isActive(item.row.entry)"
             :ancestry="isActiveAncestry(item.row.entry)"
             :favorite="item.row.favorite"
+            :show-favorite-marker="viewMode !== 'favorites'"
             :drop-target="dropHighlightPath === item.row.entry.path"
             :drag-source="treeDragging && draggedPaths.has(item.row.entry.path)"
             :editing="isEditing(item.row)"
@@ -532,6 +537,7 @@
           <ContextAction
             :label="contextEntry.isDirectory ? 'Expand or collapse' : 'Open in Mimir'"
             action="open"
+            :shortcut="!contextEntry.isDirectory && isMac ? '⌘↓' : ''"
             @select="activateContextEntry"
           />
           <ContextAction
@@ -557,7 +563,7 @@
             <ContextAction label="New folder inside" action="new-folder-inside" @select="promptNewInside('folder')" />
           </template>
           <div class="my-1 border-t border-rule-light" />
-          <ContextAction label="Rename" action="rename" shortcut="F2" @select="promptRenameContext" />
+          <ContextAction label="Rename" action="rename" :shortcut="isMac ? '↩' : 'F2'" @select="promptRenameContext" />
           <ContextAction label="Duplicate" action="duplicate" @select="duplicateContext" />
           <div class="my-1 border-t border-rule-light" />
           <ContextAction label="Reveal in Finder" action="reveal" @select="revealContext" />
@@ -645,6 +651,7 @@ import {
   IconRefresh,
   IconSearch,
   IconStar,
+  IconStarFilled,
   IconX,
 } from '@tabler/icons-vue'
 import FileSortHeader from '../components/FileSortHeader.vue'
@@ -682,6 +689,9 @@ import {
 import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
 import { managedProjectStatus } from '../../services/managedRepositories.js'
 import { basename } from '../../shared/utils/path.js'
+import { platformKind } from '../../shared/platform.js'
+
+const isMac = platformKind() === 'macos'
 
 const ContextAction = defineComponent({
   props: {
@@ -917,6 +927,7 @@ const {
   selectedDirectory,
   selectedEntries,
   selectedPaths,
+  selectPath,
   selectRow,
 } = useFileSelection({
   visibleRows,
@@ -976,6 +987,7 @@ const {
   selectedDirectory,
   closeContextMenu,
   clearSelection,
+  selectPath,
   updateFavoritePaths,
   refreshGit,
   emitOpenFile: payload => emit('openFile', payload),
@@ -1588,18 +1600,24 @@ function onCommandKeydown(event) {
 
 function onListKeydown(event) {
   if (event.defaultPrevented) return
-  if (event.isComposing || event.target?.closest?.('input, textarea, [contenteditable="true"]')) return
+  if (event.isComposing || event.keyCode === 229 || event.target?.closest?.('input, textarea, [contenteditable="true"], [data-file-favorite]')) return
   if (searchMode.value) {
     onSearchListKeydown(event)
     return
   }
-  // The inline name field is a row of the tree. While it holds focus, typing,
-  // caret motion, and text selection belong to the field, not to row
-  // navigation.
-  if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return
   const command = event.metaKey || event.ctrlKey
   const row = visibleRows.value[focusedIndex.value]
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+  const plain = !command && !event.altKey && !event.shiftKey
+  if ((plain && event.key === 'F2') || (plain && isMac && event.key === 'Enter')) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!event.repeat && selectedPaths.value.size === 1 && selectedPaths.value.has(row?.entry.path) && !row.missing) {
+      promptRename(row.entry)
+    }
+  } else if (isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === 'ArrowDown') {
+    event.preventDefault()
+    activateFocused(false)
+  } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !command && !event.altKey) {
     event.preventDefault()
     moveFocus(event.key === 'ArrowDown' ? 1 : -1, event.shiftKey)
   } else if (event.key === 'ArrowRight' && row?.entry.isDirectory) {
@@ -1610,15 +1628,12 @@ function onListKeydown(event) {
     event.preventDefault()
     if (row.expanded) void toggleRow(row, focusedIndex.value)
     else focusParent(row)
-  } else if (event.key === 'Enter') {
+  } else if (plain && event.key === 'Enter') {
     event.preventDefault()
     activateFocused(false)
-  } else if (event.key === ' ') {
+  } else if (plain && event.key === ' ') {
     event.preventDefault()
     activateFocused(true)
-  } else if (event.key === 'F2') {
-    event.preventDefault()
-    promptRename(row?.entry)
   } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
     event.preventDefault()
     openKeyboardContextMenu()
@@ -1637,6 +1652,13 @@ function onListKeydown(event) {
 
 function onSearchListKeydown(event) {
   const matches = visibleSearchResults.value
+  if (isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === 'ArrowDown') {
+    event.preventDefault()
+    const match = matches[searchFocusedIndex.value]
+    if (match) openSearchMatch(match, searchFocusedIndex.value, false)
+    return
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
   if (['Home', 'End'].includes(event.key) && matches.length) {
     event.preventDefault()
     searchFocusedIndex.value = event.key === 'Home' ? 0 : matches.length - 1
@@ -1657,8 +1679,9 @@ function onSearchListKeydown(event) {
 
 function openSearchMatch(match, index, preview) {
   searchFocusedIndex.value = index
+  if (preview) listRef.value?.querySelectorAll('[data-files-search-match]')[index]?.focus({ preventScroll: true })
   const entry = indexedByPath.value.get(normalizePath(match.path)) || fallbackFileEntry(match.path)
-  emit('openFile', { path: match.path, ...(match.matchKind === 'content' ? { line: match.line, column: match.column } : {}), preview, entry })
+  emit('openFile', { path: match.path, ...(match.matchKind === 'content' ? { line: match.line, column: match.column } : {}), preview, focus: !preview, entry })
 }
 
 function scrollSearchMatchIntoView() {
@@ -1717,7 +1740,7 @@ function activateRow(row, preview) {
     void toggleRow(row)
     return
   }
-  emit('openFile', { path: row.entry.path, preview, entry: row.entry })
+  emit('openFile', { path: row.entry.path, preview, focus: !preview, entry: row.entry })
 }
 
 function openFileHistory() {

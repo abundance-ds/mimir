@@ -12,11 +12,21 @@ export function useFileSelection({
   const anchorIndex = ref(0)
 
   watch(visibleRows, (rows) => {
-    focusedIndex.value = Math.min(focusedIndex.value, Math.max(rows.length - 1, 0))
+    const active = document.activeElement
+    const path = listRef.value?.contains(active)
+      ? active?.closest('[data-file-row]')?.getAttribute('data-file-row') : null
+    const index = selectedPaths.value.has(path) ? rows.findIndex(row => row.entry.path === path) : -1
+    focusedIndex.value = index >= 0 ? index : Math.min(focusedIndex.value, Math.max(rows.length - 1, 0))
+    if (index >= 0 && selectedPaths.value.size === 1) anchorIndex.value = index
     const visible = new Set(rows.map(row => row.entry.path))
     selectedPaths.value = new Set(
       [...selectedPaths.value].filter(path => visible.has(path)),
     )
+    // Opening a Recent file moves its DOM row. Restore only focus lost to
+    // that move; a later click or a removed row must keep its own destination.
+    if (index >= 0) nextTick(() => {
+      if (active.isConnected && document.activeElement === document.body) active.focus({ preventScroll: true })
+    })
   })
 
   function resetSelection() {
@@ -74,6 +84,18 @@ export function useFileSelection({
     activateRow(row, true)
   }
 
+  function selectPath(path) {
+    const index = visibleRows.value.findIndex(row => row.entry.path === path)
+    if (index < 0) {
+      listRef.value?.focus({ preventScroll: true })
+      return
+    }
+    focusedIndex.value = index
+    anchorIndex.value = index
+    selectedPaths.value = new Set([path])
+    scrollRowIntoView(path)
+  }
+
   function focusParent(row) {
     const parent = parentDirectory(row.entry.relativePath)
     const index = visibleRows.value.findIndex(
@@ -123,6 +145,7 @@ export function useFileSelection({
     selectedDirectory,
     selectedEntries,
     selectedPaths,
+    selectPath,
     selectRow,
   }
 }

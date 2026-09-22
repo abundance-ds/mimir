@@ -75,7 +75,7 @@ export function useEditorCommandApi({
       if (file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
       if (focus) emitNavigate({ path })
       if (!isCurrent()) return null
-      if (kind === 'text' && focus) restoreEditorFocus()
+      if (focus) restoreEditorFocus()
       return mimirActive()
     } catch (error) {
       if (!isCurrent()) return null
@@ -271,18 +271,18 @@ export function useEditorCommandApi({
     return { proposalId: review.proposalId, status: 'pending_review' }
   }
 
-  async function mimirReveal({ path, line, column, offset, preview, entry } = {}) {
+  async function mimirReveal({ path, line, column, offset, preview, entry, focus = true } = {}) {
     const isCurrent = navigation.begin()
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
       if (typeof preview === 'boolean') {
-        if (!await openDocument(path, { preview, entry }, isCurrent)) return null
+        if (!await openDocument(path, { preview, entry, focus }, isCurrent)) return null
       } else if (index >= 0) {
         flushEditorContent({ bridge: 'flush' })
         fileManager.setActiveTab(index)
-        emitNavigate({ path })
+        if (focus) emitNavigate({ path })
       } else {
-        if (!await openDocument(path, {}, isCurrent)) return null
+        if (!await openDocument(path, { focus }, isCurrent)) return null
       }
     }
     if (!isCurrent()) return null
@@ -297,7 +297,7 @@ export function useEditorCommandApi({
     if (!isCurrent()) return null
     if (file && currentFile.value !== file) throw new Error('The active document changed. Reveal the location again.')
     if (file?.kind === 'graph') {
-      restoreEditorFocus()
+      if (focus) restoreEditorFocus()
       return mimirActive()
     }
     const view = editorSurfaceRef.value?.getView?.()
@@ -310,7 +310,7 @@ export function useEditorCommandApi({
       }
     }
     editorSurfaceRef.value?.scrollToPos(position, { select: [line, column, offset].some(Number.isFinite) })
-    restoreEditorFocus()
+    if (focus) restoreEditorFocus()
     return mimirActive()
   }
 

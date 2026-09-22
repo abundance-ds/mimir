@@ -52,10 +52,12 @@
         :placeholder="editKind === 'folder' ? 'folder-name' : 'file-name.md'"
         class="mr-2 h-6 min-w-28 flex-1 border border-accent bg-surface px-1.5 font-mono text-[12px] text-ink outline-none"
         autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
         spellcheck="false"
         @input="$emit('update:editDraft', $event.target.value)"
         @keydown.enter="commitOnEnter"
-        @keydown.esc.prevent="$emit('cancel-edit')"
+        @keydown.esc="cancelOnEscape"
         @blur="commitOnBlur"
       />
     </form>
@@ -152,8 +154,11 @@
       {{ sizeDisplay }}
     </span>
 
+    <span v-if="compact" class="grid w-4 place-items-center text-ink-3" aria-hidden="true">
+      <IconStarFilled v-if="favorite && showFavoriteMarker && !editing" data-file-favorite-marker :size="10" />
+    </span>
     <button
-      v-if="!editing"
+      v-else-if="!editing"
       type="button"
       data-file-favorite
       :aria-label="favorite ? `Remove ${entry.name} from Favorites` : row.missing ? `${entry.name} is missing` : `Add ${entry.name} to Favorites`"
@@ -202,6 +207,7 @@ import {
 
 const props = defineProps({
   compact: Boolean,
+  showFavoriteMarker: { type: Boolean, default: true },
   row: { type: Object, required: true },
   selected: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
@@ -283,6 +289,7 @@ const gitClass = computed(() => props.compact && (entry.value.isDirectory || pro
 const entryAriaLabel = computed(() => {
   const parts = [entry.value.name]
   if (props.row.missing) parts.push('Missing')
+  if (props.favorite) parts.push('Favorite')
   parts.push(kindDisplay.value)
   if (gitTitle.value) parts.push(gitTitle.value)
   if (!entry.value.isDirectory) {
@@ -300,7 +307,15 @@ function commitOnEnter(event) {
   if (event.isComposing || event.keyCode === 229) return
   event.preventDefault()
   event.stopPropagation()
+  if (event.repeat) return
   emit('commit-edit')
+}
+
+function cancelOnEscape(event) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('cancel-edit')
 }
 
 // Moving focus away confirms the name, as in the Finder. But the field also
@@ -317,6 +332,9 @@ function commitOnBlur(event) {
 }
 
 function select(event) {
+  // WebKit does not focus buttons on click. Keep keys in Files while a
+  // preview opens, including clicks on a row's metadata or folder name.
+  event.currentTarget.querySelector('button')?.focus({ preventScroll: true })
   if (entry.value.isDirectory) emit('toggle', props.row)
   else emit('select', event)
 }
@@ -361,7 +379,7 @@ function activate() {
     display: none;
   }
 }
-.compact-file-row.files-ledger-grid { grid-template-columns:minmax(0, 1fr) 32px; min-width:0; overflow:hidden; padding-right:2px; }
+.compact-file-row.files-ledger-grid { grid-template-columns:minmax(0, 1fr) 32px 16px; min-width:0; overflow:hidden; padding-right:2px; }
 .compact-file-row [data-file-kind], .compact-file-row [data-file-modified], .compact-file-row [data-file-size], .compact-file-row [data-file-favorite] { display:none; }
 .compact-file-row input { min-width:0; }
 </style>

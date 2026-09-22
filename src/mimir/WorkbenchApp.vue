@@ -1389,11 +1389,13 @@ async function openFileInEditor(request) {
         line: request.line,
         column: request.column,
         ...(typeof request.preview === 'boolean' ? { preview: request.preview, entry: request.entry || null } : {}),
+        ...(typeof request.focus === 'boolean' ? { focus: request.focus } : {}),
       })
     } else {
       await editorRef.value?.mimirOpen(path, {
         preview: Boolean(typeof request === 'object' && request?.preview),
         entry: typeof request === 'object' ? request?.entry || null : null,
+        ...(typeof request?.focus === 'boolean' ? { focus: request.focus } : {}),
       })
     }
     focusNarrowPane('editor')

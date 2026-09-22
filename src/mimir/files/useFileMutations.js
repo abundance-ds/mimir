@@ -25,6 +25,7 @@ export function useFileMutations({
   selectedDirectory,
   closeContextMenu,
   clearSelection,
+  selectPath = () => {},
   updateFavoritePaths,
   refreshGit,
   emitOpenFile,
@@ -68,8 +69,9 @@ export function useFileMutations({
   }
 
   function promptRename(entry) {
-    if (!entry || entry.missing) return
+    if (!entry || entry.missing || operationBusy.value) return
     closeContextMenu()
+    operationError.value = ''
     nameAction.value = {
       kind: entry.isDirectory ? 'folder' : 'file',
       parent: parentDirectory(entry.relativePath),
@@ -105,8 +107,25 @@ export function useFileMutations({
 
   function cancelNameAction() {
     if (operationBusy.value) return
+    const path = nameAction.value?.renamePath
+    const input = focusedNameInput()
     nameAction.value = null
     nameDraft.value = ''
+    if (path) void restoreNameFocus(path, input)
+  }
+
+  function focusedNameInput() {
+    const input = listRef.value?.querySelector('[data-files-inline-name]')
+    return input === document.activeElement ? input : null
+  }
+
+  async function restoreNameFocus(path, input) {
+    await nextTick()
+    // Enter/Escape return to the row. Blur and later clicks elsewhere keep
+    // their destination, even when the native rename finishes after the click.
+    if (input && (document.activeElement === input || document.activeElement === document.body)) {
+      selectPath(path)
+    }
   }
 
   async function commitNameAction() {
@@ -123,12 +142,15 @@ export function useFileMutations({
       return
     }
     operationBusy.value = true
+    const input = focusedNameInput()
+    let renamedPath = null
     try {
       if (action.renamePath) {
         await editorFiles.waitForWorkspacePaths([action.renamePath])
         const result = await renameWorkspaceEntry(action.renamePath, name)
         editorFiles.moveWorkspacePath(action.renamePath, result.path)
         updateFavoritePaths(action.relativePath, result.relativePath)
+        renamedPath = result.path
       } else {
         const relativePath = joinRelative(action.parent, name)
         if (action.kind === 'folder') {
@@ -141,6 +163,7 @@ export function useFileMutations({
       nameAction.value = null
       nameDraft.value = ''
       await reconcileMutationDirectories([action.parent])
+      if (renamedPath) await restoreNameFocus(renamedPath, input)
     } catch (error) {
       operationError.value = describeFileError(
         error,

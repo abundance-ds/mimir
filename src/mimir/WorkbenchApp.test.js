@@ -2020,6 +2020,7 @@ describe('WorkbenchApp', () => {
 
     expect(editorOpen).toHaveBeenCalledWith('/w/README.md', {
       preview: false,
+      focus: true,
       entry: expect.objectContaining({ openBehavior: 'text' }),
     })
     expect(useWorkbenchStore().activeActivityId).toBe('')
@@ -2030,9 +2031,9 @@ describe('WorkbenchApp', () => {
     const files = wrapper.findAllComponents({ name: 'FilesActivity' }).find(component => component.props('compact'))
     const match = { path: '/w/README.md', line: 4, column: 3, entry: { openBehavior: 'text' } }
     for (const preview of [true, false]) {
-      files.vm.$emit('openFile', { ...match, preview })
+      files.vm.$emit('openFile', { ...match, preview, focus: !preview })
       await flushPromises()
-      expect(editorReveal).toHaveBeenLastCalledWith({ ...match, preview })
+      expect(editorReveal).toHaveBeenLastCalledWith({ ...match, preview, focus: !preview })
     }
   })
 
