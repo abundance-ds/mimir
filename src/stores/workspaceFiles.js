@@ -33,6 +33,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
   const treeErrors = ref({})
   const expandedDirectories = ref(new Set())
   const expandedByWorkspace = new Map()
+  let expansionGeneration = 0
   let activeSearchToken = null
   const contentRequests = new Map()
   let contentSearchQueue = Promise.resolve()
@@ -58,6 +59,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     const next = String(path || '').trim()
     if (!next) throw new Error('Workspace path must not be empty.')
     if (workspacePath.value) expandedByWorkspace.set(workspacePath.value, [...expandedDirectories.value])
+    const generation = ++expansionGeneration
     queryGeneration += 1
     loading.value = true
     error.value = ''
@@ -75,9 +77,12 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
       await loadDirectory('')
       const restored = []
       for (const directory of expandedByWorkspace.get(next) || []) {
+        if (generation !== expansionGeneration) break
         try { await loadTreeDirectory(directory); restored.push(directory) } catch { /* Keep missing folders closed. */ }
       }
-      expandedDirectories.value = new Set(restored)
+      if (generation === expansionGeneration) {
+        expandedDirectories.value = new Set([...expandedDirectories.value, ...restored])
+      }
       await startWatching()
     } catch (cause) {
       error.value = errorMessage(cause)
@@ -153,27 +158,32 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
       expandedDirectories.value = expanded
       return false
     }
+    const generation = expansionGeneration
     await loadTreeDirectory(next)
-    expanded.add(next)
-    expandedDirectories.value = expanded
+    if (generation !== expansionGeneration) return false
+    expandedDirectories.value = new Set([...expandedDirectories.value, next])
     return true
   }
 
   function collapseAllDirectories() {
+    // Pending folder loads may fill the cache, but must not reopen folders.
+    expansionGeneration += 1
     expandedDirectories.value = new Set()
   }
 
   async function revealTreePath(path) {
     const parts = normalizeRelativeDirectory(path).split('/').filter(Boolean)
     parts.pop()
+    const generation = expansionGeneration
     let current = ''
-    const expanded = new Set(expandedDirectories.value)
+    const ancestors = []
     for (const part of parts) {
       current = current ? `${current}/${part}` : part
       await loadTreeDirectory(current)
-      expanded.add(current)
+      if (generation !== expansionGeneration) return
+      ancestors.push(current)
     }
-    expandedDirectories.value = expanded
+    expandedDirectories.value = new Set([...expandedDirectories.value, ...ancestors])
   }
 
   async function setQuery(value) {

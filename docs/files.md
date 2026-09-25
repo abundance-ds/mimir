@@ -41,8 +41,13 @@ main tab and sidebar structure belongs to
   One file with many matching lines cannot consume the whole result budget.
   Other callers retain their existing multiple-location behavior. File count,
   byte, and result limits and token-scoped cancellation still apply.
-- One file actions menu lists New file, New folder, Refresh,
-  and Open File Manager. Right-click exposes file commands, including Favorites.
+- One file actions menu lists New file, New folder, Refresh, Collapse all,
+  and Open File Manager. Collapse all closes all folders in the current
+  project, including nested folders, in both the sidebar and File Manager.
+  It keeps the current view and search query, and returns focus to the menu
+  button. The item stays visible but is disabled when no folders are open.
+  Folder loads started before collapse cannot reopen folders when they finish.
+  Right-click exposes file commands, including Favorites.
   Hover shows the relative path. There is no selected-path footer.
   Native drops apply only to an active file surface.
 - File previews and search matches open in the Editor without replacing the

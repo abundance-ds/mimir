@@ -143,11 +143,54 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-mode="favorites"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[aria-label="File actions"]').trigger('click')
     await flushPromises()
-    expect([...document.querySelectorAll('[role=menuitem]')].map(item => item.textContent.trim())).toEqual(['New file', 'New folder', 'Refresh', 'Open File Manager'])
+    expect([...document.querySelectorAll('[role=menuitem]')].map(item => item.textContent.trim())).toEqual(['New file', 'New folder', 'Refresh', 'Collapse all', 'Open File Manager'])
+    const collapse = [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Collapse all')
+    expect(collapse.disabled).toBe(true)
     const manager = [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent.includes('Open File Manager'))
     manager.click()
     expect(wrapper.emitted('openManager')).toHaveLength(1)
     wrapper.unmount()
+  })
+
+  it.each(['project', 'favorites'])('collapses nested folders from the %s menu in both file panels', async mode => {
+    const store = useWorkspaceFilesStore()
+    const nested = { ...browseEntries[0], path: '/w/docs/deep', name: 'deep', relativePath: 'docs/deep' }
+    const child = { ...indexed[0], path: '/w/docs/deep/guide.md', name: 'guide.md', relativePath: 'docs/deep/guide.md' }
+    store.treeChildren = { '': browseEntries, docs: [nested], 'docs/deep': [child] }
+    store.expandedDirectories = new Set(['docs', 'docs/deep'])
+    useSettingsStore().workbenchFileFavorites = { '/w': [{ relativePath: 'docs', isDirectory: true }] }
+    const sidebar = render({ compact: true, collapsible: true })
+    const manager = render()
+    document.body.appendChild(sidebar.element)
+    try {
+      await sidebar.get(`[data-files-mode="${mode}"]`).trigger('click')
+      await sidebar.get('[data-file-row="/w/docs/deep/guide.md"] button').trigger('click')
+      expect(manager.find('[data-file-row="/w/docs/deep/guide.md"]').exists()).toBe(true)
+      const trigger = sidebar.get('[aria-label="File actions"]')
+      await trigger.trigger('keydown', { key: 'ArrowDown' })
+      const menu = document.querySelector('[role="menu"][aria-label="File actions"]')
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+      expect(document.activeElement.textContent).toBe('Collapse all')
+      document.activeElement.click()
+      await flushPromises()
+
+      expect([...store.expandedDirectories]).toEqual([])
+      expect(sidebar.find('[data-file-row="/w/docs/deep"]').exists()).toBe(false)
+      expect(manager.find('[data-file-row="/w/docs/deep"]').exists()).toBe(false)
+      expect(sidebar.find('[aria-selected="true"]').exists()).toBe(false)
+      expect(sidebar.get(`[data-files-mode="${mode}"]`).attributes('aria-pressed')).toBe('true')
+      expect(sidebar.emitted('collapse')).toBeUndefined()
+      expect(document.activeElement).toBe(trigger.element)
+      expect(document.querySelector('[role="menu"]')).toBeNull()
+
+      await sidebar.get('[data-file-row="/w/docs"] button').trigger('click')
+      expect(sidebar.get('[data-file-row="/w/docs/deep"]').attributes('aria-expanded')).toBe('false')
+      expect(sidebar.find('[data-file-row="/w/docs/deep/guide.md"]').exists()).toBe(false)
+    } finally {
+      sidebar.unmount()
+      manager.unmount()
+    }
   })
 
   it('searches the project from Favorites and restores Favorites when cleared', async () => {
@@ -161,6 +204,27 @@ describe('FilesActivity', () => {
     await wrapper.get('[aria-label="Clear search"]').trigger('click')
     expect(wrapper.get('[data-files-mode="favorites"]').attributes('aria-pressed')).toBe('true')
     wrapper.unmount()
+  })
+
+  it('collapses the remembered tree during search and keeps the query and return view', async () => {
+    const store = useWorkspaceFilesStore()
+    store.expandedDirectories = new Set(['docs'])
+    const wrapper = render({ compact: true })
+    try {
+      await wrapper.get('[data-files-mode="recent"]').trigger('click')
+      await wrapper.get('[data-files-search]').setValue('new')
+      await wrapper.get('[aria-label="File actions"]').trigger('click')
+      const collapse = [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Collapse all')
+      collapse.click()
+      await flushPromises()
+
+      expect([...store.expandedDirectories]).toEqual([])
+      expect(wrapper.get('[data-files-search]').element.value).toBe('new')
+      await wrapper.get('[aria-label="Clear search"]').trigger('click')
+      expect(wrapper.get('[data-files-mode="recent"]').attributes('aria-pressed')).toBe('true')
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('finds a native filename result when the sidebar mounted before the workspace index loaded', async () => {

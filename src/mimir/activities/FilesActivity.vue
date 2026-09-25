@@ -521,7 +521,7 @@
           <ContextAction label="New folder" action="new-folder" @select="promptNew('folder')" />
           <div class="my-1 border-t border-rule-light" />
           <ContextAction label="Refresh workspace" action="refresh" @select="refreshFromMenu" />
-          <ContextAction label="Collapse all folders" action="collapse-all" @select="collapseAllFromMenu" />
+          <ContextAction label="Collapse all" action="collapse-all" @select="collapseAllFromMenu" />
         </template>
         <template v-else-if="contextEntry && contextEntry.missing">
           <ContextAction
@@ -1432,11 +1432,13 @@ const compactActions = computed(() => [
   { id: 'file', label: 'New file', disabled: !files.workspacePath },
   { id: 'folder', label: 'New folder', disabled: !files.workspacePath },
   { id: 'refresh', label: 'Refresh' },
+  { id: 'collapse-all', label: 'Collapse all', disabled: !files.workspacePath || !files.expandedDirectories.size },
   { id: 'manager', label: 'Open File Manager' },
 ])
 function compactAction(id) {
   if (id === 'manager') emit('openManager')
   else if (id === 'refresh') void refresh()
+  else if (id === 'collapse-all') collapseAll()
   else if (id === 'file' || id === 'folder') promptNew(id)
 }
 

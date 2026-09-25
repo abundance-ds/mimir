@@ -49,6 +49,58 @@ describe('workspace files store', () => {
     await store.openWorkspace('/alpha')
     expect([...store.expandedDirectories]).toEqual(['docs'])
     expect(listWorkspaceDirectory).toHaveBeenLastCalledWith('docs')
+
+    store.collapseAllDirectories()
+    await store.openWorkspace('/beta')
+    await store.toggleDirectory('src')
+    await store.openWorkspace('/alpha')
+    expect([...store.expandedDirectories]).toEqual([])
+    await store.openWorkspace('/beta')
+    expect([...store.expandedDirectories]).toEqual(['src'])
+  })
+
+  it.each(['toggle', 'reveal'])('keeps folders collapsed after a pending %s finishes', async action => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/w')
+    await store.toggleDirectory('docs')
+    let finishLoad
+    listWorkspaceDirectory.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+
+    const pending = action === 'toggle'
+      ? store.toggleDirectory('src')
+      : store.revealTreePath('src/deep/file.md')
+    store.collapseAllDirectories()
+    await store.toggleDirectory('new-folder')
+    finishLoad([])
+    await pending
+
+    expect([...store.expandedDirectories]).toEqual(['new-folder'])
+    expect(listWorkspaceDirectory).not.toHaveBeenCalledWith('src/deep')
+    // The loaded children remain cached for the next explicit expansion.
+    const calls = listWorkspaceDirectory.mock.calls.length
+    await store.toggleDirectory('src')
+    expect([...store.expandedDirectories]).toEqual(['new-folder', 'src'])
+    expect(listWorkspaceDirectory).toHaveBeenCalledTimes(calls)
+  })
+
+  it('keeps folders collapsed during workspace restoration', async () => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/alpha')
+    await store.toggleDirectory('docs')
+    await store.openWorkspace('/beta')
+    let finishLoad
+    listWorkspaceDirectory.mockImplementation(directory => directory === 'docs'
+      ? new Promise(resolve => { finishLoad = resolve })
+      : Promise.resolve([]))
+
+    const restoring = store.openWorkspace('/alpha')
+    await vi.waitFor(() => expect(finishLoad).toBeTypeOf('function'))
+    await store.toggleDirectory('src')
+    store.collapseAllDirectories()
+    finishLoad([])
+    await restoring
+
+    expect([...store.expandedDirectories]).toEqual([])
   })
 
   it('opens a workspace as a recent-first review inbox', async () => {
