@@ -8,6 +8,7 @@ description: Use Mimir's Today, shared Scratchpad, Editor, and tool discovery. F
 - **Scratchpad:** read and edit `~/.mimir/scratchpad.md` with normal file tools. Project `scratchpad.md` links point there. Keep the links intact. Mimir opens the Editor and keeps saved history.
 - **Today (daily plan):** read `mimir_state.today`; append with `today_append`. No Graph skill needed.
 - **Editor:** `mimir_state` reads; `mimir_propose` opens a reviewed diff.
+- **Comments:** read `mimir_state {target, include_content: true}`. Use the returned path or `documentId` with `comments_*`, and `revision` as `expected_revision` on changes. Explicit targets work across workspaces. Check `saved` in receipts.
 - **Graph / Journal:** `mimir-graph`.
 - **Scribe:** `mimir-meetings`.
 - **Settings, launchers, routines, apps, skills:** `mimir-config`.

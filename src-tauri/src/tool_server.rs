@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(list["tools"][0]["name"], "mimir_state");
         assert_eq!(
             list["tools"][0]["description"],
-            "Read editor and Today context."
+            "Read editor, Today, or a target document."
         );
         assert_eq!(list["tools"][0]["_meta"]["mimir/group"], "workbench");
         assert_eq!(list["tools"][0]["_meta"]["mimir/effect"], "read");

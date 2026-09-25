@@ -37,6 +37,54 @@ async function setup() {
 }
 
 describe('document lifecycle with the real editor', () => {
+  it('keeps hidden comment edits in their document with separate Undo and Redo', async () => {
+    const original = 'First\r\nShared anchor\r\n'
+    io.read.mockResolvedValue(original)
+    const { files, wrapper, surface, open, type } = await setup()
+    await open('/work/a.md')
+    type('Unsaved: ')
+    const x = files.currentFile
+    const snapshot = await wrapper.vm.mimirDocumentState(x.path, true)
+    await wrapper.setProps({ workspacePath: '/other', workspacePaths: ['/work', '/other'] })
+    await open('/other/b.md')
+    const y = files.currentFile
+    const result = await wrapper.vm.mimirDocumentComment('add', {
+      target: x.path, anchor_text: 'Shared anchor', text: 'Check this.', expected_revision: snapshot.revision,
+    })
+    await nextTick()
+    expect(result).toMatchObject({ path: x.path, saved: false })
+    expect(files.currentFile).toBe(y)
+    expect(surface.vm.getContent()).toBe(original)
+    expect(undo(surface.vm.getView())).toBe(false)
+    expect(io.save).not.toHaveBeenCalled()
+    await wrapper.setProps({ workspacePath: '/work' })
+    await flushPromises()
+    expect(surface.vm.getContent()).toBe(x.content)
+    expect(surface.vm.getContent()).toContain('<comment')
+    expect(undo(surface.vm.getView())).toBe(true)
+    expect(x.content).toBe(`Unsaved: ${original}`)
+    expect(redo(surface.vm.getView())).toBe(true)
+    expect(x.content).toContain('<comment')
+    await wrapper.vm.mimirSave()
+    expect(io.save).toHaveBeenCalledWith(x.path, x.content)
+  })
+
+  it('autosaves a comment in a hidden document through its own save queue', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { files, wrapper, open } = await setup()
+    useSettingsStore().editorAutoSave = true
+    await open('/work/a.md')
+    const x = files.currentFile
+    await wrapper.setProps({ workspacePath: '/other', workspacePaths: ['/work', '/other'] })
+    await open('/other/b.md')
+    const y = files.currentFile
+    await wrapper.vm.mimirDocumentComment('add', { target: x.path, anchor_text: 'Text', text: 'Check this.' })
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(io.save).toHaveBeenCalledWith(x.path, x.content)
+    expect(x.dirty).toBe(false)
+    expect(files.currentFile).toBe(y)
+  })
+
   it('retains a failed review decision across tab switches and retries without replacing newer edits', async () => {
     const { files, wrapper, open } = await setup()
     await open('/work/a.md')

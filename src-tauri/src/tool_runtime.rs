@@ -98,7 +98,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 51] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
-        description: "Read editor and Today context.",
+        description: "Read editor, Today, or a target document.",
         group: "workbench",
         effect: "read",
         direct: true,
@@ -992,6 +992,13 @@ fn definition(
     DynamicToolDefinition::new(canonical_name, mcp_alias, description, input_schema)
 }
 
+fn document_target_schema() -> Value {
+    json!({
+        "type": "string", "minLength": 1, "maxLength": 500,
+        "description": "Absolute path, open document ID, or @editor. Relative paths use the caller Activity workspace, then caller cwd. Does not select a tab."
+    })
+}
+
 fn object_schema(properties: Value, required: &[&str]) -> Value {
     json!({
         "type": "object",
@@ -1133,12 +1140,13 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "comments.add",
             "comment_add",
-            "Add a pseudo-XML review comment anchored to an exact text passage.",
+            "Add an anchored comment to target (path, document ID, or @editor). Relative paths use the caller workspace. Returns revision and saved status.",
             object_schema(
                 json!({
-                    "target": { "type": "string", "minLength": 1, "maxLength": 500 },
+                    "target": document_target_schema(),
                     "anchor_text": { "type": "string", "minLength": 1, "maxLength": 2000 },
-                    "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
+                    "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+                    "expected_revision": { "type": "string", "minLength": 1, "description": "Revision from mimir_state or a comment tool. Read again after a conflict." }
                 }),
                 &["target", "anchor_text", "text"],
             ),
@@ -1146,12 +1154,13 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "comments.reply",
             "comment_reply",
-            "Reply to an existing pseudo-XML comment thread.",
+            "Reply to a comment in target (path, document ID, or @editor). Returns revision and saved status.",
             object_schema(
                 json!({
-                    "target": { "type": "string", "minLength": 1, "maxLength": 500 },
+                    "target": document_target_schema(),
                     "comment_id": { "type": "string", "minLength": 1 },
-                    "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
+                    "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+                    "expected_revision": { "type": "string", "minLength": 1, "description": "Revision from mimir_state or a comment tool. Read again after a conflict." }
                 }),
                 &["target", "comment_id", "text"],
             ),
@@ -1159,18 +1168,26 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "comments.resolve",
             "comment_resolve",
-            "Resolve a pseudo-XML comment thread in the active editor without deleting it.",
+            "Resolve a pseudo-XML comment thread in target (path, document ID, or @editor; defaults to the active document) without deleting it.",
             object_schema(
-                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                json!({
+                    "comment_id": { "type": "string", "minLength": 1 },
+                    "target": document_target_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "description": "Revision from mimir_state or a comment tool. Read again after a conflict." }
+                }),
                 &["comment_id"],
             ),
         ),
         definition(
             "comments.reopen",
             "comment_reopen",
-            "Reopen a resolved pseudo-XML comment thread in the active editor.",
+            "Reopen a resolved pseudo-XML comment thread in target (path, document ID, or @editor; defaults to the active document).",
             object_schema(
-                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                json!({
+                    "comment_id": { "type": "string", "minLength": 1 },
+                    "target": document_target_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "description": "Revision from mimir_state or a comment tool. Read again after a conflict." }
+                }),
                 &["comment_id"],
             ),
         ),
@@ -1179,7 +1196,11 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             "comment_delete",
             "Delete a pseudo-XML comment thread while preserving its anchored document text.",
             object_schema(
-                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                json!({
+                    "comment_id": { "type": "string", "minLength": 1 },
+                    "target": document_target_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "description": "Revision from mimir_state or a comment tool. Read again after a conflict." }
+                }),
                 &["comment_id"],
             ),
         ),
@@ -1228,8 +1249,8 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         editor_definition(
             "editor.state",
             "editor_state",
-            "Get active editor state.",
-            json!({ "include_content": { "type": "boolean" } }),
+            "Read the active editor and Today, or pass target (path or document ID) to read a document without selecting it. Returns document identity and revision.",
+            json!({ "include_content": { "type": "boolean" }, "target": document_target_schema() }),
             &[],
         ),
         editor_definition(
@@ -1263,8 +1284,8 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         editor_definition(
             "editor.comments",
             "editor_comments",
-            "Return canonical pseudo-XML comments for the active document.",
-            json!({}),
+            "Read comments in target (path, document ID, or @editor; defaults to the active document). Returns revision and saved status.",
+            json!({ "target": document_target_schema() }),
             &[],
         ),
         editor_definition(
@@ -1727,6 +1748,65 @@ mod tests {
             search.input_schema["properties"]["limit"]["maximum"],
             json!(50)
         );
+    }
+
+    #[tokio::test]
+    async fn document_tools_accept_targets_and_revision_checks() {
+        let registry = ToolRegistry::new();
+        for definition in core_tool_definitions().into_iter().filter(|definition| {
+            [
+                "editor.state",
+                "editor.comments",
+                "comments.add",
+                "comments.reply",
+                "comments.resolve",
+            ]
+            .contains(&definition.canonical_name.as_str())
+        }) {
+            registry.register(ToolRegistration::new(
+                ToolDescriptor::new(definition.canonical_name, definition.mcp_alias,
+                    definition.description, definition.input_schema, ToolOwner::Core, ToolSource::Ui),
+                |_context: ToolCallContext, input: Value| async move { Ok(ToolResult::new(input)) },
+            )).unwrap();
+        }
+        for (name, input) in [
+            (
+                "editor.state",
+                json!({"target": "/X/note.md", "include_content": true}),
+            ),
+            ("editor.comments", json!({"target": "document:12"})),
+            (
+                "comments.add",
+                json!({"target": "/X/note.md", "anchor_text": "Text", "text": "Check", "expected_revision": "revision"}),
+            ),
+            (
+                "comments.reply",
+                json!({"target": "/X/note.md", "comment_id": "c1", "text": "Reply", "expected_revision": "revision"}),
+            ),
+            (
+                "comments.resolve",
+                json!({"target": "/X/note.md", "comment_id": "c1", "expected_revision": "revision"}),
+            ),
+            ("comments.resolve", json!({"comment_id": "c1"})),
+        ] {
+            let result = registry
+                .call(
+                    name,
+                    ToolCallContext::new(crate::tool_registry::ToolCaller::Mcp),
+                    input.clone(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.value, input);
+        }
+        assert!(registry
+            .call(
+                "comments.resolve",
+                ToolCallContext::new(crate::tool_registry::ToolCaller::Mcp),
+                json!({"comment_id": "c1", "expected_revision": 42})
+            )
+            .await
+            .is_err());
     }
 
     #[test]

@@ -38,6 +38,45 @@ The receipt confirms the saved change.
 Read the full scratchpad with `mimir_state.today`.
 After a timeout or save error, read before retrying: the append may have applied.
 
+### Document targets and comments
+
+`mimir_state {include_content: true}` reads the visible Editor and Today.
+Its `active` document includes `documentId`, `revision`, and `saved`.
+`mimir_state {target, include_content: true}` instead returns `{document}` for
+that target. It does not select a tab, change the workspace, or read Today.
+
+A target is an absolute path, an open `documentId`, or `@editor`. Relative
+paths use the caller Activity's recorded workspace, then its working directory.
+Only calls with neither Activity context nor a working directory fall back to
+the visible workspace. Use an absolute path for another workspace. `@editor`
+binds to the active document at the start of each call; it does not remember a
+previous state read. Use the returned path or `documentId` for later calls.
+
+`comments_list {target}` reads the target's threads. `comments_add` and
+`comments_reply` retain their required `target`; `comments_resolve` accepts an
+optional `target`. List and resolve default to `@editor`. Comment changes
+accept `expected_revision` from the state read or a previous comment receipt.
+A mismatch stops the change. Read again before retrying, including after a
+timeout: the change may already have applied.
+
+For example:
+
+```bash
+mimir call mimir_state '{"target":"/work/X/notes.md","include_content":true}'
+mimir call comments_add '{"target":"/work/X/notes.md","expected_revision":"<returned revision>","anchor_text":"Exact unique passage","text":"Check this claim."}'
+```
+
+Open documents use their current buffer, including unsaved text and hidden
+tabs. A comment change is an undoable edit and follows the normal autosave
+setting; it does not force a save of the user's draft. Closed documents use a
+checked disk write. Receipts include `path`, `documentId`, the new `revision`,
+and `saved`. `saved: false` means the change is in the buffer at receipt time.
+Document IDs for open buffers are valid only while that document remains open.
+
+Graph Details still requires Source before a comment change. Closed Graph
+sources require their Graph scope to be mounted and use the Graph writer.
+Scratchpad writes retain the shared document's history and revision checks.
+
 Graph:
 
 ```text

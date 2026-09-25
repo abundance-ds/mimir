@@ -123,8 +123,9 @@ function confirmSelection() {
 
 async function openRecent(path) {
   try {
+    const readVersion = files.documentReadVersion()
     const content = await readFile(path)
-    await files.openFile(path, content)
+    await files.openFile(path, content, { readVersion })
     emit('activated')
   } catch {
     files.removeRecentFile(path)

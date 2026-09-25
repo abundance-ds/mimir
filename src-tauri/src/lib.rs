@@ -74,6 +74,7 @@ mod apps;
 pub mod business_graph;
 pub mod chat;
 mod connections;
+mod document_files;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
@@ -170,9 +171,7 @@ fn read_text_file(path: String) -> Result<ReadTextResponse, String> {
 
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
-    let path_buf = PathBuf::from(&path);
-    persistence::write_bytes_atomic(&path_buf, content.as_bytes())
-        .map_err(|err| format!("Could not write {}: {}", path, err))
+    document_files::write_text(&PathBuf::from(&path), &content)
 }
 
 #[tauri::command]
@@ -1199,6 +1198,8 @@ pub fn run() {
             connections::connections_disconnect,
             connections::connections_set_google_default,
             read_text_file,
+            document_files::document_file_read,
+            document_files::document_file_write,
             read_binary_file,
             write_text_file,
             write_binary_file,

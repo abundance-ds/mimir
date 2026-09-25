@@ -1636,9 +1636,16 @@ const editorCommands = useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
+  onDocumentChanged: file => {
+    if (file === currentFile.value) scheduleContentSync()
+    autoSave.schedule(file)
+  },
   navigation: editorNavigation,
 })
 const {
+  mimirDocumentState,
+  mimirDocumentComments,
+  mimirDocumentComment,
   mimirActive,
   mimirCloseActiveTab,
   mimirCommentAction,
@@ -1876,6 +1883,9 @@ function focusEditorPane() {
 }
 
 defineExpose({
+  mimirDocumentState,
+  mimirDocumentComments,
+  mimirDocumentComment,
   mimirFocus: focusEditorPane,
   navigationTabs, activeNavigationTab, selectNavigationTab,
   mimirScratchpad: scratchpadEditor.show,

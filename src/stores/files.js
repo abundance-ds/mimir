@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useScratchpadStore } from './scratchpad.js'
 import { resolveScratchpad } from '../services/scratchpad.js'
-import { openFileDialog, saveFileDialog, saveFile } from '../services/fileSystem.js'
+import { openFileDialog, saveFileDialog, saveFile, readFile } from '../services/fileSystem.js'
 import { SAVE_STATE } from '../shared/saveState.js'
 import { getGraphNode, graphSource, saveGraphSource } from '../services/businessGraph.js'
 import { useBusinessGraphStore } from './businessGraph.js'
@@ -29,6 +29,23 @@ export const useFileStore = defineStore('files', () => {
   const graphSaveTimers = new Map()
   const pausedGraphSaves = new Set()
   const graphRefreshVersions = new Map()
+  const documentWrites = new Set()
+  let documentWriteVersion = 0
+
+  function documentReadVersion() { return documentWriteVersion }
+
+  // A disk tool owns a closed document until its checked write completes.
+  // Opens that overlap it must discard their older disk snapshot, including
+  // reads through another path to the same file.
+  async function writeClosedDocument(write) {
+    documentWriteVersion += 1
+    const pending = Promise.resolve().then(write)
+    documentWrites.add(pending)
+    try { return await pending } finally {
+      documentWrites.delete(pending)
+      documentWriteVersion += 1
+    }
+  }
 
   const visibleOpenFiles = computed(() => openFiles.value.filter(isFileVisible))
   const visibleRecentFiles = computed(() => {
@@ -328,6 +345,7 @@ export const useFileStore = defineStore('files', () => {
     workspacePath,
     graphDocument = null,
     isCurrent = () => true,
+    readVersion = documentWriteVersion,
   } = {}) {
     // A supplied native Graph snapshot already classifies this path, including
     // a Graph entry named scratchpad.md. It is not the shared Scratchpad.
@@ -344,6 +362,17 @@ export const useFileStore = defineStore('files', () => {
       graphDocument = await graphSource(path)
     }
     if (!isCurrent()) return null
+    while (documentWrites.size || readVersion !== documentWriteVersion) {
+      await Promise.allSettled([...documentWrites])
+      if (!isCurrent()) return null
+      readVersion = documentWriteVersion
+      if (graphDocument) {
+        graphDocument = await graphSource(path)
+        if (!graphDocument) throw new Error(GRAPH_UNAVAILABLE)
+        content = graphDocument.content
+      } else if (kind === 'text') content = await readFile(path)
+      if (!isCurrent()) return null
+    }
     // Recheck after native classification: concurrent opens share one tab.
     const active = currentFile.value
     const existingIdx = openFiles.value.findIndex(f => f.path === path)
@@ -737,9 +766,10 @@ export const useFileStore = defineStore('files', () => {
 
   // Open file dialog and open the selected file
   async function openDialog() {
+    const readVersion = documentReadVersion()
     const result = await openFileDialog(workspaceScope.value || undefined)
     if (!result) return
-    await openFile(result.path, result.content, { kind: result.kind, meta: result.meta })
+    await openFile(result.path, result.content, { kind: result.kind, meta: result.meta, readVersion })
   }
 
   function moveTab(from, to) {
@@ -1100,6 +1130,8 @@ export const useFileStore = defineStore('files', () => {
     tabList,
     hasOpenFiles,
     openFile,
+    documentReadVersion,
+    writeClosedDocument,
     newFile,
     newTab,
     restoreDraft,

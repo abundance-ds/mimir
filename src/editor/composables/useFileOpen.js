@@ -27,9 +27,10 @@ export function useFileOpen({
         try { meta = await inspectWorkspaceEntry(path) } catch { /* Outside the workspace. */ }
         meta ||= fallbackOpenEntry(path)
         const kind = meta.openBehavior
+        const readVersion = fileStore.documentReadVersion()
         const content = kind === 'text' ? await readFile(path) : ''
         if (disposed) return
-        await fileStore.openFile(path, content, { kind, meta })
+        await fileStore.openFile(path, content, { kind, meta, readVersion })
         if (disposed) return
         onOpened(path)
       } catch (error) {

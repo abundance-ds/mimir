@@ -116,6 +116,40 @@ describe('canonical renderer tool runtime', () => {
     expect(getToday).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the caller Activity workspace for relative document targets while another workspace is visible', async () => {
+    const editor = {
+      mimirDocumentState: vi.fn(async target => ({ path: target, revision: 'r1' })),
+      mimirDocumentComments: vi.fn(async target => ({ path: target, comments: [] })),
+      mimirDocumentComment: vi.fn(async (_action, input) => ({ path: input.target, saved: false })),
+    }
+    const options = { editor, getWorkspacePath: () => '/Y', getActivity: id => id === 'agent-X' ? { workspacePath: '/X' } : null }
+    const context = { cwd: '/custom-cwd', metadata: { activityId: 'agent-X' } }
+    await expect(executeToolRequest({ tool: 'editor.state', input: { target: 'note.md', include_content: true }, context }, options))
+      .resolves.toEqual({ document: { path: '/X/note.md', revision: 'r1' } })
+    await executeToolRequest({ tool: 'comments.add', input: { target: '/X/note.md', anchor_text: 'Text', text: 'Comment', expected_revision: 'r1' }, context }, options)
+    expect(editor.mimirDocumentComment).toHaveBeenCalledWith('add', expect.objectContaining({ target: '/X/note.md', expected_revision: 'r1' }), undefined)
+    await executeToolRequest({ tool: 'editor.comments', input: { target: 'note.md' }, context }, options)
+    expect(editor.mimirDocumentComments).toHaveBeenCalledWith('/X/note.md', undefined)
+    await executeToolRequest({ tool: 'comments.resolve', input: { target: 'note.md', comment_id: 'c1' }, context }, options)
+    expect(editor.mimirDocumentComment).toHaveBeenLastCalledWith('resolve', { target: '/X/note.md', comment_id: 'c1' }, undefined)
+  })
+
+  it('uses an external caller directory and refuses relative traversal', async () => {
+    const editor = { mimirDocumentState: vi.fn(async path => ({ path })) }
+    const options = { editor, getWorkspacePath: () => '/Y' }
+    await expect(executeToolRequest({ tool: 'editor.state', input: { target: 'note.md' }, context: { cwd: '/X' } }, options))
+      .resolves.toEqual({ document: { path: '/X/note.md' } })
+    await expect(executeToolRequest({ tool: 'editor.state', input: { target: '../Y/note.md' }, context: { cwd: '/X' } }, options))
+      .rejects.toThrow('caller workspace')
+  })
+
+  it('retains state inspection for non-text previews', async () => {
+    const state = { active: { path: '/work/report.pdf', kind: 'pdf' }, tabs: [] }
+    const editor = { mimirState: vi.fn(() => state), mimirDocumentState: vi.fn() }
+    expect(await executeToolRequest({ tool: 'editor.state' }, { editor })).toEqual({ ...state, today: null })
+    expect(editor.mimirDocumentState).not.toHaveBeenCalled()
+  })
+
   it('routes Today append without an Editor or an app launch', async () => {
     const receipt = { date: '2026-09-06', updatedAt: '2026-09-06T10:00:00Z', contextBefore: 'Draft', appended: '\n\n- [ ] test' }
     const appendToday = vi.fn().mockResolvedValue(receipt)
@@ -129,7 +163,7 @@ describe('canonical renderer tool runtime', () => {
 
   it('routes resolve, reopen, and delete through the active editor comment model', async () => {
     const editor = {
-      mimirCommentAction: vi.fn(() => ({ ok: true })),
+      mimirDocumentComment: vi.fn(async (action, input) => ({ comment_id: input.comment_id, status: action === 'resolve' ? 'resolved' : action === 'delete' ? 'deleted' : 'active' })),
     }
 
     await expect(executeToolRequest({
@@ -145,10 +179,10 @@ describe('canonical renderer tool runtime', () => {
       input: { comment_id: 'c1' },
     }, { editor })).resolves.toEqual({ comment_id: 'c1', status: 'deleted' })
 
-    expect(editor.mimirCommentAction.mock.calls).toEqual([
-      ['resolve', 'c1'],
-      ['reopen', 'c1'],
-      ['delete', 'c1'],
+    expect(editor.mimirDocumentComment.mock.calls).toEqual([
+      ['resolve', { comment_id: 'c1', target: '@editor' }, undefined],
+      ['reopen', { comment_id: 'c1', target: '@editor' }, undefined],
+      ['delete', { comment_id: 'c1', target: '@editor' }, undefined],
     ])
   })
 

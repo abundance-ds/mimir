@@ -23,10 +23,21 @@ Comments are review threads stored directly in Markdown as protected pseudo-XML:
 - Hidden syntax needs replacement decorations, atomic ranges, change filters,
   and boundary key handlers. Deliberate changes carry `commentMutation`.
 - Public comment tools use this same representation; the definitive public
-  names are in [agent-interface.md](agent-interface.md).
+  names and document-target contract are in
+  [agent-interface.md](agent-interface.md#document-targets-and-comments).
 
 Renderer ownership is the comments service/store, comment composables, and
 `src/editor/codemirror/comments.js`.
+Agent document access belongs to `useDocumentTools.js`; text transformations
+belong to `services/comments/mutations.js`. FileStore owns open-buffer edits
+and coordinates file opens with pending disk tool writes. Native
+`document_files.rs` checks and writes closed ordinary documents.
+
+Document-tool tests cover hidden dirty buffers, caller workspace resolution,
+revision conflicts, aliases, concurrent opens, cancellation, and closed-file
+writes. Real Editor tests cover separate Undo/Redo and autosave after a
+workspace switch. A native macOS check of comments in X while Y is selected
+remains required; see [Editor verification](editor-system.md#verification).
 
 ## Table discussions
 

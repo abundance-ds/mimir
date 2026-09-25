@@ -335,6 +335,7 @@ const today = useTodayStore()
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
   getWorkspacePath: () => workspaceFiles.workspacePath || null,
+  getActivity: id => activities.byId(id),
   awaitWorkspaceWrites: paths => editorFiles.waitForWorkspacePaths(paths),
   moveWorkspacePath: (from, to) => editorFiles.moveWorkspacePath(from, to),
   reconcileWorkspaceTrash: paths => editorFiles.handleWorkspaceTrash(paths),

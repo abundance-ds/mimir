@@ -8,6 +8,7 @@ import { getCommentsFromState } from '../codemirror/comments.js'
 import { computeDiffFromReview } from './useProposalBridge.js'
 import { cloneGraphDocument } from '../../stores/graphDocuments.js'
 import { createNavigationGuard } from '../navigationGuard.js'
+import { useDocumentTools } from './useDocumentTools.js'
 
 export function useEditorCommandApi({
   fileManager,
@@ -29,8 +30,10 @@ export function useEditorCommandApi({
   closeEditorTab,
   openSettings,
   commentPrompt,
+  onDocumentChanged,
   navigation = createNavigationGuard(),
 }) {
+  const documents = useDocumentTools({ fileManager, currentFile, onChanged: onDocumentChanged })
   async function mimirOpen(path, options = {}) {
     return openDocument(path, options, navigation.begin())
   }
@@ -59,6 +62,7 @@ export function useEditorCommandApi({
       const kind = inspected.openBehavior || (
         inspected.textReadable === false ? 'external' : 'text'
       )
+      const readVersion = fileManager.documentReadVersion?.()
       const content = kind === 'text' ? await readFile(path) : ''
       if (!isCurrent()) return null
       const file = await fileManager.openFile(path, content, {
@@ -66,6 +70,7 @@ export function useEditorCommandApi({
         preview,
         meta: inspected,
         isCurrent,
+        readVersion,
       })
       if (!file || !isCurrent()) return null
       if (source && file?.graph) await openSource(file)
@@ -343,6 +348,9 @@ export function useEditorCommandApi({
   }
 
   return {
+    mimirDocumentState: documents.state,
+    mimirDocumentComments: documents.comments,
+    mimirDocumentComment: documents.mutate,
     mimirActive,
     mimirCloseActiveTab,
     mimirCommentAction,

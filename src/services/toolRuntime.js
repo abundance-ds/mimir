@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { spawnActivity } from './activities.js'
 import { createMimirTools } from './ai/tools/index.js'
+import { resolveSafePath } from './ai/tools/textMatch.js'
 
 const CORE_TOOL_ALIASES = Object.freeze({
   'files.read': 'read',
@@ -9,8 +10,6 @@ const CORE_TOOL_ALIASES = Object.freeze({
   'files.search': 'search',
   'files.edit': 'edit',
   'files.create': 'create',
-  'comments.add': 'comment_add',
-  'comments.reply': 'comment_reply',
   'web.search': 'search_web',
   'shell.run': 'shell',
 })
@@ -97,11 +96,11 @@ export async function executeToolRequest(request, options = {}) {
   if (tool === 'editor.propose') {
     return executeEditorProposal(request, options)
   }
+  if (tool.startsWith('comments.') || tool === 'editor.comments' || (tool === 'editor.state' && input.target)) {
+    return executeDocumentTool(request, options)
+  }
   if (tool.startsWith('editor.')) {
     return executeEditorTool(resolveEditor(options), tool, input, options)
-  }
-  if (['comments.resolve', 'comments.reopen', 'comments.delete'].includes(tool)) {
-    return executeEditorCommentTool(resolveEditor(options), tool, input)
   }
 
   switch (tool) {
@@ -331,16 +330,27 @@ async function invokeNativeTool(command, args) {
   }
 }
 
-function executeEditorCommentTool(editor, tool, input) {
-  const action = tool.slice('comments.'.length)
-  if (!input?.comment_id) throw invalidInputError('comment_id is required.')
-  const result = editor.mimirCommentAction?.(action, input.comment_id)
-  if (!result) throw unavailableError('The attached editor does not support comment actions.')
-  if (result.ok === false) throw toolError('handler', result.error || `Could not ${action} comment.`)
-  return {
-    comment_id: input.comment_id,
-    status: action === 'delete' ? 'deleted' : action === 'resolve' ? 'resolved' : 'active',
+function documentTarget(request, options) {
+  const target = request.input?.target || '@editor'
+  if (target === '@editor' || target.startsWith('document:') || target.startsWith('/')) return target
+  const context = request.context || {}
+  const activityId = context.metadata?.activityId || context.activityId
+  const workspace = options.getActivity?.(activityId)?.workspacePath
+    || context.cwd || (!activityId && options.getWorkspacePath?.())
+  const path = resolveSafePath(target, workspace)
+  if (!path) throw invalidInputError('A relative document path must stay inside the caller workspace. Use an absolute path for another document.')
+  return path
+}
+
+function executeDocumentTool(request, options) {
+  const editor = resolveEditor(options)
+  const input = { ...request.input, target: documentTarget(request, options) }
+  if (request.tool === 'editor.state') {
+    return editor.mimirDocumentState(input.target, Boolean(input.include_content), options.signal)
+      .then(document => ({ document }))
   }
+  if (request.tool === 'editor.comments') return editor.mimirDocumentComments(input.target, options.signal)
+  return editor.mimirDocumentComment(request.tool.slice('comments.'.length), input, options.signal)
 }
 
 async function executeWorkspaceTool(request, options) {
@@ -359,7 +369,7 @@ async function executeWorkspaceTool(request, options) {
     || request.context?.cwd
     || null
   const tools = createMimirTools({
-    sessionId: request.context?.activityId || 'mcp',
+    sessionId: request.context?.metadata?.activityId || request.context?.activityId || 'mcp',
     projectId: 'workspace',
     projectPath: workspacePath,
     disabledTools: [],
@@ -407,8 +417,8 @@ function createEditorProposalBridge(editor, request) {
       ...proposal,
       path,
       absolutePath: path,
-      sessionId: request.context?.activityId || 'mcp',
-      threadId: request.context?.activityId || 'mcp',
+      sessionId: request.context?.metadata?.activityId || request.context?.activityId || 'mcp',
+      threadId: request.context?.metadata?.activityId || request.context?.activityId || 'mcp',
     }
 
     // Open the review immediately in the stable editor surface. Registering it
@@ -432,11 +442,17 @@ async function executeEditorTool(editor, tool, input, options = {}) {
   switch (tool) {
     case 'editor.open':
       return editor.mimirOpen(input.path)
-    case 'editor.state':
+    case 'editor.state': {
+      const state = editor.mimirState({ includeContent: Boolean(input.include_content) })
+      // Capture before the first await, so a UI switch cannot combine documents.
+      const document = state.active && ['text', 'graph', undefined].includes(state.active.kind) && editor.mimirDocumentState
+        ? await editor.mimirDocumentState('@editor', Boolean(input.include_content), options.signal) : null
       return {
-        ...editor.mimirState({ includeContent: Boolean(input.include_content) }),
+        ...state,
+        ...(document ? { active: { ...state.active, ...document } } : {}),
         today: options.getToday ? await options.getToday() : null,
       }
+    }
     case 'editor.active':
       return editor.mimirActive({ includeContent: Boolean(input.includeContent) })
     case 'editor.tabs':
@@ -445,8 +461,6 @@ async function executeEditorTool(editor, tool, input, options = {}) {
       return editor.mimirActive({ includeContent: true })
     case 'editor.selection':
       return editor.mimirSelection()
-    case 'editor.comments':
-      return editor.mimirComments()
     case 'editor.replace_selection':
       return editor.mimirReplaceSelection(input.text || '')
     case 'editor.set_content':
