@@ -5,6 +5,10 @@ task scope.
 
 ## Open
 
+- Packaged skills: `mimir_cli::tests::packaged_skills_stay_lean` fails because
+  the existing `mimir-config` skill has 227 words against its 220-word limit.
+  Reduce its text without removing its setup or verification instructions.
+
 - Interactive sheets (deferred): Markdown tables lack easy cell editing and
   live formulas for team discussions. Need copy/paste, undo, SUM, AVERAGE,
   SUMIF, basic formatting, and saved sheets linked from notes. Options:
