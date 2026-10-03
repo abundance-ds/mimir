@@ -1792,6 +1792,16 @@ describe('WorkbenchApp', () => {
     expect(editorOpenGraph).toHaveBeenCalledWith('meeting-filed')
   })
 
+  it('opens a Graph search result through the normal Editor action', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState('editor', 'rail')
+    wrapper.findComponent({ name: 'QuickOpen' }).vm.$emit('activate', { type: 'graph', graphId: 'design' })
+    await flushPromises()
+    expect(editorOpenGraph).toHaveBeenCalledWith({ id: 'design' })
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+  })
+
   it('does not reopen or focus the Editor when a delayed Graph open is canceled', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps', diagnostics: [],

@@ -7,6 +7,9 @@ import { buildNativeEditorMenuItems } from '../../editor/nativeMenu.js'
 import QuickOpen from './QuickOpen.vue'
 import { buildQuickOpenResults } from '../quickOpenResults.js'
 
+const graphApi = vi.hoisted(() => ({ search: vi.fn() }))
+vi.mock('../../services/businessGraph.js', () => ({ searchGraph: graphApi.search }))
+
 const activityApi = vi.hoisted(() => ({
   searchHistory: vi.fn(),
 }))
@@ -72,6 +75,7 @@ describe('QuickOpen', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     vi.mocked(buildQuickOpenResults).mockClear()
+    graphApi.search.mockReset().mockResolvedValue([])
     activityApi.searchHistory.mockReset()
     activityApi.searchHistory.mockResolvedValue([])
     const files = useWorkspaceFilesStore()
@@ -646,6 +650,70 @@ describe('QuickOpen', () => {
     })
   })
 
+  it('searches Graph content only with g: and opens the selected entry', async () => {
+    vi.useFakeTimers()
+    try {
+      graphApi.search.mockResolvedValue([{ node: { id: 'design', title: 'Design', kind: 'note', scopeId: 'team:main' } }])
+      const wrapper = render()
+      const input = wrapper.get('[data-quick-open-input]')
+      await input.setValue('body term')
+      await vi.advanceTimersByTimeAsync(140)
+      expect(graphApi.search).not.toHaveBeenCalled()
+      await input.setValue('g:')
+      await vi.advanceTimersByTimeAsync(140)
+      expect(graphApi.search).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('Type to search Graph')
+      await input.setValue('G: body term')
+      await vi.advanceTimersByTimeAsync(140)
+      expect(graphApi.search).toHaveBeenCalledWith('body term', { limit: 100 })
+      expect(wrapper.get('[data-quick-open-type="graph"]').text()).toContain('Design')
+      expect(wrapper.get('[data-quick-open-type="graph"]').text()).toContain('Team')
+      expect(wrapper.find('[data-quick-open-type="file"]').exists()).toBe(false)
+      await input.trigger('keydown', { key: 'Enter' })
+      expect(wrapper.emitted('activate')[0][0]).toMatchObject({ type: 'graph', graphId: 'design' })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('rejects late Graph results after changing scope or closing', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolve
+      graphApi.search.mockImplementation(() => new Promise(done => { resolve = done }))
+      const wrapper = render()
+      const input = wrapper.get('[data-quick-open-input]')
+      await input.setValue('g: old')
+      await vi.advanceTimersByTimeAsync(140)
+      await input.setValue('f:')
+      resolve([{ node: { id: 'old', title: 'Old' } }])
+      await flushPromises()
+      await input.setValue('g: new')
+      expect(wrapper.find('[data-quick-open-type="graph"]').exists()).toBe(false)
+      await vi.advanceTimersByTimeAsync(140)
+      await wrapper.setProps({ open: false })
+      resolve([{ node: { id: 'new', title: 'New' } }])
+      await flushPromises()
+      await wrapper.setProps({ open: true })
+      expect(wrapper.find('[data-quick-open-type="graph"]').exists()).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('reports Graph failures and bounds large result sets', async () => {
+    vi.useFakeTimers()
+    try {
+      graphApi.search.mockRejectedValueOnce(new Error('Graph unavailable'))
+      const wrapper = render()
+      const input = wrapper.get('[data-quick-open-input]')
+      await input.setValue('g: design')
+      await vi.advanceTimersByTimeAsync(140)
+      expect(wrapper.get('[data-quick-open-error]').text()).toBe('Graph unavailable')
+      graphApi.search.mockResolvedValue(Array.from({ length: 100 }, (_, i) => ({ node: { id: String(i), title: `Note ${i}` } })))
+      await input.setValue('g: note')
+      await vi.advanceTimersByTimeAsync(140)
+      expect(wrapper.findAll('[data-quick-open-type="graph"]')).toHaveLength(100)
+      expect(wrapper.text()).toContain('100 matches shown')
+    } finally { vi.useRealTimers() }
+  })
+
   it('loads recent transcript context when browsing History without a search term', async () => {
     vi.useFakeTimers()
     try {
@@ -724,7 +792,7 @@ describe('QuickOpen', () => {
 
   it('keeps file-scope keyboard selection inside the rendered 100-result bound', async () => {
     const files = useWorkspaceFilesStore()
-    files.files = Array.from({ length: 101 }, (_, index) => ({
+    files.files = Array.from({ length: 100 }, (_, index) => ({
       path: `/w/${index}.md`,
       name: `${index}.md`,
       relativePath: `${index}.md`,

@@ -173,6 +173,7 @@
               </button>
             </template>
 
+            <div v-if="scope === 'graph' && graphHasMore" role="status" class="px-3 py-2 text-[11px] text-ink-3">100 matches shown. Refine your search to narrow the results.</div>
             <div
               v-if="searching"
               class="grid h-20 place-items-center text-[11px] text-ink-3"
@@ -201,7 +202,7 @@
             <span>↑↓ select</span>
             <span>↵ {{ selectedResult?.verb || 'open' }}</span>
             <span class="ml-auto">
-              {{ inNewActivityView ? 'Esc back · choose a source' : 'a: activities · p: projects · f: files · n: new · h: history' }}
+              {{ inNewActivityView ? 'Esc back · choose a source' : 'a: activities · p: projects · f: files · g: graph · n: new · h: history' }}
             </span>
           </div>
         </div>
@@ -258,6 +259,7 @@ import {
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { SHORTCUTS, matchShortcut, shortcutForEvent, shortcutKeys, shortcutSequenceKeys } from '../../shared/shortcuts.js'
+import { searchGraph } from '../../services/businessGraph.js'
 import { searchActivityHistory } from '../../services/activities.js'
 import IconProviderAnthropic from '../../shared/icons/IconProviderAnthropic.vue'
 import IconProviderOpenAI from '../../shared/icons/IconProviderOpenAI.vue'
@@ -310,6 +312,8 @@ const selectedIndex = ref(0)
 const searching = ref(false)
 const searchError = ref('')
 const historySnippets = ref(new Map())
+const graphEntries = ref([])
+const graphHasMore = ref(false)
 const view = ref('root')
 const inNewActivityView = computed(() => view.value === 'new-activity')
 const parsedQuery = computed(() => parseQuickOpenQuery(query.value))
@@ -324,16 +328,19 @@ const dialogTitle = computed(() => (
 const inputPlaceholder = computed(() => (
   inNewActivityView.value
     ? 'Find an activity source…'
+    : scope.value === 'graph' ? 'Search Graph titles and content…'
     : 'Go to activities, tools, projects, files, chats, or history…'
 ))
 const resultsLabel = computed(() => (
   inNewActivityView.value
     ? 'New activity sources'
     : scope.value === 'projects' ? 'Projects and project actions'
+      : scope.value === 'graph' ? 'Graph entries'
       : 'New activities, tools, projects, files, chats, and history'
 ))
 const emptyMessage = computed(() => {
   if (inNewActivityView.value) return 'No matching activity sources.'
+  if (scope.value === 'graph') return parsedQuery.value.term ? 'No matching Graph entries.' : 'Type to search Graph titles and content.'
   if (scope.value === 'projects') return 'No matching projects.'
   if (scope.value === 'history' && !parsedQuery.value.term) {
     return 'No closed sessions in this project. Type to search all projects.'
@@ -346,6 +353,7 @@ const scopeLabel = computed(() => ({
   activities: 'Activities',
   projects: 'Projects',
   files: 'Files',
+  graph: 'Graph',
   history: 'History',
   'new-activity': 'New activity',
   tools: 'Tools',
@@ -366,6 +374,7 @@ const results = computed(() => {
     currentTabKey: props.currentTabKey,
     history: props.history,
     files: files.visibleFiles,
+    graphEntries: graphEntries.value,
     historySnippets: historySnippets.value,
     newActivityView: inNewActivityView.value,
     tabPicker: props.initialView === 'tabs',
@@ -415,6 +424,10 @@ watch(
   },
 )
 
+watch(() => props.currentProjectPath, () => {
+  if (props.open && scope.value === 'graph') onInput()
+})
+
 function onInput() {
   cancelPendingSearch()
   selectedIndex.value = 0
@@ -430,7 +443,8 @@ function onInput() {
   const searchFiles = nextScope === 'all' || nextScope === 'files'
   const searchHistory = (Boolean(term) || nextScope === 'history')
     && (nextScope === 'all' || nextScope === 'history')
-  searching.value = Boolean(term) && (searchFiles || searchHistory)
+  const searchGraphEntries = nextScope === 'graph' && Boolean(term)
+  searching.value = Boolean(term) && (searchFiles || searchHistory || searchGraphEntries)
   searchError.value = ''
   queryTimer = setTimeout(async () => {
     queryTimer = null
@@ -455,6 +469,15 @@ function onInput() {
           })
           .catch((cause) => errors.push(errorMessage(cause))),
       )
+    }
+    if (searchGraphEntries) {
+      jobs.push(searchGraph(term, { limit: 100 })
+        .then(hits => {
+          if (generation !== searchGeneration) return
+          graphEntries.value = hits.slice(0, 100).map(hit => hit.node || hit)
+          graphHasMore.value = hits.length >= 100
+        })
+        .catch(cause => errors.push(errorMessage(cause))))
     }
     await Promise.all(jobs)
     if (generation !== searchGeneration) return
@@ -563,6 +586,7 @@ function prefixForGroup(group) {
     Tools: 't:',
     Projects: 'p:',
     Files: 'f:',
+    Graph: 'g:',
     Chats: 'c:',
     History: 'h:',
   }[group] || ''
@@ -651,6 +675,8 @@ function cancelPendingSearch() {
   clearTimeout(queryTimer)
   queryTimer = null
   searching.value = false
+  graphEntries.value = []
+  graphHasMore.value = false
 }
 
 function errorMessage(cause) {

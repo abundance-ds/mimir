@@ -1,3 +1,5 @@
+import { graphKindLabel } from './apps/business-graph/graphEntryMetadata.js'
+
 const DEFAULT_GROUP_LIMIT = 5
 const FILE_SCOPE_LIMIT = 100
 
@@ -5,6 +7,7 @@ const TYPED_SCOPES = {
   'a:': 'activities',
   'p:': 'projects',
   'f:': 'files',
+  'g:': 'graph',
   'h:': 'history',
   'n:': 'new-activity',
   't:': 'tools',
@@ -44,6 +47,7 @@ export function buildQuickOpenResults({
   currentTabKey = '',
   history = [],
   files = [],
+  graphEntries = [],
   historySnippets = new Map(),
   newActivityView = false,
   tabPicker = false,
@@ -57,6 +61,13 @@ export function buildQuickOpenResults({
   const normalized = term.toLocaleLowerCase()
   const searching = Boolean(normalized)
   const results = []
+
+  // Native Graph search owns content matching and relevance order.
+  if (scope === 'graph') return withOptionIds(graphEntries.map(node => result({
+    key: `graph:${node.id}`, type: 'graph', group: 'Graph',
+    title: node.title, graphId: node.id, icon: 'graph', verb: 'Open in Editor',
+    meta: joinMeta(graphKindLabel(node.kind), ({ team: 'Team', project: 'Workspace', private: 'Private' })[String(node.scopeId || '').split(':')[0]] || ''),
+  })))
 
   const openActivities = activities.filter(activity => activity.openTab)
   const openRows = [

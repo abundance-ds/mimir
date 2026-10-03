@@ -193,7 +193,13 @@ Cmd/Ctrl+P opens one grouped launcher near the window top.
   available in both entry points.
 - Typing searches New Activity, open tabs, unavailable Activities, Tools,
   Projects, Files, Chats, and History.
-- Scope prefixes are `a:`, `n:`, `t:`, `p:`, `f:`, `c:`, and `h:`.
+- Scope prefixes are `a:`, `n:`, `t:`, `p:`, `f:`, `g:`, `c:`, and `h:`.
+- Graph entry search runs only with `g:` and a non-empty term. It searches
+  titles and content across mounted scopes, independently of Graph table
+  filters. Results retain native relevance order and open through the normal
+  Graph Editor action. Up to 100 matches are shown; at that limit, a notice asks users
+  to refine the query. Empty `g:` prompts for a query. Default search
+  does not query Graph; already open Graph tabs remain in Open tabs.
 - Cmd/Ctrl+Shift+P opens Go to with `p: ` inserted and the cursor after the
   space. It shows all available recent projects, with the current project
   excluded. The previous project is selected first; Enter switches to it.

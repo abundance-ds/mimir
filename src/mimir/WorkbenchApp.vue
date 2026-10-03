@@ -1352,6 +1352,10 @@ async function activateQuickOpenResult(result) {
     }
     return
   }
+  if (result.type === 'graph') {
+    await openGraphNode({ id: result.graphId })
+    return
+  }
   if (result.type === 'file') {
     void openFileInEditor(result.path)
     return

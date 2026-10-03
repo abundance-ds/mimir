@@ -65,6 +65,14 @@ describe('quick open results', () => {
     expect(buildQuickOpenResults({ ...input, query: 'f:document' })[0]).toMatchObject({ type: 'document', documentId: 'draft', verb: 'Switch' })
   })
 
+  it('keeps Graph content matches in native order and only in Graph scope', () => {
+    const graphEntries = [{ id: 'b', title: 'Body match', kind: 'note' }, { id: 'a', title: 'Another', kind: 'issue' }]
+    expect(parseQuickOpenQuery(' G: term ')).toEqual({ scope: 'graph', term: 'term' })
+    expect(buildQuickOpenResults({ query: 'g:term', graphEntries, files }).map(row => row.graphId)).toEqual(['b', 'a'])
+    expect(buildQuickOpenResults({ query: 'Body', graphEntries }).some(row => row.type === 'graph')).toBe(false)
+    expect(buildQuickOpenResults({ query: 'Body', graphEntries, documents: [{ id: 'open', name: 'Body match' }] })[0].type).toBe('document')
+  })
+
   it('parses optional scopes without requiring them', () => {
     expect(parseQuickOpenQuery('review')).toEqual({ scope: 'all', term: 'review' })
     expect(parseQuickOpenQuery('a:release')).toEqual({ scope: 'activities', term: 'release' })
