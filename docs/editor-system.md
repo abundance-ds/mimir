@@ -61,42 +61,32 @@ width state and table rendering.
 
 ### Spelling and automatic text input
 
-**Settings → Editor → Spell check** controls Mimir-drawn spelling underlines and
-its correction menu in the main Editor, Scratchpad, Graph Markdown, Today, and
-Scribe Markdown. Right-click a word or press Shift+F10 at the text cursor to
-open the menu. Arrow keys select an action; Escape closes it. A chosen correction
-is one ordinary undoable edit. Moving the cursor does not request suggestions.
-
-Native WebKit spellchecking is disabled. Its spelling markers can open a native
-suggestion panel even when HTML autocorrect is off. Mimir instead asks macOS
-`NSSpellChecker` for spelling ranges through `spell_check`; it does not request
-correction, replacement, or popup UI. The existing `spell_suggest` command owns
-explicit menu suggestions. Native checking uses the user's preferred spelling
-languages, returns UTF-16 offsets, and runs asynchronously through AppKit.
-
-`src/editor/codemirror/spelling.js` owns the shared decoration extension. It
-checks visible prose in bounded chunks after a typing pause, excludes Markdown
-code, URLs, and hidden tags, caches repeated text, and ignores results after
-an edit, document switch, settings change, or unmount. Checks wait for input
-composition. Source-code documents and read-only views are not checked.
-
-`src/shared/textInputPolicy.js` disables native spellcheck, autocorrect,
-autocapitalization, browser autocomplete, and writing suggestions on all text
-controls. Workbench and standalone Editor install it before mounting; the
-local-app HTML bridge installs the same policy in each app document. It covers
-library-created fields and fields added or changed later. Native startup also
-disables automatic spelling correction, text replacement, and dash substitution
-for Mimir. The explicit Smart quotes choice above remains independent. macOS
-settings for other applications are unchanged.
-
-`harness/spelling.html` uses a fixed spelling provider for repeatable visual and
-menu checks. It cannot establish native spelling-service or popup behavior.
-Renderer tests cover Unicode offsets, exclusions, bounded requests, stale
-results, composition, undo, menu corrections, and dynamically created fields.
-Before release, check the rebuilt macOS app with Spell check enabled: misspelled
-words stay underlined, cursor movement shows no popup, the custom menu corrects
-the selected word, Undo restores it, and settings changes update every editor.
-Repeat after a tab switch, rapid typing, and with mixed-language prose.
+- Native WebKit spellcheck is disabled: its markers can open a native
+  suggestion panel even when HTML autocorrect is off. Mimir draws its own
+  underlines and correction menu.
+- `spell_check` asks macOS `NSSpellChecker` for ranges only (preferred
+  languages, UTF-16 offsets, asynchronous through AppKit). `spell_suggest`
+  serves explicit menu suggestions. Cursor movement never requests suggestions.
+- `src/editor/codemirror/spelling.js` owns the shared extension for the main
+  Editor, Scratchpad, Graph Markdown, Today, and Scribe Markdown.
+  **Settings → Editor → Spell check** controls it. It checks visible prose in
+  bounded chunks after a typing pause; excludes Markdown code, URLs, and hidden
+  tags; waits for input composition; and drops results after an edit, document
+  switch, settings change, or unmount. Source-code documents and read-only
+  views are not checked. A correction is one undoable edit.
+- `src/shared/textInputPolicy.js` disables native spellcheck, autocorrect,
+  autocapitalization, browser autocomplete, and writing suggestions on all text
+  controls, including library-created and later-added fields. Workbench and
+  standalone Editor install it before mount; the local-app HTML bridge installs
+  it in each app document.
+- Native startup disables automatic spelling correction, text replacement, and
+  dash substitution for Mimir only. Smart quotes stay a separate setting.
+- `harness/spelling.html` uses a fixed provider; it cannot prove native
+  spelling-service or popup behavior. Native check before release with Spell
+  check enabled: underlines persist, cursor movement shows no popup, the menu
+  corrects the selected word, Undo restores it, and settings changes reach
+  every editor. Repeat after a tab switch, rapid typing, and mixed-language
+  prose.
 
 ### Document model
 

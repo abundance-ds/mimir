@@ -37,49 +37,37 @@ required; see [Editor verification](editor-system.md#verification).
 
 ## Discussions in a review
 
-Unified, Split, Original, and Result show prose without stored comment tags.
-A comment button beside a passage opens the discussion in the Comments area
-below the diff. Select text and choose **Add comment**, or use Cmd/Ctrl+Shift+M.
-Both split panes share one discussion list. **Show resolved** includes resolved
-threads. Git and Scratchpad history use read-only discussions.
-
-Proposed discussion additions, removals, moves, and other changes have separate
-Accept and Reject buttons. They count as pending changes even when the prose
-is identical. Accepting one text change does not decide a comment change.
-Accept all and Reject all decide the remaining text and comment changes.
-
-New comments, replies, and resolve actions are kept when review decisions are
-undone or redone. Undo inside a reply input edits that input. Drafts, the open
-discussion, and decisions survive view and tab changes. Automatic completion
-waits for a nonempty draft to be posted or cleared. Later proposals wait behind
-an unfinished review of the same file.
-
-If an anchor is removed, rejected, or cannot be mapped with confidence, the
-discussion keeps its original quotation and a visible label. It is not attached
-to a guessed occurrence. On completion, an unattached thread uses an empty
-wrapper with `detached` and `quote` attributes. Its `padding="2"` separator keeps
-it outside the last Markdown block; the parser removes only this owned
-separator from clean prose. The normal Editor keeps and displays these threads
-after save and reopen. Text-only edits retain existing tag spelling.
-
-`reviewSession.js` and `reviewComments.js` hold prose and discussions separately.
-`reviewPersistence.js` serializes checked saves to `~/.mimir/document-reviews/`,
-with one record per file path or draft. Records include decisions, discussions,
-and input drafts. Rename moves the record. Failed saves keep local changes and
-show **Retry save**. Conflicting writes stop; a new review cannot replace an
-unfinished saved review.
-
-Completion saves the document draft for restart recovery before it closes the
-review record. Normal Save, autosave, and Don't Save rules still apply. Posting
-discussions and applying prose produce separate document Undo steps. Completed
-records do not restore discarded text. Direct native acceptance stops when a
-saved review owns the file; finish that review in Editor.
-
-Tests cover the real Editor across workspaces, both diff layouts, comment-only
-changes, multiline anchors, replies with links, draft input, Undo, checked
-writes, failed saves, and record reload. Native replacement tests cover comment
-boundaries and Unicode offsets. Visual macOS and actual restart checks remain
-open; no browser or native app surface was available for this implementation.
+- Unified, Split, Original, and Result show prose without stored comment tags.
+  Both split panes share one discussion list. Git and Scratchpad history use
+  read-only discussions.
+- Proposed discussion additions, removals, moves, and edits have their own
+  Accept and Reject. They count as pending changes even when the prose is
+  identical. A text decision does not decide a comment change; Accept all and
+  Reject all decide both.
+- New comments, replies, and resolve actions survive Undo and Redo of review
+  decisions. Undo inside a reply input edits that input. Drafts, the open
+  discussion, and decisions survive view and tab changes.
+- Automatic completion waits until a nonempty draft is posted or cleared. Later
+  proposals wait behind an unfinished review of the same file.
+- An anchor that is removed, rejected, or not mappable with confidence is never
+  attached to a guessed occurrence. The thread keeps its quotation and a
+  visible label. On completion it becomes an empty wrapper with `detached` and
+  `quote` attributes. Its `padding="2"` separator keeps it outside the last
+  Markdown block; the parser removes only this owned separator from clean
+  prose. Text-only edits retain existing tag spelling.
+- `reviewSession.js` and `reviewComments.js` hold prose and discussions
+  separately. `reviewPersistence.js` serializes revision-checked saves
+  (`document_review_save`) to `~/.mimir/document-reviews/`: one record per file
+  path or draft, with decisions, discussions, and input drafts. A rename moves
+  the record and leaves a completed tombstone at the old key. A failed save
+  keeps local changes and offers **Retry save**. A conflicting write stops; a
+  new review cannot replace an unfinished saved review.
+- Completion saves the document draft for restart recovery before it closes
+  the review record. Normal Save, autosave, and Don't Save rules apply. Posting
+  discussions and applying prose are separate document Undo steps. Completed
+  records do not restore discarded text.
+- Direct native acceptance stops when a saved review owns the file
+  (`has_pending_review`); finish that review in the Editor.
 
 ## Table discussions
 

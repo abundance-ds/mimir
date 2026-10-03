@@ -10,6 +10,10 @@ task scope.
   menu assertions read a Vue `v-if` comment node through `firstChild`. These five
   failures remain outside the comment review change.
 
+- Review discussions: visual macOS checks and a real restart check of saved
+  review records remain open. See
+  [Discussions in a review](comments.md#discussions-in-a-review).
+
 - Spelling: native macOS verification of Mimir-drawn underlines, the custom menu,
   and absence of native popups remains open. The development sandbox denies
   access to the Apple spelling service (`NSCocoaErrorDomain` 4099, sandbox
@@ -108,11 +112,6 @@ task scope.
 - Editor comment navigation is available only while the formatting toolbar is
   enabled. Add reusable keyboard or menu commands before treating comment
   navigation as independent of toolbar visibility.
-
-- Unified-diff deletion widgets render original text without comment
-  concealment. When a proposal deletes commented text, the struck-through
-  block shows the raw pseudo-XML tags. Editor panes and both split panes
-  conceal correctly; only the library-rendered deletion widget is affected.
 
 - Proposal restart: `create` proposals survive in `proposals.json` but have
   no open tab after restart. `checkProposalsForFile` in
