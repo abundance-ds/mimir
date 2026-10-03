@@ -65,10 +65,16 @@ describe('quick open results', () => {
     expect(buildQuickOpenResults({ ...input, query: 'f:document' })[0]).toMatchObject({ type: 'document', documentId: 'draft', verb: 'Switch' })
   })
 
-  it('keeps Graph content matches in native order and only in Graph scope', () => {
-    const graphEntries = [{ id: 'b', title: 'Body match', kind: 'note' }, { id: 'a', title: 'Another', kind: 'issue' }]
+  it('keeps all Graph entry kinds in native order and only in Graph scope', () => {
+    const graphEntries = [
+      { id: 'b', title: 'Body match', kind: 'note' },
+      { id: 'a', title: 'Another', kind: 'issue' },
+      { id: 'person', title: 'Alex', kind: 'person' },
+      { id: 'project', title: 'Atlas', kind: 'project' },
+      { id: 'company', title: 'Example', kind: 'company' },
+    ]
     expect(parseQuickOpenQuery(' G: term ')).toEqual({ scope: 'graph', term: 'term' })
-    expect(buildQuickOpenResults({ query: 'g:term', graphEntries, files }).map(row => row.graphId)).toEqual(['b', 'a'])
+    expect(buildQuickOpenResults({ query: 'g:term', graphEntries, files }).map(row => row.graphId)).toEqual(['b', 'a', 'person', 'project', 'company'])
     expect(buildQuickOpenResults({ query: 'Body', graphEntries }).some(row => row.type === 'graph')).toBe(false)
     expect(buildQuickOpenResults({ query: 'Body', graphEntries, documents: [{ id: 'open', name: 'Body match' }] })[0].type).toBe('document')
   })
