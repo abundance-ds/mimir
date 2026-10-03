@@ -1399,6 +1399,11 @@ function onFormat(action) {
 }
 
 function onEditCommand(action) {
+  const input = document.activeElement
+  if (input?.matches?.('input, textarea') || (input?.isContentEditable && !input.closest('.cm-content'))) {
+    document.execCommand(action === 'select-all' ? 'selectAll' : action)
+    return
+  }
   if (scratchpadHistoryVisible.value) return
   if (visibleDiffActive.value && (action === 'undo' || action === 'redo')) {
     if (action === 'undo') diffStore.undoReview()
@@ -1659,6 +1664,7 @@ const editorCommands = useEditorCommandApi({
     if (file === currentFile.value) scheduleContentSync()
     autoSave.schedule(file)
   },
+  getReviewState: () => visibleDiffActive.value ? diffViewRef.value?.getReviewState?.() || null : null,
   navigation: editorNavigation,
 })
 const {

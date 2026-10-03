@@ -84,13 +84,13 @@ function navigateFile(direction) {
 <style scoped>
 .diff-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-height: 32px; padding: 2px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-rule-light); background: var(--color-chrome-high); font: 11px var(--font-sans); }
 .diff-views, .diff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 27px; }
-.diff-actions { margin-left: auto; gap: 4px; }
+.diff-actions { margin-left: auto; gap: 2px; }
 .view-switch { display: flex; padding: 2px; border-radius: 5px; background: var(--color-chrome); }
-.view-switch button { height: 20px; padding: 0 7px; border-radius: 3px; color: var(--color-ink-3); font-size: 10px; white-space: nowrap; }
+.view-switch button { height: 20px; padding: 0 6px; border-radius: 3px; color: var(--color-ink-3); font-size: 10px; white-space: nowrap; }
 .view-switch button:hover { color: var(--color-ink); }
 .view-switch button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-ink); box-shadow: 0 0 0 1px var(--color-rule-light); }
 .review-navigation, .review-history { display: flex; align-items: center; }
-.review-history { padding-inline: 4px; border-inline: 1px solid var(--color-rule-light); }
+.review-history { border-inline: 1px solid var(--color-rule-light); }
 .review-status { color: var(--color-ink-3); padding: 0 4px; white-space: nowrap; }
 .history-label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 .review-count { min-width: 25px; color: var(--color-ink-3); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }

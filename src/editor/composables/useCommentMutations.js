@@ -93,7 +93,7 @@ export function useCommentMutations(editorSurfaceRef) {
     const view = getView()
     if (!view) return fail('No active editor view.')
     const doc = view.state.doc.toString()
-    const re = new RegExp(`(<reply\\s[^/]*?id="${escapeRegExp(replyId)}"[^/]*?)\\stext="[^"]*"`)
+    const re = new RegExp(`(<reply\\s[^>]*?id="${escapeRegExp(replyId)}"[^>]*?)\\stext="[^"]*"`)
     const m = re.exec(doc)
     if (!m) return fail('Reply not found.')
     const replaceFrom = m.index + m[1].length
@@ -106,7 +106,7 @@ export function useCommentMutations(editorSurfaceRef) {
     const view = getView()
     if (!view) return fail('No active editor view.')
     const doc = view.state.doc.toString()
-    const re = new RegExp(`<reply\\s[^/]*?id="${escapeRegExp(replyId)}"[^/]*?/>`)
+    const re = new RegExp(`<reply\\s[^>]*?id="${escapeRegExp(replyId)}"[^>]*?/>`)
     const m = re.exec(doc)
     if (!m) return fail('Reply not found.')
     view.dispatch({ changes: { from: m.index, to: m.index + m[0].length, insert: '' }, annotations: commentMutation.of(true) })

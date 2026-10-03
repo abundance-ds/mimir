@@ -31,6 +31,7 @@ export function useEditorCommandApi({
   openSettings,
   commentPrompt,
   onDocumentChanged,
+  getReviewState = () => null,
   navigation = createNavigationGuard(),
 }) {
   const documents = useDocumentTools({ fileManager, currentFile, onChanged: onDocumentChanged })
@@ -137,14 +138,16 @@ export function useEditorCommandApi({
     const active = mimirActive({ includeContent })
     const tabs = mimirTabs()
     const selection = mimirSelection()
-    const view = currentFile.value?.kind === 'graph' ? null : editorSurfaceRef.value?.getView?.()
+    const review = getReviewState()
+    const view = review || currentFile.value?.kind === 'graph' ? null : editorSurfaceRef.value?.getView?.()
     const comments = view ? getCommentsFromState(view.state) : []
     const visible = view?.visibleRanges?.[0]
     return {
       active,
       tabs,
       selection,
-      visibleRange: visible
+      ...(review ? { view: { ...review, content: includeContent ? review.content : undefined } } : {}),
+      visibleRange: review ? review.visibleRange : visible
         ? {
             from: visible.from,
             to: visible.to,
@@ -162,6 +165,11 @@ export function useEditorCommandApi({
 
   function mimirSelection() {
     if (currentFile.value?.kind === 'graph') return null
+    const review = getReviewState()
+    if (review) {
+      const selection = review.selection
+      return selection ? { from: selection.from, to: selection.to, text: selection.text, contentSource: 'review', side: review.side } : null
+    }
     return editorSurfaceRef.value?.getSelection?.() || null
   }
 

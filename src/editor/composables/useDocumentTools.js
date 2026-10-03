@@ -4,6 +4,8 @@ import { graphSource, saveGraphSource } from '../../services/businessGraph.js'
 import { resolveScratchpad, saveScratchpad } from '../../services/scratchpad.js'
 import { documentComments, mutateComment } from '../../services/comments/mutations.js'
 import { cloneGraphDocument, isGraphSourceCandidate } from '../../stores/graphDocuments.js'
+import { reviewComments, reviewContent, mutateReviewComment, syncReviewComments } from '../reviewComments.js'
+import { loadReview, persistReview, reviewKey } from '../reviewPersistence.js'
 
 function conflict() {
   return Object.assign(new Error('Document conflict: the document changed. Read it again.'), { code: 'handler', data: { reason: 'document_conflict' } })
@@ -14,7 +16,7 @@ function checkSignal(signal) {
 }
 
 async function revision(snapshot) {
-  const bytes = new TextEncoder().encode(JSON.stringify([snapshot.documentId, snapshot.path, snapshot.content, snapshot.graphDraft]))
+  const bytes = new TextEncoder().encode(JSON.stringify([snapshot.documentId, snapshot.path, snapshot.content, snapshot.graphDraft, snapshot.reviewContent]))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -27,6 +29,8 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
 
   function captureFile(file) {
     if (!['text', 'graph'].includes(file.kind || 'text')) throw new Error('This document is not text.')
+    const review = file.reviewSession && !file.reviewSession.completed && file.reviewSession.meta?.type !== 'history' ? file.reviewSession : null
+    if (review) syncReviewComments(review, file.content || '')
     return {
       file, documentId: `document:${file.id}`, path: file.path || null,
       name: file.path?.split('/').pop() || 'Untitled', kind: file.kind || 'text',
@@ -34,6 +38,7 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
       contentSource: file.kind === 'graph' ? 'saved' : 'buffer',
       ...(file.kind === 'graph' ? { graphDraft: cloneGraphDocument(file.graph?.draft || {}) } : {}),
       graphVersion: file.graph?.version,
+      ...(review ? { review, reviewContent: reviewContent(review), reviewRevision: review.revision, commentRevision: review.commentRevision } : {}),
     }
   }
 
@@ -41,7 +46,15 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
     checkSignal(signal)
     const file = target === '@editor' ? currentFile.value
       : files().find(file => file.path === target || `document:${file.id}` === target)
-    if (file) return captureFile(file)
+    if (file) {
+      if (!file.reviewSession && file.kind !== 'graph') {
+        const saved = await loadReview(reviewKey(file))
+        checkSignal(signal)
+        if (!files().includes(file)) throw conflict()
+        if (saved && !saved.completed) file.reviewSession = saved
+      }
+      return captureFile(file)
+    }
     if (target === '@editor' || target.startsWith('document:')) throw new Error('The document is no longer open.')
     const before = openSet()
     const disk = await invoke('document_file_read', { path: target, openPaths: files().map(file => file.path).filter(Boolean) })
@@ -54,15 +67,21 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
     const matches = files().filter(file => file.path === disk.path || disk.openPaths.includes(file.path))
     if (matches.length > 1) throw new Error('This file has more than one open document. Use its document ID.')
     if (matches.length) return captureFile(matches[0])
-    return { documentId: disk.path, path: disk.path, name: disk.path.split('/').pop(), kind: 'text', content: disk.content, dirty: false, contentSource: 'saved', openSet: before }
+    const saved = await loadReview(disk.path)
+    const review = saved && !saved.completed ? saved : null
+    if (review) syncReviewComments(review, disk.content)
+    return { documentId: disk.path, path: disk.path, name: disk.path.split('/').pop(), kind: 'text', content: disk.content, dirty: false, contentSource: 'saved', openSet: before,
+      ...(review ? { review, reviewContent: reviewContent(review), reviewRevision: review.revision, commentRevision: review.commentRevision } : {}) }
   }
 
   async function describe(snapshot, includeContent = false) {
     return {
       documentId: snapshot.documentId, path: snapshot.path, name: snapshot.name,
       kind: snapshot.kind, revision: await revision(snapshot), dirty: snapshot.dirty,
-      saved: !snapshot.dirty, contentSource: snapshot.contentSource,
-      ...(includeContent ? { content: snapshot.content } : {}),
+      saved: snapshot.review ? !snapshot.review.saveError : !snapshot.dirty, contentSource: snapshot.review ? 'review' : snapshot.contentSource,
+      ...(includeContent ? { content: snapshot.reviewContent ?? snapshot.content } : {}),
+      ...(snapshot.review ? { review: { id: snapshot.review.id, pendingChanges: snapshot.review.pending,
+        ...(includeContent ? { original: snapshot.review.original } : {}) } } : {}),
       ...(snapshot.graphDraft ? { graphDraft: snapshot.graphDraft } : {}),
     }
   }
@@ -76,12 +95,17 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
 
   async function comments(target, signal) {
     const snapshot = await capture(target, signal)
-    const result = { ...await describe(snapshot), comments: documentComments(snapshot.content) }
+    const result = { ...await describe(snapshot), comments: snapshot.review ? reviewComments(snapshot.review).map(comment => ({
+      ...comment, anchorText: comment.anchorText || comment.quote, attachment: comment.detached || 'attached',
+      replies: comment.replies.map(reply => ({ ...reply, timestamp: reply.ts || null })),
+    })) : documentComments(snapshot.content) }
     checkSignal(signal)
     return result
   }
 
   function assertCurrent(snapshot) {
+    if (snapshot.review && (snapshot.review.completed || snapshot.review.revision !== snapshot.reviewRevision
+      || snapshot.review.commentRevision !== snapshot.commentRevision)) throw conflict()
     const file = snapshot.file
     if (file) {
       if (!files().includes(file) || file.path !== snapshot.path || file.content !== snapshot.content
@@ -92,8 +116,18 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
   async function mutate(action, input, signal) {
     const snapshot = await capture(input.target || '@editor', signal)
     if (snapshot.kind === 'graph') throw new Error('Open Source before editing the Markdown text. The Graph draft is unchanged.')
-    if (snapshot.file?.reviewPending || snapshot.file?.reviews?.length) throw new Error('Finish the document review before changing its comments.')
+    if (snapshot.file?.reviewPending || (snapshot.file?.reviews?.length && !snapshot.review)) throw new Error('Finish the document review before changing its comments.')
     if (input.expected_revision && input.expected_revision !== await revision(snapshot)) throw conflict()
+    if (snapshot.review) {
+      checkSignal(signal)
+      assertCurrent(snapshot)
+      const result = mutateReviewComment(snapshot.review, action, input)
+      let saved = true
+      try { await persistReview(snapshot.review) } catch { saved = false }
+      const next = { ...snapshot, reviewContent: reviewContent(snapshot.review) }
+      return { ...result, ...await describe(next), saved,
+        ...(saved ? {} : { saveError: snapshot.review.saveError }) }
+    }
     const change = mutateComment(snapshot.content, action, input)
     checkSignal(signal)
     if (snapshot.file) {

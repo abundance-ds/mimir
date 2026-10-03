@@ -12,49 +12,58 @@ describe('DiffBar', () => {
     diff = useDiffStore()
     diff.activate({ original: 'old', modified: 'new' })
   })
-  function mountBar() { return mount(DiffBar, { attachTo: document.body, global: { stubs: { Teleport: true } } }) }
-  async function openActions(wrapper) { await wrapper.get('.review-menu-trigger').trigger('click') }
+  function mountBar() {
+    return mount(DiffBar, { attachTo: document.body, props: {
+      onAcceptAll: () => diff.decideRemainingChanges('accept'),
+      onRejectAll: () => diff.decideRemainingChanges('reject'),
+    } })
+  }
+  const button = (wrapper, label) => wrapper.findAll('button').find(button => button.text() === label)
 
-  it('uses one view selector and names the pending work', () => {
+  it('shows view switches and direct actions with short labels', () => {
     const w = mountBar()
-    expect(w.get('[role=combobox]').text()).toBe('Unified')
-    expect(w.text()).toContain('1 change left')
-    expect(w.get('.review-finish').attributes()).toHaveProperty('disabled')
+    expect(w.get('[aria-label="Review view"]').text()).toBe('OriginalDiffResult')
+    expect(w.get('[aria-label="Diff layout"]').text()).toBe('UnifiedSplit')
+    expect(w.get('[role=status]').attributes('aria-label')).toBe('1 change left')
+    expect(button(w, 'Accept all')).toBeDefined()
+    expect(button(w, 'Reject all')).toBeDefined()
+    expect(w.find('[role=combobox]').exists()).toBe(false)
+    expect(w.text()).not.toContain('Finish review')
   })
 
-  it('selects Split, Original, and Result through the same view menu', async () => {
+  it('switches views in one click and retains the selected layout', async () => {
     const w = mountBar()
-    for (const value of ['split', 'original', 'result', 'unified']) {
-      await w.get('[role=combobox]').trigger('click')
-      await w.get(`[data-graph-select-option=${value}]`).trigger('click')
-      expect(diff.viewMode).toBe(['split', 'unified'].includes(value) ? 'diff' : value)
-      expect(w.get('[role=combobox]').attributes('aria-expanded')).toBe('false')
+    await button(w, 'Split').trigger('click')
+    expect(diff.layout).toBe('split')
+    expect(button(w, 'Split').attributes('aria-pressed')).toBe('true')
+    for (const label of ['Original', 'Result', 'Diff']) {
+      await button(w, label).trigger('click')
+      expect(diff.viewMode).toBe(label.toLowerCase())
+      expect(button(w, label).attributes('aria-pressed')).toBe('true')
     }
+    expect(button(w, 'Split').attributes('aria-pressed')).toBe('true')
+    await button(w, 'Unified').trigger('click')
     expect(diff.layout).toBe('unified')
   })
 
-  it.each(['accept', 'reject'])('stages %s remaining and requires Finish review', async action => {
+  it.each(['accept', 'reject'])('sends %s all directly to the review owner', async action => {
     const w = mountBar()
-    await openActions(w)
-    const label = action === 'accept' ? 'Accept' : 'Reject'
-    await w.findAll('[role=menuitem]').find(button => button.text().startsWith(label)).trigger('click')
-    expect(diff.active).toBe(true)
+    await button(w, action === 'accept' ? 'Accept all' : 'Reject all').trigger('click')
+    expect(w.emitted(`${action}-all`)).toHaveLength(1)
     expect(diff.currentReview.result).toBe(action === 'accept' ? 'new' : 'old')
-    expect(w.text()).toContain('Review complete')
-    expect(w.emitted('finish')).toBeUndefined()
-    await w.get('.review-finish').trigger('click')
-    expect(w.emitted('finish')).toHaveLength(1)
+    expect(diff.canFinish).toBe(true)
+    expect(w.text()).not.toContain('Finish review')
   })
 
-  it('offers Undo and Redo after the final decision', async () => {
+  it('shows Undo and Redo directly while decisions remain', async () => {
+    const middle = Array.from({ length: 12 }, (_, i) => `same ${i}`).join('\n')
+    diff.activate({ original: `old\n${middle}\nold`, modified: `new\n${middle}\nnew` })
+    diff.recordReviewChange(diff.currentReview, `new\n${middle}\nold`, diff.currentReview.result, 'accept')
     const w = mountBar()
-    diff.decideRemainingChanges('accept')
-    await w.vm.$nextTick()
-    await w.get('[title="Undo review decision"]').trigger('click')
+    await w.get('[aria-label="Undo review decision"]').trigger('click')
+    expect(diff.pendingChanges).toBe(2)
+    await w.get('[aria-label="Redo review decision"]').trigger('click')
     expect(diff.pendingChanges).toBe(1)
-    await openActions(w)
-    await w.findAll('[role=menuitem]').find(button => button.text() === 'Redo review decision').trigger('click')
-    expect(diff.canFinish).toBe(true)
   })
 
   it('navigates pending changes and returns from Result to the diff', async () => {
@@ -65,52 +74,46 @@ describe('DiffBar', () => {
     expect(w.emitted('navigate-chunk')).toEqual([[0]])
   })
 
-  it('names batch scope and applies the menu action to every pending file', async () => {
+  it('applies the direct bulk action to every pending file in the overview', async () => {
     diff.activateBatch({ fileList: [
       { path: '/a.md', original: 'a', modified: 'A' },
       { path: '/b.md', original: 'b', modified: 'B' },
     ] })
     const w = mountBar()
-    await openActions(w)
-    expect(w.get('[role=menu]').attributes('aria-label')).toBe('All files')
-    const accept = w.findAll('[role=menuitem]')[0]
-    expect(accept.text()).toBe('Accept remaining changes in all files')
-    await accept.trigger('click')
+    await w.get('[aria-label="Previous pending file"]').trigger('click')
+    expect(w.emitted('navigate-file')).toEqual([['/b.md']])
+    await w.get('[aria-label="Accept remaining changes in all files"]').trigger('click')
     expect(diff.canFinish).toBe(true)
-    expect(diff.active).toBe(true)
   })
 
-  it('limits the focused-file menu to that file', async () => {
+  it('limits a focused-file action to that file', async () => {
     diff.activateBatch({ fileList: [
       { path: '/a.md', original: 'a', modified: 'A' },
       { path: '/b.md', original: 'b', modified: 'B' },
     ] })
     diff.focusBatchFile('/a.md')
     const w = mountBar()
-    await openActions(w)
-    await w.findAll('[role=menuitem]')[0].trigger('click')
+    await w.get('[aria-label="Accept remaining changes in this file"]').trigger('click')
     expect(diff.files.map(file => file.review.pending)).toEqual([0, 1])
     expect(diff.canFinish).toBe(false)
   })
 
-  it('supports menu keyboard navigation and Escape without a decision', async () => {
+  it('offers Retry only after a completion error', async () => {
+    diff.decideRemainingChanges('accept')
+    diff.setReviewError('Could not apply this file.')
     const w = mountBar()
-    await w.get('.review-menu-trigger').trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(w.findAll('[role=menuitem]')[0].element)
-    await w.get('[role=menu]').trigger('keydown', { key: 'End' })
-    expect(document.activeElement).toBe(w.findAll('[role=menuitem]')[1].element)
-    await w.get('[role=menu]').trigger('keydown', { key: 'Escape' })
-    expect(w.find('[role=menu]').exists()).toBe(false)
-    expect(diff.pendingChanges).toBe(1)
+    expect(w.get('[role=alert]').text()).toBe('Could not apply this file.')
+    await button(w, 'Retry').trigger('click')
+    expect(w.emitted('finish')).toHaveLength(1)
   })
 
   it('keeps Restore and Cancel for history', async () => {
     diff.activate({ original: 'old', modified: 'new', review: { type: 'history', hash: 'abc1234' } })
     const w = mountBar()
     expect(w.text()).toContain('abc1234')
-    expect(w.find('.review-menu-trigger').exists()).toBe(false)
-    await w.get('.review-finish').trigger('click')
-    await w.get('.review-text').trigger('click')
+    expect(w.find('.review-actions').exists()).toBe(false)
+    await button(w, 'Restore').trigger('click')
+    await button(w, 'Cancel').trigger('click')
     expect(w.emitted('accept-all')).toHaveLength(1)
     expect(w.emitted('reject-all')).toHaveLength(1)
   })

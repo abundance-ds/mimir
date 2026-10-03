@@ -1,7 +1,11 @@
 import { singleDiffTargetsFile } from '../workspaceDiffProjection.js'
+import { nextTick } from 'vue'
 import { graphSource, saveGraphSource } from '../../services/businessGraph.js'
 import { graphDocumentState, isGraphSourceCandidate } from '../../stores/graphDocuments.js'
 import { reviewStatus } from '../reviewSession.js'
+import { reviewContent, syncReviewComments } from '../reviewComments.js'
+import { stripCommentTags } from '../../services/comments/parser.js'
+import { persistReview, reviewKey, scheduleReviewSave } from '../reviewPersistence.js'
 
 const SOURCE_REQUIRED = 'Open Source before applying a Markdown review to this Graph entry.'
 
@@ -104,9 +108,14 @@ export function useDiffReview({
     let activeEditorChanged = false
 
     for (const file of allFiles) {
-      if (file.status !== 'accepted' || file.applied) continue
+      if (file.status === 'pending' || file.applied) continue
+      if (file.status === 'rejected' && file.modified === file.original) continue
       try {
         const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
+        if (openFile) {
+          syncReviewComments(file.review, openFile.content)
+          file.modified = reviewContent(file.review)
+        }
         const graph = openFile?.graph ? null : await graphSource(file.path)
         if (file.graphSourceRevision != null && !openFile?.graph && !graph) {
           throw new Error('This Graph source is unavailable. Reopen the proposal after its scope is mounted.')
@@ -127,7 +136,7 @@ export function useDiffReview({
           if (!fileManager.openFiles.includes(graphFile) || graphFile.path !== file.path || graphFile.kind === 'graph') {
             throw new Error('This Graph tab changed. Open the proposal again.')
           }
-          if (graphFile.content !== file.original && graphFile.content !== file.modified) {
+          if (stripCommentTags(graphFile.content) !== stripCommentTags(file.original) && graphFile.content !== file.modified) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
           if (graphFile.content !== file.modified) {
@@ -142,18 +151,22 @@ export function useDiffReview({
         }
         const active = currentFile.value?.path === file.path
         if (active) {
-          if (currentFile.value.content !== file.original) {
+          if (stripCommentTags(currentFile.value.content) !== stripCommentTags(file.original) && currentFile.value.content !== file.modified) {
             throw new Error('The active document changed after this review was created. Reopen the proposal against the latest text.')
           }
-          fileManager.updateContent(file.modified, currentFile.value)
-          activeEditorChanged = true
+          if (currentFile.value.content !== file.modified) {
+            fileManager.updateContent(file.modified, currentFile.value)
+            activeEditorChanged = true
+          }
         } else {
           const currentContent = graph?.content ?? (openFile
             ? openFile.content
             : (await invoke('read_text_file', { path: file.path })).content)
-          if (currentContent !== file.original && currentContent !== file.modified) {
+          if (stripCommentTags(currentContent) !== stripCommentTags(file.original) && currentContent !== file.modified) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
+          syncReviewComments(file.review, currentContent)
+          file.modified = reviewContent(file.review)
           if (openFile) {
             if (currentContent !== file.modified) fileManager.updateContent(file.modified, openFile)
             if (openFile.dirty) await fileManager.save(openFile)
@@ -179,7 +192,7 @@ export function useDiffReview({
         file.error = null
         continue
       }
-      const status = file.status === 'accepted' ? 'applied' : 'rejected'
+      const status = reviewStatus(file.review) === 'accepted' ? 'applied' : 'rejected'
       try {
         await invoke('proposal_respond', {
           result: {
@@ -190,6 +203,10 @@ export function useDiffReview({
           },
         })
         file.lifecycleResolved = true
+        file.review.completed = true
+        await persistReview(file.review)
+        const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
+        if (openFile?.reviewSession === file.review) openFile.reviewSession = null
         file.error = null
       } catch (error) {
         file.status = 'pending'
@@ -257,7 +274,7 @@ export function useDiffReview({
       try {
         for (const file of rows) {
           if (file.lifecycleResolved) continue
-          file.modified = file.review.result
+          file.modified = reviewContent(file.review)
           file.status = file.applied ? 'accepted' : reviewStatus(file.review)
         }
         const result = await finishBatchReview()
@@ -276,8 +293,23 @@ export function useDiffReview({
     const targetResult = requireActiveSingleDiffTarget()
     if (!targetResult.ok) return targetResult
     const session = diffStore.currentReview
+    syncReviewComments(session, targetResult.target.content)
+    try { await persistReview(session) } catch (error) {
+      diffStore.setReviewError(error?.message || String(error))
+      return { ok: false, error: diffStore.reviewError }
+    }
+    // Posting a discussion and accepting prose are separate Undo steps.
+    // Keep the discussion on its original quotation before applying the text.
+    if (stripCommentTags(targetResult.target.content) === session.references?.original) {
+      const withDiscussions = reviewContent(session, session.references.original)
+      if (withDiscussions !== targetResult.target.content && session.comments?.some(record => record.discussion || Object.keys(record.live).length)) {
+        fileManager.updateContent(withDiscussions, targetResult.target)
+        scheduleContentSync()
+        await nextTick()
+      }
+    }
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
-    return completeReview(targetResult.target, reviewStatus(session) === 'rejected' ? 'rejected' : 'applied', session.result)
+    return completeReview(targetResult.target, reviewStatus(session) === 'rejected' ? 'rejected' : 'applied', reviewContent(session))
   }
 
   function completeReview(target, status, content) {
@@ -290,7 +322,7 @@ export function useDiffReview({
     }
     if (!decision) {
       const original = diffStore.originalContent
-      if (status === 'applied' && target.content !== original && target.content !== content) {
+      if (status === 'applied' && stripCommentTags(target.content) !== stripCommentTags(original) && target.content !== content) {
         const error = 'The document changed after this review was created. Reopen the proposal against the latest text.'
         diffStore.setReviewError(error)
         return { ok: false, error }
@@ -307,7 +339,7 @@ export function useDiffReview({
       target.reviewPending = true
       // Commit once, before any asynchronous report. A receipt can never write
       // text back into this document. Reject only dismisses the proposal.
-      if (status === 'applied' && target.content !== content) {
+      if ((status === 'applied' || stripCommentTags(target.content) === stripCommentTags(original)) && target.content !== content) {
         fileManager.updateContent(content, target)
         if (currentFile.value === target) scheduleContentSync()
       }
@@ -324,6 +356,14 @@ export function useDiffReview({
         return lifecycle
       }
       const remaining = (target.reviews || []).filter(review => !decision.ids.includes(review.proposalId))
+      if (decision.reviewSession) {
+        decision.reviewSession.completed = true
+        try { await persistReview(decision.reviewSession) } catch (error) {
+          decision.error = error?.message || String(error)
+          if (diffStore.decision === decision) diffStore.setReviewError(decision.error)
+          return { ok: false, error: decision.error }
+        }
+      }
       if (remaining.length) fileManager.setFileReviews(target, remaining)
       else fileManager.clearFileReviews(target)
       target.reviewDecision = null
@@ -358,9 +398,11 @@ export function useDiffReview({
       fileId: file?.id ?? null,
       review: opts?.review || null,
     })
-    if (file) {
+    if (file && opts?.review?.type !== 'history') {
       file.reviewSession = diffStore.reviewSession
+      file.reviewSession.key = reviewKey(file)
       file.reviewSession.proposalKey = proposalIdsFromReviewMeta(opts?.review).slice().sort().join('\n')
+      if (opts?.review?.type !== 'history') scheduleReviewSave(file.reviewSession)
     }
   }
 
@@ -373,6 +415,10 @@ export function useDiffReview({
       return { ...file, graphSourceRevision: graph?.sourceRevision ?? null }
     }))
     diffStore.activateBatch({ fileList: rows, sessionId: meta?.sessionId })
+    for (const row of diffStore.files) {
+      const file = fileManager.openFiles?.find(candidate => candidate.path === row.path)
+      if (file) file.reviewSession = row.review
+    }
     reviewTabActive.value = true
   }
 

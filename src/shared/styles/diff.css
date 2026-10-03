@@ -266,3 +266,9 @@
 .cm-collapsedLines:hover {
   color: var(--color-ink-3);
 }
+/* Discussion controls remain visible and keyboard accessible in every layout. */
+.cm-review-comment-marker { width: 24px; height: 24px; color: var(--color-ink-2); cursor: pointer; }
+.cm-review-comment-marker:hover { background: var(--color-chrome-mid); }
+.cm-review-comment-marker:focus-visible { outline: 1px solid var(--color-accent); outline-offset: -1px; }
+.cm-review-comment-gutter { min-width: 24px; }
+.cm-comment-quotation { border-left: 2px solid var(--color-rule); padding: 4px 8px; margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -6,7 +6,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
 import { Strikethrough } from '@lezer/markdown'
 import { editorTheme, editorHighlightStyle, wrapCompartment } from './core.js'
-import { commentConcealment } from './comments.js'
+import { stripCommentTags } from '../../services/comments/parser.js'
 
 const mergeViewCompartment = new Compartment()
 const diffConfig = { scanLimit: 5000 }
@@ -71,9 +71,6 @@ const sharedDiffExtensions = [
   wrapCompartment.of(EditorView.lineWrapping),
   history(),
   keymap.of(historyKeymap),
-  // Hide pseudo-XML comment tags in every diff pane; resolved threads read
-  // as plain text, exactly as they do in the editor's document flow.
-  commentConcealment(),
 ]
 
 function chunkWatcherPlugin(onAllResolved, onChunkCountChange) {
@@ -121,11 +118,15 @@ export function createUnifiedDiffView({
   onChunkCountChange,
   onChange,
   onReviewChange,
+  extensions = [],
 }) {
+  originalContent = stripCommentTags(originalContent)
+  modifiedContent = stripCommentTags(modifiedContent)
   const state = EditorState.create({
     doc: modifiedContent,
     extensions: [
       ...sharedDiffExtensions,
+      ...extensions,
       EditorView.updateListener.of(update => {
         if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
         if (update.docChanged || getOriginalDoc(update.startState) !== getOriginalDoc(update.state)) {
@@ -185,7 +186,11 @@ export function createSplitDiffView({
   onChunkCountChange,
   onChange,
   onReviewChange,
+  originalExtensions = [],
+  modifiedExtensions = [],
 }) {
+  originalContent = stripCommentTags(originalContent)
+  modifiedContent = stripCommentTags(modifiedContent)
   let mv
 
   function report(update, side) {
@@ -220,6 +225,7 @@ export function createSplitDiffView({
       doc: originalContent,
       extensions: [
         ...sharedDiffExtensions,
+        ...originalExtensions,
         EditorView.editable.of(false),
         EditorView.updateListener.of(update => report(update, 'a')),
       ],
@@ -228,6 +234,7 @@ export function createSplitDiffView({
       doc: modifiedContent,
       extensions: [
         ...sharedDiffExtensions,
+        ...modifiedExtensions,
         EditorView.updateListener.of(update => {
           if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
           report(update, 'b')
@@ -273,11 +280,12 @@ export function getSplitChunks(mv) {
   return mv.chunks || []
 }
 
-export function createReadOnlyView({ parent, content }) {
+export function createReadOnlyView({ parent, content, extensions = [] }) {
   const state = EditorState.create({
-    doc: content,
+    doc: stripCommentTags(content),
     extensions: [
       ...sharedDiffExtensions,
+      ...extensions,
       EditorView.editable.of(false),
       EditorView.theme({
         '&': { cursor: 'default' },

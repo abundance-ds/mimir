@@ -2,7 +2,7 @@ import { buildCommentTag, cleanToRawPos, escapeAttr, parseCommentTags } from './
 import { snapCommentAnchor } from './anchor.js'
 
 // Text transformations are shared by agent tools and never select a document.
-export function mutateComment(content, action, input) {
+export function mutateComment(content, action, input, author = 'ai') {
   const { comments, cleanText, offsetMap } = parseCommentTags(content)
   if (action === 'add') {
     const anchor = input.anchor_text
@@ -15,7 +15,7 @@ export function mutateComment(content, action, input) {
     if (comments.some(comment => from < comment.tagTo && to > comment.tagFrom)) throw new Error('Anchor text overlaps with an existing comment. Choose a non-overlapping passage.')
     const id = crypto.randomUUID()
     const anchorText = content.slice(from, to)
-    const tag = buildCommentTag({ id, author: 'ai', text: input.text, created: new Date().toISOString(), anchorText })
+    const tag = buildCommentTag({ id, author, text: input.text, created: new Date().toISOString(), anchorText })
     return { content: content.slice(0, from) + tag + content.slice(to), result: { comment_id: id, status: 'created', anchor: anchorText.slice(0, 80) } }
   }
   const comment = comments.find(item => item.id === input.comment_id)
@@ -25,7 +25,7 @@ export function mutateComment(content, action, input) {
   if (action === 'reply') {
     const id = crypto.randomUUID()
     from = to = comment.tagTo - '</comment>'.length
-    insert = `<reply id="${escapeAttr(id)}" author="ai" text="${escapeAttr(input.text)}" ts="${new Date().toISOString()}"/>`
+    insert = `<reply id="${escapeAttr(id)}" author="${escapeAttr(author)}" text="${escapeAttr(input.text)}" ts="${new Date().toISOString()}"/>`
     Object.assign(result, { reply_id: id, status: 'replied' })
   } else if (action === 'delete') {
     from = comment.tagFrom; to = comment.tagTo; insert = comment.anchorText
@@ -47,6 +47,7 @@ export function documentComments(content) {
     return {
       id: comment.id, author: comment.author || 'user', text: comment.text,
       status: comment.status, created: comment.created || null, anchorText: comment.anchorText,
+      ...(comment.detached ? { attachment: comment.detached, anchorText: comment.quote } : {}),
       line: lines.length, column: lines.at(-1).length + 1,
       replies: comment.replies.map(reply => ({ id: reply.id, author: reply.author || 'agent', text: reply.text, timestamp: reply.ts || null })),
     }

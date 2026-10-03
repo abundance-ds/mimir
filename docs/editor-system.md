@@ -127,7 +127,7 @@ selection and preview. `merge.test.js` and `DiffView.test.js` cover diff content
 line endings, and completion in unified and split views.
 File-open tests complete reads in reverse order and cancel pending work during
 navigation. Real review views test mixed decisions across layouts and previews,
-tab changes, remaining-change actions, Undo/Redo, and explicit completion.
+tab changes, remaining-change actions, Undo/Redo, and automatic completion.
 Proposal tests delay and
 fail status replies, edit during the wait, retry after tab changes, and retain
 newer reviews.
@@ -157,21 +157,27 @@ This native check remains open in [issues.md](issues.md).
   is replaced. Unified, Split, Original, Result, and file-tab changes preserve
   decisions and Undo/Redo during the session. Original always shows the initial
   snapshot; Result shows the current review result.
-- Each pending change has visible check and cross buttons with 28 px targets,
-  accessible names, and keyboard activation. Unified reserves a right margin;
-  Split uses the center column. The View selector combines the four views.
-  The header names remaining work and wraps when the pane is narrow.
-- File actions and All files menus accept or reject only remaining changes.
-  Earlier decisions stay intact. Bulk decisions are one Undo step. The last
-  decision leaves the review open. **Finish review** (Cmd/Ctrl+Enter) applies
-  and reports the result only after every change is decided. Batch completion
-  requires decisions for all files. A result equal to the original is rejected;
+- Each pending change has visible check and cross buttons with 12 px icons,
+  accessible names, and keyboard activation. Split stacks them in a 30 px center
+  strip. Unified floats a compact pair over a translucent background, with
+  local text clearance instead of a reserved column. Green and red stay subtle
+  until hover; keyboard focus remains visible.
+- The header has direct Original / Diff / Result and Unified / Split buttons,
+  change navigation, Undo/Redo, and **Accept all** / **Reject all**. The bulk
+  actions affect only remaining changes in the current file, or all files in
+  the batch overview. Each batch file also has direct Accept / Reject actions.
+  Earlier decisions stay intact. The header wraps instead of clipping actions.
+- The final decision automatically applies and reports the result. There is
+  no extra confirmation step. Cmd/Ctrl+Enter accepts the remaining changes.
+  Batch completion requires decisions for all files. Undo/Redo remains available
+  while reviewing; applied document text uses the normal document Undo history.
+  A result equal to the original is rejected;
   a mixed result applies only the retained edits. Status retries cannot reapply
   text or undo a file already applied or reported.
 - Single-file acceptance checks the current draft against the review snapshot,
   then commits the result before reporting it. Rejection keeps the current
   draft. Status replies never write document text. A failed report retains the
-  decision on its document and offers Retry status, including after a tab switch.
+  decision on its document and offers Retry, including after a tab switch.
   Retry reports only unfinished proposal ids and never reapplies the text.
   The review result is read-only once decided; document edits made during the
   report remain intact. A completed report clears only the proposals it owns.

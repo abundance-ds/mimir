@@ -118,6 +118,99 @@ describe('document lifecycle with the real editor', () => {
     expect(file.content).toBe(original)
   })
 
+  it.each([
+    ['unified', 'accept'], ['unified', 'reject'], ['split', 'accept'], ['split', 'reject'],
+  ])('automatically applies mixed decisions from %s when the last action is %s', async (layout, last) => {
+    const middle = Array.from({ length: 12 }, (_, i) => `same ${i}`).join('\r\n')
+    const original = `old A\r\n${middle}\r\nold B`
+    const proposed = `new A\r\n${middle}\r\nnew B`
+    io.read.mockResolvedValue(original)
+    const { files, wrapper, surface, open } = await setup()
+    await open('/work/a.md')
+    const file = files.currentFile
+    wrapper.vm.mimirReviewProposal({ id: 'p1', targetText: original, replacement: proposed })
+    const diff = useDiffStore()
+    diff.setLayout(layout)
+    await flushPromises()
+    invoke.mockClear()
+    const first = last === 'accept' ? 'reject' : 'accept'
+    await vi.waitFor(() => expect(wrapper.find(`.diff-view .cm-review-${first}`).exists()).toBe(true))
+    await wrapper.get(`.diff-view .cm-review-${first}`).trigger('click')
+    expect(diff.pendingChanges).toBe(1)
+    expect(file.content).toBe(original)
+    expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
+    diff.setLayout(layout === 'unified' ? 'split' : 'unified')
+    await nextTick()
+    expect(diff.pendingChanges).toBe(1)
+    await vi.waitFor(() => expect(wrapper.find(`.diff-view .cm-review-${last}`).exists()).toBe(true))
+    await wrapper.get(`.diff-view .cm-review-${last}`).trigger('click')
+    await flushPromises()
+    expect(file.content).toBe(last === 'accept' ? `old A\r\n${middle}\r\nnew B` : `new A\r\n${middle}\r\nold B`)
+    expect(diff.active).toBe(false)
+    const reports = invoke.mock.calls.filter(([command]) => command === 'proposal_respond')
+    expect(reports).toHaveLength(1)
+    expect(reports[0][1].result).toMatchObject({ id: 'p1', status: 'applied' })
+    expect(undo(surface.vm.getView())).toBe(true)
+    expect(file.content).toBe(original)
+  })
+
+  it.each(['Accept all', 'Reject all'])('completes a review with one click on %s', async label => {
+    const { files, wrapper, open } = await setup()
+    await open('/work/a.md')
+    const file = files.currentFile
+    const original = file.content
+    wrapper.vm.mimirReviewProposal({ id: 'p1', targetText: original, replacement: 'Proposed' })
+    await flushPromises()
+    invoke.mockClear()
+    await wrapper.findComponent(DiffBar).findAll('button').find(button => button.text() === label).trigger('click')
+    await flushPromises()
+    expect(useDiffStore().active).toBe(false)
+    expect(file.content).toBe(label === 'Accept all' ? 'Proposed' : original)
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p1', status: label === 'Accept all' ? 'applied' : 'rejected' }) })
+  })
+
+  it('completes a batch after the final file, then waits for Retry if a report fails', async () => {
+    const { files, wrapper, open } = await setup()
+    await open('/work/a.md')
+    const a = files.currentFile
+    await open('/work/b.md')
+    const b = files.currentFile
+    const originalB = b.content
+    const diff = useDiffStore()
+    diff.activateBatch({ fileList: [
+      { path: a.path, original: a.content, modified: 'Accepted A', proposalId: 'p1' },
+      { path: b.path, original: b.content, modified: 'Rejected B', proposalId: 'p2' },
+    ] })
+    diff.focusBatchFile(a.path)
+    await flushPromises()
+    invoke.mockClear().mockImplementation(async (command, args) => {
+      if (command === 'proposal_respond' && args.result.id === 'p2') throw new Error('Registry offline')
+    })
+    await wrapper.findComponent(DiffBar).get('.review-accept').trigger('click')
+    await flushPromises()
+    expect(diff.files.map(file => file.review.pending)).toEqual([0, 1])
+    expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
+    diff.focusBatchFile(b.path)
+    await nextTick()
+    await wrapper.findComponent(DiffBar).get('.review-reject').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(a.content).toBe('Accepted A')
+    expect(b.content).toBe(originalB)
+    expect(diff.active).toBe(true)
+    expect(diff.finishing).toBe(false)
+    expect(diff.files[1].error).toContain('Registry offline')
+    expect(invoke.mock.calls.filter(([command]) => command === 'proposal_respond')).toHaveLength(2)
+    invoke.mockClear().mockResolvedValue(undefined)
+    await wrapper.findComponent(DiffBar).findAll('button').find(button => button.text() === 'Retry').trigger('click')
+    await flushPromises()
+    expect(diff.active).toBe(false)
+    expect(invoke.mock.calls.filter(([command]) => command === 'proposal_respond')).toHaveLength(1)
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p2', status: 'rejected' }) })
+    expect(a.content).toBe('Accepted A')
+    expect(b.content).toBe(originalB)
+  })
+
   it('retains a failed review decision across tab switches and retries without replacing newer edits', async () => {
     const { files, wrapper, open } = await setup()
     await open('/work/a.md')
@@ -129,20 +222,19 @@ describe('document lifecycle with the real editor', () => {
     let fail
     invoke.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
     await nextTick()
-    await wrapper.findComponent(DiffBar).get('.review-finish').trigger('click')
     await flushPromises()
     expect(file.content).toBe('Proposed text')
-    expect(wrapper.findComponent(DiffBar).get('button.review-finish').attributes()).toHaveProperty('disabled')
+    expect(wrapper.findComponent(DiffBar).text()).toContain('Applying…')
     files.updateContent('Newer user text', file)
     fail(new Error('Registry unavailable'))
     await flushPromises()
-    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry status')
+    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry')
     await open('/work/b.md')
     await open('/work/a.md')
     expect(diff.decision).toBe(file.reviewDecision)
-    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry status')
+    expect(wrapper.findComponent(DiffBar).text()).toContain('Retry')
     invoke.mockResolvedValueOnce(undefined)
-    await wrapper.findComponent(DiffBar).get('.review-finish').trigger('click')
+    await wrapper.findComponent(DiffBar).findAll('button').find(button => button.text() === 'Retry').trigger('click')
     await flushPromises()
     expect(file.content).toBe('Newer user text')
     expect(file.reviewDecision).toBeNull()

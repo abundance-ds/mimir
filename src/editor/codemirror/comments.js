@@ -1,3 +1,4 @@
+import { applyManualTextInput } from '../../shared/textInputPolicy.js'
 import { StateEffect, StateField, Prec, EditorState, Annotation, Facet } from '@codemirror/state'
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view'
 import { parseCommentTags, stripCommentTags } from '../../services/comments/parser.js'
@@ -201,6 +202,16 @@ class CommentBlockWidget extends WidgetType {
     }
     header.append(meta)
 
+    if (c.detached) {
+      const context = document.createElement('blockquote')
+      context.className = 'cm-comment-quotation'
+      const label = document.createElement('span')
+      label.className = 'cm-comment-block-status'
+      label.textContent = c.detached === 'rejected' ? 'Proposed text not kept' : 'Text removed'
+      context.append(label, document.createElement('br'), document.createTextNode(c.quote || ''))
+      wrap.append(context)
+    }
+
     const summary = document.createElement('span')
     summary.className = 'cm-comment-block-summary'
     summary.textContent = commentSummary(c)
@@ -252,6 +263,7 @@ class CommentBlockWidget extends WidgetType {
         replyEditor.className = 'cm-comment-reply-editor'
         replyEditor.hidden = true
         const replyInput = document.createElement('textarea')
+        applyManualTextInput(replyInput)
         replyInput.className = 'cm-comment-input'
         replyInput.rows = 1
         replyInput.value = reply.text || ''
@@ -328,10 +340,7 @@ class CommentBlockWidget extends WidgetType {
     input.dataset.commentInput = 'true'
     input.rows = 1
     input.value = draft.text
-    input.spellcheck = false
-    input.autocomplete = 'off'
-    input.autocorrect = 'off'
-    input.autocapitalize = 'off'
+    applyManualTextInput(input)
     input.placeholder = hasText ? 'Reply' : 'Comment'
     const saveAction = hasText ? 'reply' : 'save-text'
     const saveButton = makeButton(hasText ? 'Reply' : 'Save', saveAction, { primary: true })
@@ -812,7 +821,7 @@ const commentEmptyCleanup = EditorState.transactionFilter.of((tr) => {
 
   const newDoc = tr.newDoc.toString()
   const newComments = parseCommentTags(newDoc).comments
-  const empties = newComments.filter(c => c.contentFrom === c.contentTo)
+  const empties = newComments.filter(c => c.contentFrom === c.contentTo && !c.detached)
   if (empties.length === 0) return tr
 
   let text = newDoc

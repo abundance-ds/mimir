@@ -39,6 +39,7 @@ const wrapperStyle = computed(() => {
 })
 
 function onKeydown(event) {
+  if (event.target?.closest?.('input, textarea, [contenteditable="true"]:not(.cm-content)')) return
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.isComposing) {
     event.preventDefault()
     event.stopPropagation()

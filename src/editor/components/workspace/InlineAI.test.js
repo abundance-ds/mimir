@@ -187,9 +187,9 @@ describe('InlineAI', () => {
     await wrapper.get('textarea').trigger('keydown', { key: 'Enter', metaKey: true })
     expect(wrapper.emitted('apply').at(-1)).toEqual(['Accepted by key', 5, 22])
   })
-  it('uses Finish review for an active diff and never applies the original suggestion over partial decisions', async () => {
+  it('accepts remaining changes in the shared review without replacing partial decisions', async () => {
     const wrapper = render()
-    await wrapper.setProps({ reviewActive: true, canFinishReview: false })
+    await wrapper.setProps({ reviewActive: true })
     await flushPromises()
     await enterInstruction(wrapper)
     mocks.getConfig().onEdit({ replacement: 'Original suggestion' })
@@ -198,10 +198,7 @@ describe('InlineAI', () => {
     expect(wrapper.text()).toContain('Refine')
     await wrapper.get('textarea').trigger('keydown', { key: 'Enter', metaKey: true })
     expect(wrapper.emitted('apply')).toBeUndefined()
-    expect(wrapper.emitted('finish-review')).toBeUndefined()
-    await wrapper.setProps({ canFinishReview: true })
-    await wrapper.get('textarea').trigger('keydown', { key: 'Enter', metaKey: true })
-    expect(wrapper.emitted('finish-review')).toHaveLength(1)
+    expect(wrapper.emitted('accept-review')).toHaveLength(1)
     expect(wrapper.emitted('apply')).toBeUndefined()
   })
 

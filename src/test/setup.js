@@ -27,6 +27,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
   'document_file_read', 'document_file_write',
+  'document_review_read', 'document_review_save',
   'path_exists', 'workspace_paths_status', 'create_dir', 'list_dir',
   // unified business graph
   'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
@@ -50,7 +51,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'settings_changed',
   'app_quit_confirmed', 'app_prepare_relaunch',
   // spell
-  'spell_suggest', 'set_smart_quotes',
+  'spell_suggest', 'spell_check', 'set_smart_quotes',
   // shell_exec
   'shell_exec',
   // Activities and launcher presets

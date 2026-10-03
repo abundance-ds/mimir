@@ -2,6 +2,7 @@ import { ref, onUnmounted } from 'vue'
 import { findTargetText } from '../../services/ai/tools/textMatch.js'
 import { matchInCleanContent } from '../../services/ai/tools/edit.js'
 import { PROPOSAL_APPLY_EVENT, DIFF_OPEN_EVENT } from '../../shared/proposalEvents.js'
+import { replaceCommentText } from '../../services/comments/document.js'
 
 const SOURCE_REQUIRED = 'Open Source before applying a Markdown proposal to this Graph entry.'
 
@@ -12,7 +13,7 @@ export function computeDiffFromReview(review, fileContent) {
   if (!match || match.error) return null
   return {
     original: fileContent,
-    modified: fileContent.slice(0, match.from) + review.replacement + fileContent.slice(match.to),
+    modified: replaceCommentText(fileContent, match.from, match.to, review.replacement),
   }
 }
 
@@ -33,7 +34,7 @@ export function computeCompoundDiff(reviews, fileContent) {
   }
   let modified = fileContent
   for (const p of positioned) {
-    modified = modified.slice(0, p.from) + p.replacement + modified.slice(p.to)
+    modified = replaceCommentText(modified, p.from, p.to, p.replacement)
   }
   return { original: fileContent, modified }
 }

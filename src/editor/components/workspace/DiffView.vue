@@ -4,7 +4,10 @@
     :style="wrapperStyle"
     @keydown.capture="onKeydown"
   >
-    <div ref="viewHost" class="flex-1 min-w-0 h-full" :class="hostClass"></div>
+    <div ref="viewHost" class="flex-1 min-w-0 min-h-0" :class="hostClass"></div>
+    <ReviewComments v-if="diff.currentReview" ref="discussions" :session="diff.currentReview" :readonly="locked" :selection="selection"
+      :action="(action, input, selected) => diff.comment(diff.currentReview, action, input, selected)"
+      :decide="(id, action) => diff.decideComment(diff.currentReview, id, action)" />
   </div>
 </template>
 
@@ -15,11 +18,16 @@ import { useSettingsStore } from '../../../stores/settings.js'
 import { editorTypographyVars } from '../../../shared/fonts.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
 import { createReviewView } from '../../codemirror/reviewView.js'
+import { reviewContent } from '../../reviewComments.js'
+import ReviewComments from './ReviewComments.vue'
 
 const diff = useDiffStore()
 const settings = useSettingsStore()
 const editorUI = useEditorUIStore()
 const viewHost = ref(null)
+const discussions = ref(null)
+const selection = ref(null)
+const locked = computed(() => Boolean(diff.decision || diff.finishing || diff.reviewMeta?.type === 'history'))
 let projection = null
 
 const wrapperStyle = computed(() => editorTypographyVars({
@@ -45,15 +53,19 @@ function buildView() {
     session,
     layout: diff.layout,
     mode: diff.viewMode,
-    locked: Boolean(diff.decision || diff.finishing || diff.reviewMeta?.type === 'history'),
+    locked: locked.value,
     content: diff.decision?.content,
     collapse: diff.reviewMeta?.type === 'inline-ai',
     onChange: (base, result, action) => diff.recordReviewChange(session, base, result, action),
+    onComment: id => discussions.value?.open(id),
+    onAddComment: selected => discussions.value?.start(selected),
+    onSelection: selected => { selection.value = selected },
   })
   diff.setChunkCount(session.pending)
 }
 
 function onKeydown(event) {
+  if (event.target?.closest?.('input, textarea, [contenteditable="true"]:not(.cm-content)')) return
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.isComposing) {
     event.preventDefault()
     event.stopPropagation()
@@ -62,14 +74,21 @@ function onKeydown(event) {
   }
 }
 
-function scrollToChunk(index) { projection?.scrollToChunk(index) }
-function getResolvedContent() { return diff.decision?.content ?? diff.currentReview?.result ?? diff.modifiedContent }
-defineExpose({ scrollToChunk, getResolvedContent })
+function scrollToChunk(index) {
+  const annotation = diff.currentReview?.comments.filter(record => diff.currentReview.commentDecisions[record.id] === 'pending')[index - (diff.currentReview.pending - Object.values(diff.currentReview.commentDecisions).filter(value => value === 'pending').length)]
+  if (annotation) discussions.value?.open(annotation.id)
+  else projection?.scrollToChunk(index)
+}
+function getResolvedContent() { return diff.decision?.content ?? (diff.currentReview ? reviewContent(diff.currentReview) : diff.modifiedContent) }
+function getReviewState() { return projection?.getState() || null }
+function editCommand(command) { if (command === 'undo') diff.undoReview(); else if (command === 'redo') diff.redoReview() }
+defineExpose({ scrollToChunk, getResolvedContent, getReviewState, editCommand })
 
 const viewInputs = () => [diff.active, diff.currentReview, diff.currentReview?.revision, diff.viewMode, diff.layout, diff.decision, diff.finishing]
 // Capture before Vue changes the host's layout class and its scroll geometry.
 watch(viewInputs, () => projection?.savePosition(), { flush: 'pre' })
 watch(viewInputs, buildView, { flush: 'post' })
+watch(() => [diff.currentReview?.result, diff.currentReview?.base, diff.currentReview?.commentRevision, diff.currentReview?.commentUI?.showResolved], () => projection?.refreshComments(), { flush: 'post' })
 onMounted(buildView)
 onBeforeUnmount(() => destroyCurrent())
 </script>
@@ -77,6 +96,7 @@ onBeforeUnmount(() => destroyCurrent())
 <style scoped>
 .diff-view {
   position: relative;
+  flex-direction: column;
 }
 
 .diff-view :deep(.cm-editor) {

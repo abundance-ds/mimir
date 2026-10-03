@@ -8,6 +8,9 @@
     </div>
     <div v-if="file.error" class="batch-file-error" role="alert">{{ file.error }}</div>
     <div ref="diffHost" class="batch-file-diff"></div>
+    <ReviewComments ref="discussions" :session="file.review" :readonly="locked" :selection="selection"
+      :action="(action, input, selected) => diff.comment(file.review, action, input, selected)"
+      :decide="(id, action) => diff.decideComment(file.review, id, action)" />
   </section>
 </template>
 
@@ -16,10 +19,14 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { createReviewView } from '../../codemirror/reviewView.js'
 import ReviewActions from './ReviewActions.vue'
+import ReviewComments from './ReviewComments.vue'
 
 const props = defineProps({ file: { type: Object, required: true }, displayName: { type: String, default: '' } })
 const diff = useDiffStore()
 const diffHost = ref(null)
+const discussions = ref(null)
+const selection = ref(null)
+const locked = computed(() => Boolean(props.file.applied || props.file.lifecycleResolved || diff.finishing))
 let projection = null
 const fileName = computed(() => props.displayName || props.file.path?.split('/').pop() || props.file.path)
 function buildEditor() {
@@ -29,11 +36,15 @@ function buildEditor() {
   const session = props.file.review
   projection = createReviewView({
     parent: diffHost.value, session, collapse: true,
-    locked: Boolean(props.file.applied || props.file.lifecycleResolved || diff.finishing),
+    locked: locked.value,
     onChange: (base, result, action) => diff.recordReviewChange(session, base, result, action),
+    onComment: id => discussions.value?.open(id),
+    onAddComment: selected => discussions.value?.start(selected),
+    onSelection: selected => { selection.value = selected },
   })
 }
 watch(() => [props.file.review, props.file.review.revision, props.file.applied, props.file.lifecycleResolved, diff.finishing], buildEditor, { flush: 'post' })
+watch(() => [props.file.review.result, props.file.review.base, props.file.review.commentRevision, props.file.review.commentUI?.showResolved], () => projection?.refreshComments(), { flush: 'post' })
 onMounted(buildEditor)
 onBeforeUnmount(() => projection?.destroy())
 </script>

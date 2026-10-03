@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { createReviewSession, recordReview, decideRemaining, moveReviewHistory, reviewStatus } from '../editor/reviewSession.js'
+import { createReviewSession, recordReview, decideRemaining, decideCommentChange, moveReviewHistory, reviewStatus } from '../editor/reviewSession.js'
+import { mutateReviewComment, reviewContent } from '../editor/reviewComments.js'
+import { persistReview, scheduleReviewSave } from '../editor/reviewPersistence.js'
 
 export const useDiffStore = defineStore('diff', () => {
   const active = ref(false)
@@ -63,6 +65,8 @@ export const useDiffStore = defineStore('diff', () => {
     decision.value = null
     finishing.value = false
     reviewSession.value = session || createReviewSession(original, modified)
+    reviewSession.value.key ||= path || null
+    reviewSession.value.meta = review || null
     reviewHistory.value = reviewSession.value.past.map(() => [reviewSession.value])
     reviewFuture.value = reviewSession.value.future.map(() => [reviewSession.value])
     files.value = []
@@ -70,6 +74,7 @@ export const useDiffStore = defineStore('diff', () => {
     chunkCount.value = reviewSession.value.pending
     currentChunk.value = reviewSession.value.currentChunk
     active.value = true
+    if (review?.type !== 'history') scheduleReviewSave(reviewSession.value)
   }
 
   function activateBatch({ fileList, batch = null, sessionId = null }) {
@@ -92,7 +97,13 @@ export const useDiffStore = defineStore('diff', () => {
       lifecycleResolved: false,
       error: null,
     }))
-    for (const file of files.value) file.status = reviewStatus(file.review)
+    for (const file of files.value) {
+      file.status = reviewStatus(file.review)
+      file.review.key = file.path
+      file.review.meta = { ids: [file.proposalId].filter(Boolean), sessionId, path: file.path }
+      file.review.proposalKey = file.proposalId || ''
+      scheduleReviewSave(file.review)
+    }
     batchId.value = batch
     reviewMeta.value = sessionId ? { sessionId } : null
     reviewError.value = ''
@@ -132,12 +143,32 @@ export const useDiffStore = defineStore('diff', () => {
   }
 
   function syncReview(session) {
+    reviewError.value = ''
     const file = files.value.find(file => file.review === session)
     if (file) {
-      file.modified = session.result
+      file.modified = reviewContent(session)
       file.status = reviewStatus(session)
+      file.error = null
     }
     if (currentReview.value === session) setChunkCount(session.pending)
+    scheduleReviewSave(session)
+  }
+
+  async function comment(session, action, input, selection) {
+    if (!editableSession(session) || finishing.value || decision.value || reviewMeta.value?.type === 'history') throw new Error('This review is read only.')
+    const result = mutateReviewComment(session, action, input, 'user', selection)
+    // A failed save keeps the discussion in memory and exposes Retry save.
+    // It must not roll back a reply after another action has already seen it.
+    try { await persistReview(session) } catch { return { ...result, saved: false } }
+    return { ...result, saved: true }
+  }
+
+  function decideComment(session, id, action) {
+    if (!editableSession(session) || finishing.value || decision.value) return
+    if (!decideCommentChange(session, id, action)) return
+    reviewHistory.value.push([session])
+    reviewFuture.value = []
+    syncReview(session)
   }
 
   function recordReviewChange(session, base, result, action) {
@@ -247,7 +278,7 @@ export const useDiffStore = defineStore('diff', () => {
     originalContent, modifiedContent, filePath, fileId,
     proposalIds, batchId, reviewMeta, reviewError, decision,
     reviewSession, currentReview, pendingChanges, canFinish, canUndo, canRedo, finishing,
-    recordReviewChange, decideRemainingChanges, undoReview, redoReview,
+    recordReviewChange, decideRemainingChanges, undoReview, redoReview, comment, decideComment,
     focusedFile, isBatchFileFocused,
     files, pendingFiles, resolvedCount, allResolved,
     viewMode, layout, chunkCount, currentChunk, hasChunks,

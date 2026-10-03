@@ -20,7 +20,7 @@ function parseAttrs(tagStr) {
 
 function parseReplies(inner) {
   const replies = []
-  const re = /<reply\s+([^/]*?)\/>/g
+  const re = /<reply\s+((?:"[^"]*"|[^">])*)\/>/g
   let m
   while ((m = re.exec(inner)) !== null) {
     const attrs = parseAttrs(m[1])
@@ -63,6 +63,7 @@ export function parseCommentTags(text) {
       cleanLen += tagFrom - lastEnd
     }
 
+    const cleanFrom = cleanLen
     offsetMap.push({ cleanPos: cleanLen, rawPos: contentFrom })
     cleanParts.push(anchorText)
     cleanLen += anchorText.length
@@ -80,6 +81,9 @@ export function parseCommentTags(text) {
       contentFrom,
       contentTo,
       anchorText,
+      cleanFrom,
+      cleanTo: cleanLen,
+      ...(attrs.detached ? { detached: attrs.detached, quote: attrs.quote || '' } : {}),
     })
 
     lastEnd = tagTo
@@ -97,10 +101,7 @@ export function parseCommentTags(text) {
 }
 
 export function stripCommentTags(text) {
-  return text.replace(/<comment\s+[^>]*>([\s\S]*?)<\/comment>/g, (_, inner) => {
-    const firstReply = inner.indexOf('<reply ')
-    return firstReply !== -1 ? inner.slice(0, firstReply) : inner
-  })
+  return parseCommentTags(text).cleanText
 }
 
 export function buildCommentTag(comment) {
@@ -108,6 +109,7 @@ export function buildCommentTag(comment) {
   let tag = `<comment id="${escapeAttr(id)}" author="${escapeAttr(author)}" text="${escapeAttr(text)}"`
   if (status) tag += ` status="${escapeAttr(status)}"`
   if (created) tag += ` created="${escapeAttr(created)}"`
+  if (comment.detached) tag += ` detached="${escapeAttr(comment.detached)}" quote="${escapeAttr(comment.quote || anchorText || '')}"`
   tag += `>${anchorText || ''}`
   if (replies?.length) {
     for (const r of replies) {
@@ -118,6 +120,18 @@ export function buildCommentTag(comment) {
   }
   tag += '</comment>'
   return tag
+}
+
+export function rawToCleanPos(comments, position) {
+  let hidden = 0
+  for (const comment of comments) {
+    if (position < comment.tagFrom) break
+    if (position <= comment.contentFrom) return comment.cleanFrom
+    if (position <= comment.contentTo) return comment.cleanFrom + position - comment.contentFrom
+    if (position < comment.tagTo) return comment.cleanTo
+    hidden += comment.tagTo - comment.tagFrom - comment.anchorText.length
+  }
+  return position - hidden
 }
 
 export function cleanToRawPos(offsetMap, cleanPos) {

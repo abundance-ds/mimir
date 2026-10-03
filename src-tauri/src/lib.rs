@@ -75,6 +75,7 @@ pub mod business_graph;
 pub mod chat;
 mod connections;
 mod document_files;
+mod document_reviews;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
@@ -91,6 +92,7 @@ mod persistence;
 pub mod routine_runtime;
 pub mod routines;
 mod scratchpad;
+mod spelling;
 mod session;
 mod shell_exec;
 pub mod tool_bridge;
@@ -107,8 +109,10 @@ mod workspace_files;
 fn configure_macos_text_input() {
     use objc2_foundation::{NSString, NSUserDefaults};
     let defaults = NSUserDefaults::standardUserDefaults();
-    let key = NSString::from_str("WebContinuousSpellCheckingEnabled");
-    defaults.setBool_forKey(true, &key);
+    for key in ["WebContinuousSpellCheckingEnabled", "WebAutomaticSpellingCorrectionEnabled",
+        "WebAutomaticTextReplacementEnabled", "WebAutomaticDashSubstitutionEnabled"] {
+        defaults.setBool_forKey(false, &NSString::from_str(key));
+    }
     // Set this before creating any webview. Otherwise WebKit inherits the
     // system smart-quotes preference, independently of HTML autocorrect.
     set_macos_smart_quotes(false);
@@ -161,7 +165,7 @@ fn spell_suggest(word: String) -> Vec<String> {
         return vec![];
     }
 
-    let range = NSRange::new(0, ns_word.len());
+    let range = NSRange::new(0, word.encode_utf16().count());
     let guesses = checker
         .guessesForWordRange_inString_language_inSpellDocumentWithTag(range, &ns_word, None, 0);
 
@@ -1236,6 +1240,8 @@ pub fn run() {
             read_text_file,
             document_files::document_file_read,
             document_files::document_file_write,
+            document_reviews::document_review_read,
+            document_reviews::document_review_save,
             read_binary_file,
             write_text_file,
             write_binary_file,
@@ -1338,6 +1344,7 @@ pub fn run() {
             meetings::commands::meetings_install_model,
             meetings::commands::meetings_delete_model,
             spell_suggest,
+            spelling::spell_check,
             set_smart_quotes,
             shell_exec::shell_exec,
             activity_commands::activity_list,

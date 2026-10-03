@@ -4,6 +4,7 @@ import { withGate } from './gate'
 import { readDocument } from './helpers'
 import { resolveSafePath, findTargetText, countMatches } from './textMatch'
 import { parseCommentTags, cleanToRawPos } from '../../comments/parser'
+import { replaceCommentText } from '../../comments/document.js'
 
 function generateProposalId(prefix = 'file') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -55,7 +56,7 @@ export function createEditTool(context = {}) {
           if (range.error === 'ambiguous') {
             return { error: `Text matches ${range.count} locations in the active editor. Provide a longer, unique passage.` }
           }
-          const modified = document.content.slice(0, range.from) + new_text + document.content.slice(range.to)
+          const modified = replaceCommentText(document.content, range.from, range.to, new_text)
           const proposal = {
             id: generateProposalId('proposal'),
             type: 'edit',
@@ -92,7 +93,7 @@ export function createEditTool(context = {}) {
             return { error: `Text matches ${range.count} locations in ${target}. Provide a longer, unique passage.` }
           }
 
-          const modified = response.content.slice(0, range.from) + new_text + response.content.slice(range.to)
+          const modified = replaceCommentText(response.content, range.from, range.to, new_text)
           await invoke('write_text_file', { path: safePath, content: modified })
           onProposal({
             id: generateProposalId(),

@@ -75,7 +75,7 @@ describe('BatchDiffView resolution', () => {
     expect(h.files.currentFile.content).toBe(`old A\n${middle}\nnew B`)
   })
 
-  it('keeps the last decision reversible and blocks Finish after Undo', async () => {
+  it('does not commit when Undo restores a pending change before completion', async () => {
     const h = await reviewFile('old', 'new')
     rejectChunk(h.view, 0)
     h.diff.undoReview()
@@ -84,7 +84,7 @@ describe('BatchDiffView resolution', () => {
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
   })
 
-  it('retains all files and permits Undo after the last decision', async () => {
+  it('leaves batch completion to the review owner', async () => {
     const diff = useDiffStore()
     diff.activateBatch({ fileList: [
       { path: '/work/a.md', original: 'a', modified: 'A' },

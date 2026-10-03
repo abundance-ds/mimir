@@ -5,6 +5,7 @@ import { createSessionPersist, createSessionSnapshot } from '../sessionPersist.j
 import { loadSessionEntries, normalizeSessionEntries } from '../sessionRestore.js'
 import { graphSource } from '../../services/businessGraph.js'
 import { graphDocumentState, isGraphSourceCandidate, restoredGraphState } from '../../stores/graphDocuments.js'
+import { loadReview, reviewKey, flushReviews } from '../reviewPersistence.js'
 
 export function useEditorSessionLifecycle({
   fileManager,
@@ -96,6 +97,12 @@ export function useEditorSessionLifecycle({
       }
     }
     fileManager.activateSessionEntry(restored.activeEntry)
+    await Promise.all(fileManager.openFiles.map(async file => {
+      try {
+        const review = await loadReview(reviewKey(file))
+        if (review && !review.completed) file.reviewSession = review
+      } catch (error) { onError(error) }
+    }))
     if (session.zoomLevel) setZoomLevel(session.zoomLevel)
     if (restored.changed) {
       try {
@@ -128,6 +135,7 @@ export function useEditorSessionLifecycle({
   }
 
   async function flush(discardedFiles = []) {
+    await flushReviews()
     const value = snapshot(discardedFiles)
     if (persist) {
       await persist.flush(value)
@@ -138,6 +146,7 @@ export function useEditorSessionLifecycle({
 
   function beforeUnload() {
     flushEditorContent({ bridge: 'flush' })
+    void flushReviews().catch(onError)
     if (persist) void persist.flush(snapshot()).catch(onError)
   }
 

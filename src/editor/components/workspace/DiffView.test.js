@@ -31,7 +31,7 @@ describe('DiffView', () => {
     wrapper.unmount()
   })
 
-  it('keeps the completed review open until Finish review', async () => {
+  it('leaves completion to the review owner', async () => {
     const { wrapper } = mountActive()
     const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
     expect(view).toBeTruthy()

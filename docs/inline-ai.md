@@ -9,8 +9,8 @@ the Rust-authenticated provider bridge. The agent can answer, inspect approved
 context, or call `suggest_edit`. An edit always opens the normal full-document
 diff, with the review controls described in [Editor](editor-system.md#proposal-and-git-review).
 **Refine** returns to the instruction input; Escape cancels or closes.
-Cmd/Ctrl+Enter finishes a review after all changes are decided. It applies the
-reviewed result, including partial rejections and manual edits.
+Cmd/Ctrl+Enter accepts the remaining changes. The last decision automatically
+applies the reviewed result, including partial rejections and manual edits.
 
 Primary ownership is `InlineAI.vue`, `inlineTransport.js`, the Editor diff
 store, and the native AI bridge.

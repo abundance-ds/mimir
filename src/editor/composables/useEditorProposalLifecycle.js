@@ -1,4 +1,5 @@
 import { nextTick, watch } from 'vue'
+import { loadReview, reviewKey, scheduleReviewSave } from '../reviewPersistence.js'
 import {
   computeCompoundDiff,
   computeDiffFromReview,
@@ -65,7 +66,7 @@ export function useEditorProposalLifecycle({
       // Wait for the surface before flushing its buffer into a pending review.
       await nextTick()
       if (cancelled || disposed || fileManager.currentFile !== file) return
-      if (file?.reviews || file?.reviewDecision) {
+      if (file?.reviews || file?.reviewDecision || file?.reviewSession) {
         if (!activateDiffFromReviews(file)) diffStore.deactivate()
       } else if (diffStore.active && diffStore.reviewMeta?.ids) {
         diffStore.deactivate()
@@ -180,7 +181,14 @@ export function useEditorProposalLifecycle({
       diffStore.setReviewError(decision.error)
       return true
     }
-    if (!file?.reviews?.length || file.kind === 'graph') return false
+    if (!file || file.kind === 'graph') return false
+    if (!file.reviews?.length && file.reviewSession && !file.reviewSession.completed) {
+      const session = file.reviewSession
+      diffStore.activate({ original: session.original, modified: session.proposed,
+        path: file.path || '', fileId: file.id, session, review: session.meta })
+      return true
+    }
+    if (!file.reviews?.length) return false
     const proposalKey = file.reviews.map(review => review.proposalId).slice().sort().join('\n')
     const session = file.reviewSession?.proposalKey === proposalKey ? file.reviewSession : null
     if (session) {
@@ -216,7 +224,9 @@ export function useEditorProposalLifecycle({
       },
     })
     file.reviewSession = diffStore.reviewSession
+    file.reviewSession.key = reviewKey(file)
     file.reviewSession.proposalKey = proposalKey
+    scheduleReviewSave(file.reviewSession)
     return true
   }
 
@@ -224,9 +234,18 @@ export function useEditorProposalLifecycle({
     if (!file?.path || file.reviews || !hasTauriRuntime()) return
     const path = file.path
     try {
+      if (!file.reviewSession) {
+        const saved = await loadReview(reviewKey(file))
+        if (disposed || file.path !== path || !fileManager.openFiles.includes(file)) return
+        if (saved && !saved.completed) file.reviewSession = saved
+      }
       const { invoke } = await import('@tauri-apps/api/core')
       const proposals = await invoke('get_proposals_for_path', { path })
-      if (!proposals.length || disposed || file.path !== path || !fileManager.openFiles.includes(file)) return
+      if (disposed || file.path !== path || !fileManager.openFiles.includes(file)) return
+      if (!proposals.length) {
+        if (file.reviewSession && fileManager.currentFile === file) activateDiffFromReviews(file)
+        return
+      }
       fileManager.setFileReviews(file, proposals.map(proposalToReview))
       // Only activate the diff if this file is still current; a tab switch
       // during the await must not leave a stale diff active.
