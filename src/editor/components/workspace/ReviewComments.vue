@@ -11,9 +11,10 @@
       <button type="button" @click="retry">Retry save</button>
     </div>
     <div v-if="ui.open" ref="list" class="review-discussion-list">
+      <p v-if="!readonly && !session.pending && hasDraft" class="review-discussion-empty" role="status">Post or clear your draft to complete the review.</p>
       <form v-if="ui.compose && !readonly" class="review-comment-compose" @submit.prevent="add">
         <blockquote>{{ ui.compose.text }}</blockquote>
-        <textarea v-model="ui.compose.body" aria-label="New comment" placeholder="Add a comment" rows="2" />
+        <textarea autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false" v-model="ui.compose.body" aria-label="New comment" placeholder="Add a comment" rows="2" />
         <div class="review-thread-actions">
           <button type="submit" :disabled="busy || !ui.compose.body?.trim()">Add comment</button>
           <button type="button" @click="ui.compose = null">Cancel</button>
@@ -34,16 +35,17 @@
           </template>
         </div>
         <div v-if="ui.activeId === thread.id" class="review-thread-content">
-          <p v-if="thread.detached" class="review-thread-state">{{ thread.detached === 'rejected' ? 'Proposed text not kept' : 'Text removed' }}</p>
+          <p v-if="thread.detached" class="review-thread-state">{{ thread.detached === 'rejected' ? 'Proposed text not kept' : thread.detached === 'changed' ? 'Passage changed' : 'Text removed' }}</p>
           <blockquote>{{ thread.anchorText || thread.quote }}</blockquote>
           <p v-if="previousText(thread)" class="review-thread-previous"><span>Previously: </span>{{ previousText(thread) }}</p>
+          <p v-for="reply in previousReplies(thread)" :key="reply.id" class="review-thread-previous"><span>Previous reply: </span>{{ reply.text }}</p>
           <p class="review-thread-body">{{ thread.text }}</p>
           <div v-for="reply in thread.replies" :key="reply.id" class="review-thread-reply">
             <span>{{ author(reply.author) }}</span><p>{{ reply.text }}</p>
           </div>
           <template v-if="!readonly">
             <form @submit.prevent="reply(thread)">
-              <textarea v-model="ui.drafts[thread.id]" :aria-label="`Reply to ${thread.text}`" placeholder="Reply" rows="2" />
+              <textarea autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false" v-model="ui.drafts[thread.id]" :aria-label="`Reply to ${thread.text}`" placeholder="Reply" rows="2" />
               <div class="review-thread-actions">
                 <button type="submit" :disabled="busy || !ui.drafts[thread.id]?.trim()">Reply</button>
                 <button type="button" :disabled="busy" @click="run(thread.status === 'resolved' ? 'reopen' : 'resolve', { comment_id: thread.id })">{{ thread.status === 'resolved' ? 'Reopen' : 'Resolve' }}</button>
@@ -62,7 +64,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { reviewComments, pendingCommentChanges } from '../../reviewComments.js'
-import { persistReview, scheduleReviewSave } from '../../reviewPersistence.js'
+import { retryReviewSave, scheduleReviewSave } from '../../reviewPersistence.js'
 
 const props = defineProps({ session: { type: Object, required: true }, readonly: Boolean, selection: Object, action: Function, decide: Function })
 const list = ref(null)
@@ -73,10 +75,16 @@ const all = computed(() => reviewComments(props.session, props.session.result, {
 const visible = computed(() => all.value.filter(thread => ui.value.showResolved || thread.status !== 'resolved' || thread.change))
 const resolved = computed(() => all.value.some(thread => thread.status === 'resolved'))
 const pending = computed(() => pendingCommentChanges(props.session))
+const hasDraft = computed(() => ui.value.compose?.body?.trim() || Object.values(ui.value.drafts).some(text => text?.trim()))
 function author(value) { return ['ai', 'agent', 'assistant'].includes(value) ? 'Agent' : 'You' }
 function previousText(thread) {
   const before = props.session.comments.find(record => record.id === thread.id)?.before?.text
   return before && before !== thread.text ? before : ''
+}
+function previousReplies(thread) {
+  if (!thread.change) return []
+  const before = props.session.comments.find(record => record.id === thread.id)?.before
+  return (before?.replies || []).filter(reply => !thread.replies.some(current => current.id === reply.id && current.text === reply.text))
 }
 async function open(id) {
   ui.value.open = true
@@ -109,7 +117,7 @@ async function add() {
 async function reply(thread) {
   if (await run('reply', { comment_id: thread.id, text: ui.value.drafts[thread.id] })) ui.value.drafts[thread.id] = ''
 }
-async function retry() { try { await persistReview(props.session) } catch { /* The save error remains visible. */ } }
+async function retry() { try { await retryReviewSave(props.session) } catch { /* The save error remains visible. */ } }
 watch(ui, () => { if (!props.readonly) scheduleReviewSave(props.session) }, { deep: true })
 defineExpose({ open, start })
 </script>

@@ -1140,7 +1140,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "comments.add",
             "comment_add",
-            "Add an anchored comment to target (path, document ID, or @editor). Relative paths use the caller workspace. Returns revision and saved status.",
+            "Add a comment to a quoted passage in target (path, document ID, or @editor), including proposed text during review. Relative paths use the caller workspace. Quote more context if ambiguous. Returns revision and saved status.",
             object_schema(
                 json!({
                     "target": document_target_schema(),

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { useFileStore } from '../../stores/files.js'
 import { useDocumentTools } from './useDocumentTools.js'
+import { createReviewSession, decideRemaining, moveReviewHistory } from '../reviewSession.js'
 
 const note = 'First line.\r\nShared anchor.\r\n'
 let files, tools, onChanged, disk
@@ -37,6 +38,42 @@ async function openPair() {
 }
 
 describe('document tools across workspaces', () => {
+  it('reads a historical snapshot and refuses to mutate its hidden working document', async () => {
+    const { x, y } = await openPair()
+    const history = useDocumentTools({ fileManager: files, currentFile: computed(() => files.currentFile),
+      getReviewState: () => ({ kind: 'history', reviewId: 'snapshot1', path: x.path, content: 'Past text', historyContent: 'Past text' }) })
+    expect(await history.state('@editor', true)).toMatchObject({ path: x.path, content: 'Past text', readOnly: true, contentSource: 'history' })
+    await expect(history.mutate('add', { target: '@editor', anchor_text: 'Past text', text: 'Comment' })).rejects.toThrow('History is read only')
+    expect(x.content).toBe(note)
+    expect(y.content).toBe('Y text')
+    await history.mutate('add', { target: x.path, anchor_text: 'Shared anchor', text: 'Working file comment' })
+    expect(x.content).toContain('Working file comment')
+    expect(files.currentFile).toBe(y)
+  })
+  it('uses the same simple tools on a hidden proposal and preserves its discussion after rejection', async () => {
+    const { x, y } = await openPair()
+    x.reviewSession = createReviewSession(x.content, 'New proposed passage.\r\n')
+    const created = await tools.mutate('add', { target: x.path, anchor_text: 'New proposed passage.', text: 'Verify this.' })
+    expect(created).toMatchObject({ contentSource: 'review', status: 'created' })
+    expect(x.content).toBe(note)
+    expect((await tools.state(x.path, true)).content).toContain('New proposed passage.')
+    decideRemaining(x.reviewSession, 'reject')
+    await tools.mutate('reply', { target: x.path, comment_id: created.comment_id, text: 'Keep for later.' })
+    expect((await tools.comments(x.path)).comments[0]).toMatchObject({ attachment: 'rejected', anchorText: 'New proposed passage.', replies: [{ text: 'Keep for later.' }] })
+    moveReviewHistory(x.reviewSession, 'undo')
+    const listed = (await tools.comments(x.path)).comments[0]
+    expect(listed).toMatchObject({ attachment: 'attached', replies: [{ text: 'Keep for later.' }] })
+    expect(listed).not.toHaveProperty('source')
+    expect(files.currentFile).toBe(y)
+  })
+
+  it('refuses a review whose document prose has changed', async () => {
+    const { x } = await openPair()
+    x.reviewSession = createReviewSession(x.content, 'Proposal')
+    files.updateContent('New user draft', x)
+    await expect(tools.mutate('add', { target: x.path, anchor_text: 'Proposal', text: 'Check' })).rejects.toThrow('document text changed')
+    expect(x.reviewSession.comments).toEqual([])
+  })
   it('reads and changes a hidden dirty buffer without selecting or saving it', async () => {
     const { x, y } = await openPair()
     files.updateContent(`Unsaved.\r\n${note}`, x)

@@ -24,6 +24,8 @@ export function matchInCleanContent(rawContent, oldText) {
 }
 
 export function findUniqueRange(fileContent, oldText) {
+  // Ordinary quoted passages must never match a hidden comment attribute.
+  if (!parseCommentTags(oldText).comments.length) return matchInCleanContent(fileContent, oldText)
   const matchCount = countMatches(fileContent, oldText)
   if (matchCount === 1) return findTargetText(fileContent, oldText)
   if (matchCount > 1) return { error: 'ambiguous', count: matchCount }

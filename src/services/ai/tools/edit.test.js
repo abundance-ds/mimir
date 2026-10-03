@@ -372,9 +372,10 @@ describe('edit @editor review contract', () => {
     expect(onProposal).toHaveBeenCalledWith(expect.objectContaining({
       path: '/work/doc.md',
       original: raw,
-      modified: 'Hello precise world.',
+      modified: expect.stringContaining('Hello precise world.'),
       status: 'pending',
     }))
+    expect(onProposal.mock.calls[0][0].modified).toContain('quote="careful"')
   })
 
   it('does not create a phantom review when the target is missing or ambiguous', async () => {

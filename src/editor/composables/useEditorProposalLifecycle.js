@@ -34,7 +34,9 @@ export function useEditorProposalLifecycle({
     canApply,
     applyChange: (from, to, text) => {
       if (!canApply()) throw new Error(sourceRequired)
-      editorSurfaceRef.value.replaceRange(from, to, text)
+      const file = fileManager.currentFile
+      const content = currentEditorContent()
+      fileManager.updateContent(content.slice(0, from) + text + content.slice(to), file)
     },
     getDocPath: () => fileManager.currentFile?.path ?? '',
     activateDiff: (original, modified, options) => {
@@ -47,13 +49,15 @@ export function useEditorProposalLifecycle({
       if (file?.kind === 'graph' && !await fileManager.setGraphView(file, 'source')) {
         throw new Error('Save the Graph draft before opening Source.')
       }
+      await checkProposalsForFile(file)
       await nextTick()
       if (file && fileManager.currentFile !== file) throw new Error('The active document changed. Open the proposal again.')
       return file
     },
-    stashFileReviews: review => (
-      fileManager.setFileReviews(fileManager.currentFile, [review])
-    ),
+    stashFileReviews: review => {
+      const file = fileManager.currentFile
+      fileManager.setFileReviews(file, [...(file.reviews || []).filter(item => item.proposalId !== review.proposalId), review])
+    },
   })
 
   const stopActiveFileWatch = watch(
@@ -190,12 +194,14 @@ export function useEditorProposalLifecycle({
     }
     if (!file.reviews?.length) return false
     const proposalKey = file.reviews.map(review => review.proposalId).slice().sort().join('\n')
-    const session = file.reviewSession?.proposalKey === proposalKey ? file.reviewSession : null
+    // A later proposal waits behind an in-progress review. Rebuilding the
+    // comparison here would discard decisions and discussion drafts.
+    const session = file.reviewSession && !file.reviewSession.completed ? file.reviewSession : null
     if (session) {
       diffStore.activate({
         original: session.original, modified: session.proposed,
         path: file.path || '', fileId: file.id, session,
-        review: { ids: file.reviews.map(review => review.proposalId), sessionId: file.reviews[0].sessionId, path: file.path },
+        review: session.meta,
       })
       return true
     }

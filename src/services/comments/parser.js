@@ -41,11 +41,18 @@ export function parseCommentTags(text) {
   let m
   const re = new RegExp(COMMENT_RE.source, COMMENT_RE.flags)
   while ((m = re.exec(text)) !== null) {
-    const tagFrom = m.index
+    let tagFrom = m.index
     const tagTo = m.index + m[0].length
     const attrStr = m[1]
     const inner = m[2]
     const attrs = parseAttrs(attrStr)
+    // Detached discussions occupy a separate Markdown block. Its owned
+    // separator is storage syntax, so it must not become an extra prose edit.
+    if (attrs.detached && attrs.padding === '2') {
+      const prefix = text.slice(lastEnd, tagFrom)
+      const separator = prefix.match(/(?:\r\n|\n|\r){2}$/)?.[0]
+      if (separator) tagFrom -= separator.length
+    }
     const openTagEnd = m.index + '<comment '.length + attrStr.length + '>'.length
 
     const replies = parseReplies(inner)
@@ -109,7 +116,7 @@ export function buildCommentTag(comment) {
   let tag = `<comment id="${escapeAttr(id)}" author="${escapeAttr(author)}" text="${escapeAttr(text)}"`
   if (status) tag += ` status="${escapeAttr(status)}"`
   if (created) tag += ` created="${escapeAttr(created)}"`
-  if (comment.detached) tag += ` detached="${escapeAttr(comment.detached)}" quote="${escapeAttr(comment.quote || anchorText || '')}"`
+  if (comment.detached) tag += ` detached="${escapeAttr(comment.detached)}" quote="${escapeAttr(comment.quote || anchorText || '')}" padding="2"`
   tag += `>${anchorText || ''}`
   if (replies?.length) {
     for (const r of replies) {
@@ -119,7 +126,7 @@ export function buildCommentTag(comment) {
     }
   }
   tag += '</comment>'
-  return tag
+  return comment.detached ? `\n\n${tag}` : tag
 }
 
 export function rawToCleanPos(comments, position) {

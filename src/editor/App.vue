@@ -128,11 +128,11 @@
             @open-meeting="$emit('openGraphMeeting', $event)"
             @diagnostic="showDiagnosticError"
           />
-          <ScratchpadHistory v-if="scratchpadHistoryVisible"
+          <ScratchpadHistory v-if="scratchpadHistoryVisible" ref="scratchpadHistoryRef"
             :content="scratchpadSelected?.content ?? currentFile?.content ?? ''"
             :before="scratchpadBefore" :changes="scratchpadChanges"
           />
-          <GitDiffView v-if="gitReviewVisible" />
+          <GitDiffView v-if="gitReviewVisible" ref="gitDiffViewRef" />
           <BatchDiffView
             v-else-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
             ref="batchDiffViewRef"
@@ -185,7 +185,7 @@
           :selectionText="selectionText"
           :stats="documentStats"
           :saveStatus="footerSave"
-          :resolved-comment-count="commentManager.resolvedCommentCount"
+          :resolved-comment-count="visibleDiffActive ? 0 : commentManager.resolvedCommentCount"
           :resolved-comments-visible="commentManager.resolvedCommentsVisible"
           @zoom-in="zoomIn"
           @zoom-out="zoomOut"
@@ -471,6 +471,8 @@ const diffStore = useDiffStore()
 const gitReview = useGitReviewStore()
 const diffViewRef = ref(null)
 const batchDiffViewRef = ref(null)
+const gitDiffViewRef = ref(null)
+const scratchpadHistoryRef = ref(null)
 
 const visibleDiffActive = computed(() => {
   return diffIsVisibleForFile(
@@ -1664,7 +1666,12 @@ const editorCommands = useEditorCommandApi({
     if (file === currentFile.value) scheduleContentSync()
     autoSave.schedule(file)
   },
-  getReviewState: () => visibleDiffActive.value ? diffViewRef.value?.getReviewState?.() || null : null,
+  getReviewState: () => {
+    if (gitReviewVisible.value) return { ...gitDiffViewRef.value?.getReviewState?.(), kind: 'history', readOnly: true, path: gitReviewPath.value }
+    if (scratchpadHistoryVisible.value) return { ...scratchpadHistoryRef.value?.getReviewState?.(), path: currentFile.value?.path }
+    if (!visibleDiffActive.value) return null
+    return (diffStore.isBatch && reviewTabActive.value ? batchDiffViewRef.value : diffViewRef.value)?.getReviewState?.() || null
+  },
   navigation: editorNavigation,
 })
 const {
@@ -1951,12 +1958,14 @@ const diffReview = useDiffReview({
   batchDiffViewRef,
   scheduleContentSync,
   flushEditorContent,
+  persistDocuments: () => editorSession.flush(),
 })
 const { onDiffAcceptAll, onDiffRejectAll, onDiffFinish, onDiffNavigateChunk, onDiffNavigateFile, onRestoreConfirm, activateDiffForCurrentFile, activateBatchDiff } = diffReview
 
 // Completion belongs to the review, independent of its CodeMirror layout.
 // Failed writes or reports wait for Retry; they must not start a retry loop.
 watch(() => visibleDiffActive.value && diffStore.canFinish && !diffStore.reviewError
+  && !diffStore.hasDiscussionDrafts
   && diffStore.reviewMeta?.type !== 'history', ready => {
   if (ready) void finishDiffAndFocus()
 }, { flush: 'post' })

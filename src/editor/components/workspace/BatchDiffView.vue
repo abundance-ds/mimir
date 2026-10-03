@@ -53,7 +53,12 @@ function scrollToFile(path) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-defineExpose({ scrollToFile })
+function getReviewState() {
+  return { kind: 'batch-review', selection: null, visibleRange: null, documents: diffStore.files.map(file => ({
+    path: file.path, reviewId: file.review.id, pendingChanges: file.review.pending,
+  })) }
+}
+defineExpose({ scrollToFile, getReviewState })
 </script>
 
 <style scoped>

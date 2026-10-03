@@ -1,5 +1,5 @@
 <template>
-  <div data-git-diff-view class="flex min-h-0 min-w-0 flex-1 bg-surface" :style="wrapperStyle">
+  <div data-git-diff-view class="flex flex-col min-h-0 min-w-0 flex-1 bg-surface" :style="wrapperStyle">
     <div v-if="git.loading" class="grid flex-1 place-items-center text-center">
       <div>
         <IconLoader2 :size="19" :stroke-width="1.6" class="mx-auto motion-safe:animate-spin text-accent" />
@@ -26,13 +26,16 @@
       </div>
     </div>
     <div v-else ref="viewHost" class="git-diff-host min-h-0 min-w-0 flex-1 overflow-hidden" />
+    <ReviewComments v-if="session && !git.loading && !git.error && !git.review?.binary" ref="discussions" :session="session" readonly />
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IconAlertTriangle, IconFileUnknown, IconLoader2 } from '@tabler/icons-vue'
-import { createUnifiedDiffView } from '../../codemirror/merge.js'
+import { createReviewView } from '../../codemirror/reviewView.js'
+import { createReviewSession } from '../../reviewSession.js'
+import ReviewComments from './ReviewComments.vue'
 import { useGitReviewStore } from '../../../stores/gitReview.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
@@ -42,6 +45,8 @@ const git = useGitReviewStore()
 const settings = useSettingsStore()
 const editorUI = useEditorUIStore()
 const viewHost = ref(null)
+const discussions = ref(null)
+const session = ref(null)
 let editorView = null
 
 const wrapperStyle = computed(() => editorTypographyVars({
@@ -55,19 +60,20 @@ function buildView() {
   destroyView()
   const review = git.review
   if (!viewHost.value || !review || review.binary) return
-  editorView = createUnifiedDiffView({
+  session.value = createReviewSession(review.original, review.modified)
+  editorView = createReviewView({
     parent: viewHost.value,
-    originalContent: review.original,
-    modifiedContent: review.modified,
+    session: session.value,
     collapse: true,
-    editable: false,
-    mergeControls: false,
+    locked: true,
+    onComment: id => discussions.value?.open(id),
   })
 }
 
 function destroyView() {
   editorView?.destroy()
   editorView = null
+  session.value = null
   if (viewHost.value) viewHost.value.innerHTML = ''
 }
 
@@ -77,12 +83,15 @@ function retry() {
 }
 
 watch(() => git.review?.snapshot, () => nextTick(buildView))
+watch(() => session.value?.commentUI.showResolved, () => editorView?.refreshComments())
 watch(() => git.active, active => {
   if (active) nextTick(buildView)
   else destroyView()
 })
 onMounted(() => nextTick(buildView))
 onUnmounted(destroyView)
+defineExpose({ getReviewState: () => editorView ? { ...editorView.getState(), kind: 'history', readOnly: true,
+  historyContent: git.review.modified } : null })
 </script>
 
 <style scoped>

@@ -4,7 +4,7 @@ import { useEditorCommandApi } from './useEditorCommandApi.js'
 
 vi.mock('../../services/fileSystem.js', () => ({ readFile: vi.fn(async () => 'saved source') }))
 
-function graphCommands() {
+function graphCommands(overrides = {}) {
   const openFiles = ref([{ id: 1, path: '/graph/item.md', kind: 'graph', content: 'saved source', dirty: true, graph: { draft: { title: 'Unsaved title' } } }])
   const currentFile = computed(() => openFiles.value[0])
   const surface = {
@@ -40,11 +40,23 @@ function graphCommands() {
     closeEditorTab: vi.fn(),
     openSettings: vi.fn(),
     commentPrompt: vi.fn(),
+    ...overrides,
   })
   return { commands, currentFile, fileManager, surface }
 }
 
 describe('Graph Editor command boundaries', () => {
+  it('reports visible review text and selection without reading the hidden editor', () => {
+    const state = { kind: 'review', reviewId: 'review1', mode: 'original', side: 'original', content: 'Visible original',
+      selection: { from: 0, to: 7, text: 'Visible' }, visibleRange: { from: 0, to: 16 }, comments: [{ status: 'active' }, { status: 'resolved' }] }
+    const { commands, currentFile, surface } = graphCommands({ getReviewState: () => state })
+    currentFile.value.kind = 'text'
+    expect(commands.mimirState()).toMatchObject({ view: { kind: 'review', side: 'original' }, selection: { text: 'Visible', contentSource: 'review' }, comments: { total: 2, unresolved: 1, resolved: 1 } })
+    expect(commands.mimirState().view).not.toHaveProperty('content')
+    expect(commands.mimirState({ includeContent: true }).view.content).toBe('Visible original')
+    expect(surface.getView).not.toHaveBeenCalled()
+    expect(surface.getSelection).not.toHaveBeenCalled()
+  })
   it('reports Graph Details without reading the hidden source selection or comments', () => {
     const { commands, surface, currentFile } = graphCommands()
     const active = commands.mimirActive({ includeContent: true })

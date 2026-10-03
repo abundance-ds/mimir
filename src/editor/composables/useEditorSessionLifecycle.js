@@ -1,11 +1,11 @@
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useProjectHomeStore } from '../../stores/projectHome.js'
 import { loadSession, saveSession } from '../../services/session.js'
 import { createSessionPersist, createSessionSnapshot } from '../sessionPersist.js'
 import { loadSessionEntries, normalizeSessionEntries } from '../sessionRestore.js'
 import { graphSource } from '../../services/businessGraph.js'
 import { graphDocumentState, isGraphSourceCandidate, restoredGraphState } from '../../stores/graphDocuments.js'
-import { loadReview, reviewKey, flushReviews } from '../reviewPersistence.js'
+import { loadReview, reviewKey, flushReviews, moveReview } from '../reviewPersistence.js'
 
 export function useEditorSessionLifecycle({
   fileManager,
@@ -24,6 +24,11 @@ export function useEditorSessionLifecycle({
   let persist = null
   let disposed = false
   let hydrationPromise = Promise.resolve(false)
+  const stopReviewPaths = watch(() => openFiles.value.map(file => [file.reviewSession, reviewKey(file)]), entries => {
+    for (const [review, key] of entries) {
+      if (review && key && (review.key !== key || review.previousKey)) void moveReview(review, key).catch(onError)
+    }
+  }, { flush: 'sync' })
 
   function beginMount() {
     disposed = false
@@ -156,6 +161,7 @@ export function useEditorSessionLifecycle({
 
   function dispose() {
     disposed = true
+    stopReviewPaths()
     if (!persist) return
     const stop = persist
     persist = null

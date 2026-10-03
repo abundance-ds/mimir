@@ -78,6 +78,7 @@ export function moveReviewHistory(session, direction) {
   if (!previous) return false
   to.push({ ...snapshot(session), action: previous.action })
   Object.assign(session, { base: previous.base, result: previous.result, pending: previous.pending, commentDecisions: previous.commentDecisions || {} })
+  session.pending = reviewChunks(session).length + pendingCommentChanges(session)
   session.revision++
   return true
 }

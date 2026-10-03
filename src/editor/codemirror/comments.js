@@ -207,7 +207,7 @@ class CommentBlockWidget extends WidgetType {
       context.className = 'cm-comment-quotation'
       const label = document.createElement('span')
       label.className = 'cm-comment-block-status'
-      label.textContent = c.detached === 'rejected' ? 'Proposed text not kept' : 'Text removed'
+      label.textContent = c.detached === 'rejected' ? 'Proposed text not kept' : c.detached === 'changed' ? 'Passage changed' : 'Text removed'
       context.append(label, document.createElement('br'), document.createTextNode(c.quote || ''))
       wrap.append(context)
     }

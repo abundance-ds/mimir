@@ -30,4 +30,13 @@ describe('comment-aware text changes', () => {
     expect(reread.threads[0]).toMatchObject({ detached: 'removed', quote: 'the claim' })
     expect(rewriteCommentDocument(result, 'Edited again.')).toContain('quote="the claim"')
   })
+
+  it('stores a detached discussion outside the final code fence and removes only its owned separator', () => {
+    const source = `Before ${tag}`
+    const prose = '```js\r\nconst value = 1\r\n```'
+    const result = rewriteCommentDocument(source, prose)
+    expect(result).toContain('```\n\n<comment')
+    expect(stripCommentTags(result)).toBe(prose)
+    expect(stripCommentTags(result.replace(/(?<!\r)\n/g, '\r\n'))).toBe(prose)
+  })
 })

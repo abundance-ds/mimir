@@ -45,6 +45,8 @@ export const useDiffStore = defineStore('diff', () => {
   const canFinish = computed(() => active.value && !decision.value && !finishing.value && (isBatch.value
     ? files.value.length > 0 && files.value.every(file => file.review.pending === 0)
     : currentReview.value?.pending === 0))
+  const hasDiscussionDrafts = computed(() => (isBatch.value ? files.value.map(file => file.review) : [currentReview.value])
+    .some(session => session?.commentUI?.compose?.body?.trim() || Object.values(session?.commentUI?.drafts || {}).some(text => text?.trim())))
   const canUndo = computed(() => !decision.value && !finishing.value && reviewHistory.value.some(group => group.some(editableSession)))
   const canRedo = computed(() => !decision.value && !finishing.value && reviewFuture.value.some(group => group.some(editableSession)))
 
@@ -89,7 +91,7 @@ export const useDiffStore = defineStore('diff', () => {
       original: f.original,
       modified: f.modified,
       proposed: f.modified,
-      review: createReviewSession(f.original, f.modified),
+      review: f.review || createReviewSession(f.original, f.modified),
       proposalId: f.proposalId || null,
       ...(f.graphSourceRevision != null ? { graphSourceRevision: f.graphSourceRevision } : {}),
       status: 'pending',
@@ -99,6 +101,7 @@ export const useDiffStore = defineStore('diff', () => {
     }))
     for (const file of files.value) {
       file.status = reviewStatus(file.review)
+      file.modified = reviewContent(file.review)
       file.review.key = file.path
       file.review.meta = { ids: [file.proposalId].filter(Boolean), sessionId, path: file.path }
       file.review.proposalKey = file.proposalId || ''
@@ -157,10 +160,11 @@ export const useDiffStore = defineStore('diff', () => {
   async function comment(session, action, input, selection) {
     if (!editableSession(session) || finishing.value || decision.value || reviewMeta.value?.type === 'history') throw new Error('This review is read only.')
     const result = mutateReviewComment(session, action, input, 'user', selection)
+    syncReview(session)
     // A failed save keeps the discussion in memory and exposes Retry save.
     // It must not roll back a reply after another action has already seen it.
-    try { await persistReview(session) } catch { return { ...result, saved: false } }
-    return { ...result, saved: true }
+    try { return { ...result, saved: await persistReview(session) } }
+    catch { return { ...result, saved: false } }
   }
 
   function decideComment(session, id, action) {
@@ -277,7 +281,7 @@ export const useDiffStore = defineStore('diff', () => {
     active, mode, isBatch,
     originalContent, modifiedContent, filePath, fileId,
     proposalIds, batchId, reviewMeta, reviewError, decision,
-    reviewSession, currentReview, pendingChanges, canFinish, canUndo, canRedo, finishing,
+    reviewSession, currentReview, pendingChanges, canFinish, hasDiscussionDrafts, canUndo, canRedo, finishing,
     recordReviewChange, decideRemainingChanges, undoReview, redoReview, comment, decideComment,
     focusedFile, isBatchFileFocused,
     files, pendingFiles, resolvedCount, allResolved,

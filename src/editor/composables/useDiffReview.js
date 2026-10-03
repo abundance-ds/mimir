@@ -5,7 +5,8 @@ import { graphDocumentState, isGraphSourceCandidate } from '../../stores/graphDo
 import { reviewStatus } from '../reviewSession.js'
 import { reviewContent, syncReviewComments } from '../reviewComments.js'
 import { stripCommentTags } from '../../services/comments/parser.js'
-import { persistReview, reviewKey, scheduleReviewSave } from '../reviewPersistence.js'
+import { resolveScratchpad, saveScratchpad } from '../../services/scratchpad.js'
+import { loadReview, persistReview, reviewKey, scheduleReviewSave } from '../reviewPersistence.js'
 
 const SOURCE_REQUIRED = 'Open Source before applying a Markdown review to this Graph entry.'
 
@@ -27,7 +28,9 @@ export function useDiffReview({
   batchDiffViewRef,
   scheduleContentSync,
   flushEditorContent,
+  persistDocuments = async () => {},
 }) {
+  const singleFinishes = new Map()
   function resolveSingleDiffTarget() {
     const files = fileManager.openFiles || []
     if (diffStore.fileId != null) {
@@ -106,16 +109,19 @@ export function useDiffReview({
     const sessionId = diffStore.reviewMeta?.sessionId || ''
     const { invoke } = await import('@tauri-apps/api/core')
     let activeEditorChanged = false
+    const updateResult = (file, content) => {
+      syncReviewComments(file.review, content)
+      file.modified = reviewContent(file.review, file.status === 'rejected' ? stripCommentTags(content) : file.review.result)
+    }
+    const matchesReview = (file, content) => stripCommentTags(content) === stripCommentTags(file.original)
+      || content === file.modified || (file.status === 'rejected' && stripCommentTags(content) === stripCommentTags(file.modified))
 
     for (const file of allFiles) {
       if (file.status === 'pending' || file.applied) continue
       if (file.status === 'rejected' && file.modified === file.original) continue
       try {
         const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
-        if (openFile) {
-          syncReviewComments(file.review, openFile.content)
-          file.modified = reviewContent(file.review)
-        }
+        if (openFile) updateResult(file, openFile.content)
         const graph = openFile?.graph ? null : await graphSource(file.path)
         if (file.graphSourceRevision != null && !openFile?.graph && !graph) {
           throw new Error('This Graph source is unavailable. Reopen the proposal after its scope is mounted.')
@@ -136,7 +142,8 @@ export function useDiffReview({
           if (!fileManager.openFiles.includes(graphFile) || graphFile.path !== file.path || graphFile.kind === 'graph') {
             throw new Error('This Graph tab changed. Open the proposal again.')
           }
-          if (stripCommentTags(graphFile.content) !== stripCommentTags(file.original) && graphFile.content !== file.modified) {
+          updateResult(file, graphFile.content)
+          if (!matchesReview(file, graphFile.content)) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
           if (graphFile.content !== file.modified) {
@@ -151,8 +158,9 @@ export function useDiffReview({
         }
         const active = currentFile.value?.path === file.path
         if (active) {
-          if (stripCommentTags(currentFile.value.content) !== stripCommentTags(file.original) && currentFile.value.content !== file.modified) {
-            throw new Error('The active document changed after this review was created. Reopen the proposal against the latest text.')
+          updateResult(file, currentFile.value.content)
+          if (!matchesReview(file, currentFile.value.content)) {
+            throw new Error('The active document changed after this review was created. Reject this review, then request a new proposal.')
           }
           if (currentFile.value.content !== file.modified) {
             fileManager.updateContent(file.modified, currentFile.value)
@@ -162,17 +170,23 @@ export function useDiffReview({
           const currentContent = graph?.content ?? (openFile
             ? openFile.content
             : (await invoke('read_text_file', { path: file.path })).content)
-          if (stripCommentTags(currentContent) !== stripCommentTags(file.original) && currentContent !== file.modified) {
+          updateResult(file, currentContent)
+          if (!matchesReview(file, currentContent)) {
             throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
           }
-          syncReviewComments(file.review, currentContent)
-          file.modified = reviewContent(file.review)
           if (openFile) {
             if (currentContent !== file.modified) fileManager.updateContent(file.modified, openFile)
             if (openFile.dirty) await fileManager.save(openFile)
           } else if (currentContent !== file.modified) {
             if (graph) await saveGraphSource({ path: file.path, content: file.modified, expectedRevision: file.graphSourceRevision ?? graph.sourceRevision })
-            else await invoke('write_text_file', { path: file.path, content: file.modified })
+            else {
+              const scratchpad = file.path.endsWith('/scratchpad.md') ? await resolveScratchpad(file.path) : null
+              await fileManager.writeClosedDocument(async () => {
+                if (fileManager.openFiles?.some(candidate => candidate.path === file.path)) throw new Error('This file was opened during review. Retry the decision.')
+                if (scratchpad) await saveScratchpad(file.modified, currentContent)
+                else await invoke('document_file_write', { path: file.path, content: file.modified, expectedContent: currentContent })
+              })
+            }
           }
         }
         file.applied = true
@@ -183,18 +197,14 @@ export function useDiffReview({
       }
     }
     if (activeEditorChanged) scheduleContentSync()
+    await persistDocuments()
 
     for (const file of allFiles) {
       if (file.status === 'pending' || file.lifecycleResolved) continue
       if (file.status === 'accepted' && !file.applied) continue
-      if (!file.proposalId) {
-        file.lifecycleResolved = true
-        file.error = null
-        continue
-      }
       const status = reviewStatus(file.review) === 'accepted' ? 'applied' : 'rejected'
       try {
-        await invoke('proposal_respond', {
+        if (file.proposalId && !file.reported) await invoke('proposal_respond', {
           result: {
             id: file.proposalId,
             sessionId,
@@ -202,9 +212,10 @@ export function useDiffReview({
             detail: `User ${status} the change`,
           },
         })
-        file.lifecycleResolved = true
+        file.reported = true
         file.review.completed = true
         await persistReview(file.review)
+        file.lifecycleResolved = true
         const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
         if (openFile?.reviewSession === file.review) openFile.reviewSession = null
         file.error = null
@@ -261,6 +272,8 @@ export function useDiffReview({
   }
 
   async function onDiffFinish() {
+    const pending = singleFinishes.get(diffStore.currentReview?.id)
+    if (pending) return pending
     if (diffStore.decision) {
       const targetResult = requireActiveSingleDiffTarget()
       if (!targetResult.ok) return targetResult
@@ -271,6 +284,7 @@ export function useDiffReview({
       diffStore.finishing = true
       diffStore.setReviewError('')
       const rows = diffStore.files
+      for (const file of rows) file.review.applying = true
       try {
         for (const file of rows) {
           if (file.lifecycleResolved) continue
@@ -286,6 +300,7 @@ export function useDiffReview({
         if (diffStore.files === rows) diffStore.setReviewError(error?.message || error)
         return { ok: false, error: String(error?.message || error) }
       } finally {
+        for (const file of rows) file.review.applying = false
         // A newer review can arrive while the native operation is pending.
         if (diffStore.files === rows) diffStore.finishing = false
       }
@@ -293,26 +308,47 @@ export function useDiffReview({
     const targetResult = requireActiveSingleDiffTarget()
     if (!targetResult.ok) return targetResult
     const session = diffStore.currentReview
-    syncReviewComments(session, targetResult.target.content)
-    try { await persistReview(session) } catch (error) {
-      diffStore.setReviewError(error?.message || String(error))
-      return { ok: false, error: diffStore.reviewError }
-    }
-    // Posting a discussion and accepting prose are separate Undo steps.
-    // Keep the discussion on its original quotation before applying the text.
-    if (stripCommentTags(targetResult.target.content) === session.references?.original) {
-      const withDiscussions = reviewContent(session, session.references.original)
-      if (withDiscussions !== targetResult.target.content && session.comments?.some(record => record.discussion || Object.keys(record.live).length)) {
-        fileManager.updateContent(withDiscussions, targetResult.target)
-        scheduleContentSync()
-        await nextTick()
+    const target = targetResult.target
+    const path = target.path
+    const context = { session, original: session.original, meta: diffStore.reviewMeta }
+    diffStore.finishing = true
+    session.applying = true
+    target.reviewPending = true
+    const operation = (async () => {
+      syncReviewComments(session, targetResult.target.content)
+      await persistReview(session)
+      // Posting a discussion and accepting prose are separate Undo steps.
+      // Keep the discussion on its original quotation before applying the text.
+      if (!(fileManager.openFiles || []).includes(target) || target.path !== path) {
+        throw new Error('The review document changed. Open the review again.')
       }
-    }
-    if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
-    return completeReview(targetResult.target, reviewStatus(session) === 'rejected' ? 'rejected' : 'applied', reviewContent(session))
+      if (stripCommentTags(targetResult.target.content).replace(/\r\n?/g, '\n') === session.references?.original) {
+        const withDiscussions = reviewContent(session, session.references.original)
+        if (withDiscussions !== targetResult.target.content && session.comments?.some(record => record.discussion || Object.keys(record.live).length)) {
+          fileManager.updateContent(withDiscussions, targetResult.target)
+          scheduleContentSync()
+          await nextTick()
+        }
+      }
+      if (context.meta?.type === 'inline-ai' && diffStore.currentReview === session) inlineAIState.value = null
+      const rejected = reviewStatus(session) === 'rejected'
+      const content = rejected ? reviewContent(session, stripCommentTags(target.content)) : reviewContent(session)
+      return completeReview(targetResult.target, rejected ? 'rejected' : 'applied', content, context)
+    })().catch(error => {
+      const message = error?.message || String(error)
+      if (diffStore.currentReview === session) diffStore.setReviewError(message)
+      return { ok: false, error: message }
+    }).finally(() => {
+      session.applying = false
+      target.reviewPending = false
+      if (diffStore.currentReview === session) diffStore.finishing = false
+      singleFinishes.delete(session.id)
+    })
+    singleFinishes.set(session.id, operation)
+    return operation
   }
 
-  function completeReview(target, status, content) {
+  function completeReview(target, status, content, context) {
     let decision = target.reviewDecision
     if (decision && decision !== diffStore.decision) {
       return { ok: false, error: 'Finish the previous review decision before reviewing another change.' }
@@ -321,25 +357,26 @@ export function useDiffReview({
       return { ok: false, error: 'This decision is already applied. Retry its status update.' }
     }
     if (!decision) {
-      const original = diffStore.originalContent
+      const original = context?.original ?? diffStore.originalContent
       if (status === 'applied' && stripCommentTags(target.content) !== stripCommentTags(original) && target.content !== content) {
-        const error = 'The document changed after this review was created. Reopen the proposal against the latest text.'
+        const error = 'The document changed after this review was created. Reject this review, then request a new proposal.'
         diffStore.setReviewError(error)
         return { ok: false, error }
       }
-      diffStore.decision = {
+      decision = {
         targetId: target.id, original, content, status,
-        reviewSession: diffStore.reviewSession,
-        ids: proposalIdsFromReviewMeta(diffStore.reviewMeta),
-        sessionId: diffStore.reviewMeta?.sessionId,
+        reviewSession: context?.session ?? diffStore.reviewSession,
+        ids: proposalIdsFromReviewMeta(context?.meta ?? diffStore.reviewMeta),
+        sessionId: (context?.meta ?? diffStore.reviewMeta)?.sessionId,
         reported: new Set(), pending: false, operation: null, error: '',
       }
-      decision = diffStore.decision
+      if (!context || diffStore.currentReview === context.session) diffStore.decision = decision
       target.reviewDecision = decision
+      decision = target.reviewDecision
       target.reviewPending = true
       // Commit once, before any asynchronous report. A receipt can never write
       // text back into this document. Reject only dismisses the proposal.
-      if ((status === 'applied' || stripCommentTags(target.content) === stripCommentTags(original)) && target.content !== content) {
+      if ((status === 'applied' || stripCommentTags(target.content) === stripCommentTags(content)) && target.content !== content) {
         fileManager.updateContent(content, target)
         if (currentFile.value === target) scheduleContentSync()
       }
@@ -349,6 +386,11 @@ export function useDiffReview({
     decision.error = ''
     target.reviewPending = true
     decision.operation = (async () => {
+      try { await persistDocuments() } catch (error) {
+        decision.error = `The document draft could not be saved: ${error?.message || error}`
+        if (diffStore.decision === decision) diffStore.setReviewError(decision.error)
+        return { ok: false, error: decision.error }
+      }
       const lifecycle = await respondToDiffReview(decision)
       if (!lifecycle.ok) {
         decision.error = lifecycle.error
@@ -391,6 +433,12 @@ export function useDiffReview({
     if (file?.kind === 'graph') throw new Error(SOURCE_REQUIRED)
     const path = file?.path || ''
     flushEditorContent({ bridge: 'flush' })
+    const existing = file?.reviewSession
+    if (existing && !existing.completed && opts?.review?.type !== 'history') {
+      diffStore.activate({ original: existing.original, modified: existing.proposed, path, fileId: file.id,
+        session: existing, review: existing.meta })
+      return
+    }
     diffStore.activate({
       original,
       modified,
@@ -410,9 +458,14 @@ export function useDiffReview({
     flushEditorContent({ bridge: 'flush' })
     const rows = await Promise.all(fileList.map(async file => {
       const open = fileManager.openFiles?.find(candidate => candidate.path === file.path)
-      if (open?.graph) return { ...file, graphSourceRevision: open.graph.sourceRevision }
+      const saved = open?.reviewSession || await loadReview(file.path)
+      const review = saved && !saved.completed ? saved : null
+      if (review && review.proposalKey !== (file.proposalId || '')) {
+        throw new Error(`Finish the current review of ${file.path.split('/').pop()} before opening another review.`)
+      }
+      if (open?.graph) return { ...file, review, graphSourceRevision: open.graph.sourceRevision }
       const graph = isGraphSourceCandidate(file.path) ? await graphSource(file.path) : null
-      return { ...file, graphSourceRevision: graph?.sourceRevision ?? null }
+      return { ...file, review, graphSourceRevision: graph?.sourceRevision ?? null }
     }))
     diffStore.activateBatch({ fileList: rows, sessionId: meta?.sessionId })
     for (const row of diffStore.files) {

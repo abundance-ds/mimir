@@ -1,15 +1,13 @@
 import { ref, onUnmounted } from 'vue'
-import { findTargetText } from '../../services/ai/tools/textMatch.js'
-import { matchInCleanContent } from '../../services/ai/tools/edit.js'
+import { findUniqueRange } from '../../services/ai/tools/edit.js'
 import { PROPOSAL_APPLY_EVENT, DIFF_OPEN_EVENT } from '../../shared/proposalEvents.js'
-import { replaceCommentText } from '../../services/comments/document.js'
+import { replaceCommentText, replaceCommentRanges } from '../../services/comments/document.js'
 
 const SOURCE_REQUIRED = 'Open Source before applying a Markdown proposal to this Graph entry.'
 
 export function computeDiffFromReview(review, fileContent) {
   if (!review?.targetText) return null
-  const direct = findTargetText(fileContent, review.targetText)
-  const match = direct || matchInCleanContent(fileContent, review.targetText)
+  const match = findUniqueRange(fileContent, review.targetText)
   if (!match || match.error) return null
   return {
     original: fileContent,
@@ -22,8 +20,7 @@ export function computeCompoundDiff(reviews, fileContent) {
   const positioned = []
   for (const r of reviews) {
     if (!r.targetText) continue
-    const direct = findTargetText(fileContent, r.targetText)
-    const match = direct || matchInCleanContent(fileContent, r.targetText)
+    const match = findUniqueRange(fileContent, r.targetText)
     if (!match || match.error) continue
     positioned.push({ replacement: r.replacement || '', from: match.from, to: match.to })
   }
@@ -32,10 +29,7 @@ export function computeCompoundDiff(reviews, fileContent) {
   for (let i = 0; i < positioned.length - 1; i++) {
     if (positioned[i + 1].to > positioned[i].from) return null
   }
-  let modified = fileContent
-  for (const p of positioned) {
-    modified = replaceCommentText(modified, p.from, p.to, p.replacement)
-  }
+  const modified = replaceCommentRanges(fileContent, positioned)
   return { original: fileContent, modified }
 }
 
@@ -71,9 +65,11 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
           throw new Error('This proposal belongs to another document. Open its Source tab before applying it.')
         }
         const docContent = getDocContent()
-        const match = findTargetText(docContent, payload.targetText)
-        if (!match) return report(payload, 'not-found', 'Target text not found in the current document')
-        applyChange(match.from, match.to, payload.replacement)
+        const match = findUniqueRange(docContent, payload.targetText)
+        if (!match || match.error) return report(payload, 'not-found', 'Target text not found uniquely in the current document')
+        const modified = replaceCommentText(docContent, match.from, match.to, payload.replacement)
+        if (modified === docContent.slice(0, match.from) + payload.replacement + docContent.slice(match.to)) applyChange(match.from, match.to, payload.replacement)
+        else applyChange(0, docContent.length, modified)
         return report(payload, 'applied', 'Change applied successfully')
       } catch (error) {
         return report(payload, 'conflict', error?.message || String(error))
@@ -107,9 +103,9 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
           const original = docContent
           let modified = docContent
           if (f.targetText && f.replacement != null) {
-            const match = findTargetText(docContent, f.targetText)
-            if (match) {
-              modified = docContent.slice(0, match.from) + f.replacement + docContent.slice(match.to)
+            const match = findUniqueRange(docContent, f.targetText)
+            if (match && !match.error) {
+              modified = replaceCommentText(docContent, match.from, match.to, f.replacement)
             }
           }
           return { path: f.path || getDocPath(), original, modified, proposalId: f.id }
@@ -166,9 +162,9 @@ export function useProposalBridge({ getDocContent, applyChange, getDocPath, acti
       let modified = docContent
 
       if (payload.targetText && payload.replacement != null) {
-        const match = findTargetText(docContent, payload.targetText)
-        if (match) {
-          modified = docContent.slice(0, match.from) + payload.replacement + docContent.slice(match.to)
+        const match = findUniqueRange(docContent, payload.targetText)
+        if (match && !match.error) {
+          modified = replaceCommentText(docContent, match.from, match.to, payload.replacement)
         }
       } else if (payload.modifiedContent) {
         modified = payload.modifiedContent

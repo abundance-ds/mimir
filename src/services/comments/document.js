@@ -37,12 +37,21 @@ export function textChanges(before, after) {
 
 // Map the known occurrence, never search for a similar sentence elsewhere.
 // A fully replaced/deleted anchor is kept as a quoted, detached discussion.
-export function mapCommentRange(before, after, range, changes = textChanges(before, after)) {
+export function mapCommentRange(before, after, range, changes = textChanges(before, after), { exact = false } = {}) {
   const from = changes.mapPos(Math.min(range.from, before.length), 1)
   const to = changes.mapPos(Math.min(range.to, before.length), -1)
   let surviving = Math.max(0, range.to - range.from)
   changes.iterChangedRanges((a, b) => { surviving -= Math.max(0, Math.min(b, range.to) - Math.max(a, range.from)) })
-  return { from, to: Math.max(from, to), surviving: Math.max(0, surviving), detached: to <= from || surviving <= 0 }
+  const quote = before.slice(range.from, range.to)
+  const mapped = after.slice(from, Math.max(from, to))
+  const words = quote.toLocaleLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) || []
+  const keptWords = new Set(mapped.toLocaleLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) || [])
+  // A character diff can align a few letters in unrelated text. Do not turn
+  // that into an apparently precise comment anchor. Exact edits already
+  // identify the occurrence and do not need this inference check.
+  const uncertain = !exact && quote !== mapped && (surviving < quote.length / 2 || (words.length > 0 && !words.some(word => keptWords.has(word))))
+  return { from, to: Math.max(from, to), surviving: Math.max(0, surviving), detached: to <= from || surviving <= 0 || uncertain,
+    reason: surviving > 0 ? 'changed' : 'removed' }
 }
 
 export function writeCommentDocument(text, threads) {
@@ -79,23 +88,41 @@ export function rewriteCommentDocument(source, text) {
   return writeCommentDocument(text, document.threads.map(thread => {
     if (thread.detached) return thread
     const range = mapCommentRange(document.text, text, thread, changes)
-    return { ...thread, from: range.from, to: range.to, detached: range.detached ? 'removed' : null }
+    return { ...thread, from: range.from, to: range.to, detached: range.detached ? range.reason : null }
   }))
 }
 
 // Agent replacements may start inside a comment and end outside it. Replace
 // prose first, then map complete threads; slicing the raw range breaks tags.
 export function replaceCommentText(source, from, to, replacement) {
+  return replaceCommentRanges(source, [{ from, to, replacement }])
+}
+
+// Convert every offset against the same source. Serializing one replacement
+// before applying the next can move a tag across the next raw range.
+export function replaceCommentRanges(source, replacements) {
   const parsed = parseCommentTags(source)
-  if (!parsed.comments.length) return source.slice(0, from) + replacement + source.slice(to)
-  const start = rawToCleanPos(parsed.comments, from)
-  const end = rawToCleanPos(parsed.comments, to)
-  const text = parsed.cleanText.slice(0, start) + replacement + parsed.cleanText.slice(end)
   const document = readCommentDocument(source)
-  const changes = ChangeSet.of({ from: start, to: end, insert: replacement }, document.text.length)
-  return writeCommentDocument(text, document.threads.map(thread => {
+  const edits = replacements.map(({ from, to, replacement }) => ({
+    from: rawToCleanPos(parsed.comments, from), to: rawToCleanPos(parsed.comments, to),
+    document: readCommentDocument(replacement || ''),
+  })).sort((a, b) => a.from - b.from)
+  if (edits.some((edit, i) => i && edit.from < edits[i - 1].to)) throw new Error('The proposed text ranges overlap.')
+  const changes = ChangeSet.of(edits.map(edit => ({ from: edit.from, to: edit.to, insert: edit.document.text })), document.text.length)
+  let cursor = 0
+  let text = ''
+  const inserted = []
+  for (const edit of edits) {
+    text += document.text.slice(cursor, edit.from)
+    for (const thread of edit.document.threads) inserted.push({ ...thread, from: text.length + thread.from, to: text.length + thread.to })
+    text += edit.document.text
+    cursor = edit.to
+  }
+  text += document.text.slice(cursor)
+  const threads = document.threads.filter(thread => !inserted.some(next => next.id === thread.id)).map(thread => {
     if (thread.detached) return thread
-    const range = mapCommentRange(document.text, text, thread, changes)
+    const range = mapCommentRange(document.text, text, thread, changes, { exact: true })
     return { ...thread, from: range.from, to: range.to, detached: range.detached ? 'removed' : null }
-  }))
+  })
+  return writeCommentDocument(text, [...threads, ...inserted])
 }

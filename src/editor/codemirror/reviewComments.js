@@ -22,7 +22,18 @@ export function reviewCommentMarkers(initial, onOpen, onAdd, onSelection) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'cm-review-comment-marker'
-      button.textContent = '◇'
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      icon.setAttribute('viewBox', '0 0 24 24')
+      icon.setAttribute('width', '14')
+      icon.setAttribute('height', '14')
+      icon.setAttribute('fill', 'none')
+      icon.setAttribute('stroke', 'currentColor')
+      icon.setAttribute('stroke-width', '1.6')
+      icon.setAttribute('aria-hidden', 'true')
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('d', 'M8 10h8M8 14h4M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8l-5 3V6a2 2 0 0 1 2-2Z')
+      icon.appendChild(path)
+      button.appendChild(icon)
       button.title = `${this.comments.length} ${this.comments.length === 1 ? 'discussion' : 'discussions'}`
       button.setAttribute('aria-label', `Open ${button.title}`)
       button.addEventListener('mousedown', event => event.preventDefault())

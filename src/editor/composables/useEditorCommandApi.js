@@ -34,7 +34,7 @@ export function useEditorCommandApi({
   getReviewState = () => null,
   navigation = createNavigationGuard(),
 }) {
-  const documents = useDocumentTools({ fileManager, currentFile, onChanged: onDocumentChanged })
+  const documents = useDocumentTools({ fileManager, currentFile, onChanged: onDocumentChanged, getReviewState })
   async function mimirOpen(path, options = {}) {
     return openDocument(path, options, navigation.begin())
   }
@@ -78,7 +78,8 @@ export function useEditorCommandApi({
       await nextTick()
       if (!isCurrent()) return null
       if (source && currentFile.value !== file) throw new Error('The active document changed. Open Source again.')
-      if (file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
+      // Background reveals (including Scratchpad updates) retain the reading position.
+      if (focus && file?.kind !== 'graph' && kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
       if (focus) emitNavigate({ path })
       if (!isCurrent()) return null
       if (focus) restoreEditorFocus()
@@ -103,9 +104,19 @@ export function useEditorCommandApi({
 
   function mimirActive({ includeContent = false } = {}) {
     flushEditorContent({ bridge: 'flush' })
+    const review = getReviewState()
+    if (review?.kind === 'batch-review') return null
+    if (review?.kind === 'history') {
+      const content = review.historyContent ?? review.content
+      if (typeof content !== 'string') return null
+      return { documentId: `history:${review.reviewId}`, path: review.path || null, name: basename(review.path) || 'History',
+        kind: 'text', readOnly: true, contentSource: 'history', dirty: false, cursor: null,
+        ...(includeContent ? { content } : {}) }
+    }
     const file = currentFile.value
     if (!file) return null
     const details = file.kind === 'graph'
+    const reviewing = Boolean(review)
     const content = file.content || ''
     return {
       path: file.path || null,
@@ -114,7 +125,7 @@ export function useEditorCommandApi({
       kind: file.kind || 'text',
       preview: Boolean(file.preview),
       index: activeVisibleFileIndex.value,
-      cursor: details ? null : editorSurfaceRef.value?.getCursor?.() || null,
+      cursor: details || reviewing ? null : editorSurfaceRef.value?.getCursor?.() || null,
       content: includeContent ? content : undefined,
       ...(details && includeContent ? {
         contentSource: 'saved',
@@ -140,13 +151,16 @@ export function useEditorCommandApi({
     const selection = mimirSelection()
     const review = getReviewState()
     const view = review || currentFile.value?.kind === 'graph' ? null : editorSurfaceRef.value?.getView?.()
-    const comments = view ? getCommentsFromState(view.state) : []
+    const comments = review?.comments || (view ? getCommentsFromState(view.state) : [])
     const visible = view?.visibleRanges?.[0]
     return {
       active,
       tabs,
       selection,
-      ...(review ? { view: { ...review, content: includeContent ? review.content : undefined } } : {}),
+      ...(review ? { view: { kind: review.kind, reviewId: review.reviewId, mode: review.mode, side: review.side,
+        ...(review.readOnly ? { readOnly: true } : {}), ...(review.path ? { path: review.path } : {}),
+        ...(review.documents ? { documents: review.documents } : {}),
+        selection, visibleRange: review.visibleRange, ...(includeContent ? { content: review.content } : {}) } } : {}),
       visibleRange: review ? review.visibleRange : visible
         ? {
             from: visible.from,
@@ -164,12 +178,12 @@ export function useEditorCommandApi({
   }
 
   function mimirSelection() {
-    if (currentFile.value?.kind === 'graph') return null
     const review = getReviewState()
     if (review) {
       const selection = review.selection
       return selection ? { from: selection.from, to: selection.to, text: selection.text, contentSource: 'review', side: review.side } : null
     }
+    if (currentFile.value?.kind === 'graph') return null
     return editorSurfaceRef.value?.getSelection?.() || null
   }
 
@@ -273,7 +287,7 @@ export function useEditorCommandApi({
       // runs, so no native proposal exists to back a stashed review.
       throw new Error('The proposal target is no longer present in the active document.')
     }
-    fileManager.setFileReviews(file, [review])
+    fileManager.setFileReviews(file, [...(file.reviews || []).filter(item => item.proposalId !== review.proposalId), review])
     activateDiff(diff.original, diff.modified, {
       review: {
         ids: [review.proposalId],

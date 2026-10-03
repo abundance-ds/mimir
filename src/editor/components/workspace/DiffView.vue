@@ -19,6 +19,7 @@ import { editorTypographyVars } from '../../../shared/fonts.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
 import { createReviewView } from '../../codemirror/reviewView.js'
 import { reviewContent } from '../../reviewComments.js'
+import { reviewChunks } from '../../reviewSession.js'
 import ReviewComments from './ReviewComments.vue'
 
 const diff = useDiffStore()
@@ -61,6 +62,7 @@ function buildView() {
     onAddComment: selected => discussions.value?.start(selected),
     onSelection: selected => { selection.value = selected },
   })
+  selection.value = projection.getSelection()
   diff.setChunkCount(session.pending)
 }
 
@@ -75,12 +77,19 @@ function onKeydown(event) {
 }
 
 function scrollToChunk(index) {
-  const annotation = diff.currentReview?.comments.filter(record => diff.currentReview.commentDecisions[record.id] === 'pending')[index - (diff.currentReview.pending - Object.values(diff.currentReview.commentDecisions).filter(value => value === 'pending').length)]
+  const session = diff.currentReview
+  if (!session) return
+  const annotation = session.comments.filter(record => session.commentDecisions[record.id] === 'pending')[index - reviewChunks(session).length]
   if (annotation) discussions.value?.open(annotation.id)
   else projection?.scrollToChunk(index)
 }
 function getResolvedContent() { return diff.decision?.content ?? (diff.currentReview ? reviewContent(diff.currentReview) : diff.modifiedContent) }
-function getReviewState() { return projection?.getState() || null }
+function getReviewState() {
+  const state = projection?.getState()
+  if (!state) return null
+  return diff.reviewMeta?.type === 'history' ? { ...state, kind: 'history', readOnly: true, path: diff.filePath,
+    historyContent: state.side === 'original' ? diff.currentReview.original : diff.currentReview.proposed } : state
+}
 function editCommand(command) { if (command === 'undo') diff.undoReview(); else if (command === 'redo') diff.redoReview() }
 defineExpose({ scrollToChunk, getResolvedContent, getReviewState, editCommand })
 

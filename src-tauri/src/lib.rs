@@ -76,6 +76,7 @@ pub mod chat;
 mod connections;
 mod document_files;
 mod document_reviews;
+mod comment_text;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
@@ -92,9 +93,9 @@ mod persistence;
 pub mod routine_runtime;
 pub mod routines;
 mod scratchpad;
-mod spelling;
 mod session;
 mod shell_exec;
+mod spelling;
 pub mod tool_bridge;
 pub mod tool_registry;
 mod tool_runtime;
@@ -109,8 +110,12 @@ mod workspace_files;
 fn configure_macos_text_input() {
     use objc2_foundation::{NSString, NSUserDefaults};
     let defaults = NSUserDefaults::standardUserDefaults();
-    for key in ["WebContinuousSpellCheckingEnabled", "WebAutomaticSpellingCorrectionEnabled",
-        "WebAutomaticTextReplacementEnabled", "WebAutomaticDashSubstitutionEnabled"] {
+    for key in [
+        "WebContinuousSpellCheckingEnabled",
+        "WebAutomaticSpellingCorrectionEnabled",
+        "WebAutomaticTextReplacementEnabled",
+        "WebAutomaticDashSubstitutionEnabled",
+    ] {
         defaults.setBool_forKey(false, &NSString::from_str(key));
     }
     // Set this before creating any webview. Otherwise WebKit inherits the
@@ -157,6 +162,9 @@ fn spell_suggest(word: String) -> Vec<String> {
     use objc2_app_kit::NSSpellChecker;
     use objc2_foundation::{NSRange, NSString};
 
+    if word.encode_utf16().count() > 256 {
+        return Vec::new();
+    }
     let checker = NSSpellChecker::sharedSpellChecker();
     let ns_word = NSString::from_str(&word);
 
@@ -602,13 +610,6 @@ fn broadcast_proposal_result(
     }
 }
 
-fn count_exact(haystack: &str, needle: &str) -> usize {
-    if needle.is_empty() {
-        return 0;
-    }
-    haystack.matches(needle).count()
-}
-
 fn find_editor_owner(
     store: &ProposalStore,
     proposal: &serde_json::Value,
@@ -729,31 +730,27 @@ fn apply_proposal_to_file(
         }
     };
 
-    let target_count = count_exact(&content, target);
-    if target_count > 1 {
-        return (
-            "conflict".to_string(),
-            "Target text is ambiguous in file".to_string(),
-            None,
-        );
-    }
-    if target_count == 0 {
-        if count_exact(&content, replacement) == 1 {
-            return (
-                "accepted".to_string(),
-                "Proposal was already applied".to_string(),
-                None,
-            );
-        }
-        return (
-            "stale".to_string(),
-            "Target text no longer found in file".to_string(),
-            None,
-        );
+    // A saved review can contain decisions and discussions that do not yet
+    // exist in the file. Only its Editor owner can finish that review.
+    match document_reviews::has_pending_review(&path) {
+        Ok(true) => return ("conflict".into(), "Open this file's review in Editor before accepting it. Its decisions and discussions are kept there.".into(), None),
+        Err(error) => return ("failed".into(), error, None),
+        Ok(false) => {}
     }
 
-    let modified = content.replacen(target, replacement, 1);
-    if let Err(err) = write_text_file(path.clone(), modified.clone()) {
+    let modified = match comment_text::replace(&content, target, replacement) {
+        Ok(Some(modified)) => modified,
+        Ok(None) => return ("accepted".into(), "Proposal was already applied".into(), None),
+        Err(detail) => {
+            let status = if detail.contains("no longer found") { "stale" } else { "conflict" };
+            return (status.into(), detail, None);
+        }
+    };
+    let checked_path = match fs::canonicalize(&path) {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(error) => return ("failed".into(), error.to_string(), None),
+    };
+    if let Err(err) = document_files::document_file_write(checked_path, modified.clone(), content) {
         return ("failed".to_string(), err, None);
     }
     (

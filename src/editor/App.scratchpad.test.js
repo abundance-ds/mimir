@@ -65,6 +65,26 @@ it('keeps a Scratchpad refresh separate from the file shown before a tab switch'
   expect(surface.vm.getContent()).toBe('Latest scratchpad text')
 })
 
+it.each([false, true])('retains the Scratchpad view on an external update (background tab: %s)', async background => {
+  const { wrapper, scratchpad, surface, store } = await setup()
+  store.content = Array.from({ length: 100 }, (_, index) => `Line ${index + 1}`).join('\n')
+  await wrapper.vm.mimirOpen(path)
+  await flushPromises()
+  const view = surface.vm.getView()
+  view.scrollDOM.scrollTop = 420
+  if (background) await wrapper.vm.mimirOpen('/work/ordinary.md')
+  const scrollToPos = vi.spyOn(surface.vm.$.exposed, 'scrollToPos')
+
+  store.content += '\nAgent addition'
+  store.externalChange++
+  await flushPromises()
+
+  expect(surface.vm.getContent()).toBe(store.content)
+  expect(scratchpad.dirty).toBe(false)
+  expect(scrollToPos).not.toHaveBeenCalled()
+  expect(view.scrollDOM.scrollTop).toBe(420)
+})
+
 it('keeps refresh after workspace selection separate from the outgoing CodeMirror document', async () => {
   const { wrapper, scratchpad, surface, store, files } = await setup()
   // Force the refresh between workspace selection and the surface's

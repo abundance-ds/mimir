@@ -17,6 +17,47 @@ describe('DiffView', () => {
     return { diff, wrapper }
   }
 
+  it.each(['unified', 'split'])('shows clean %s prose with discussions, drafts, and safe reply Undo', async layout => {
+    const tagged = '<comment id="a" author="user" text="Check this">Claim here</comment>'
+    const { diff, wrapper } = mountActive({ original: tagged + ' old', modified: tagged + ' new' })
+    diff.setLayout(layout)
+    await flushPromises()
+    for (const content of wrapper.findAll('.cm-scroller')) expect(content.text()).not.toContain('<comment')
+    await vi.waitFor(() => expect(wrapper.find('.cm-review-comment-marker').exists()).toBe(true))
+    await wrapper.find('.cm-review-comment-marker').trigger('click')
+    await wrapper.find('textarea').setValue('Draft reply')
+    diff.decideRemainingChanges('accept')
+    await flushPromises()
+    const decisions = diff.currentReview.past.length
+    await wrapper.find('textarea').trigger('keydown', { key: 'z', metaKey: true })
+    expect(diff.currentReview.past).toHaveLength(decisions)
+    diff.setLayout(layout === 'split' ? 'unified' : 'split')
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('Draft reply')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    diff.undoReview()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Draft reply')
+    expect(wrapper.vm.getResolvedContent()).toContain('text="Draft reply"')
+    expect(wrapper.vm.getReviewState().selection).not.toHaveProperty('document')
+    wrapper.unmount()
+  })
+
+  it('shows a metadata-only change with explicit Accept and Reject controls', async () => {
+    const { diff, wrapper } = mountActive({ original: 'Claim', modified: '<comment id="a" text="Question">Claim</comment>' })
+    expect(wrapper.find('.cm-content').text()).toBe('Claim')
+    expect(diff.pendingChanges).toBe(1)
+    expect(wrapper.find('button[name=accept]').exists()).toBe(false)
+    await wrapper.find('[aria-label="Reject comment change"]').trigger('click')
+    expect(wrapper.vm.getResolvedContent()).toBe('Claim')
+    expect(diff.pendingChanges).toBe(0)
+    diff.undoReview()
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Accept comment change"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('builds a unified diff, reports chunks to the store, and resolves content', () => {
     const { diff, wrapper } = mountActive()
 

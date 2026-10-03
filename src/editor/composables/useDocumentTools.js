@@ -6,6 +6,7 @@ import { documentComments, mutateComment } from '../../services/comments/mutatio
 import { cloneGraphDocument, isGraphSourceCandidate } from '../../stores/graphDocuments.js'
 import { reviewComments, reviewContent, mutateReviewComment, syncReviewComments } from '../reviewComments.js'
 import { loadReview, persistReview, reviewKey } from '../reviewPersistence.js'
+import { stripCommentTags } from '../../services/comments/parser.js'
 
 function conflict() {
   return Object.assign(new Error('Document conflict: the document changed. Read it again.'), { code: 'handler', data: { reason: 'document_conflict' } })
@@ -23,7 +24,7 @@ async function revision(snapshot) {
 
 // FileStore owns all open documents, including tabs hidden by workspace changes.
 // A tool captures that owner once. Selection is never used as a write target.
-export function useDocumentTools({ fileManager, currentFile, onChanged = () => {} }) {
+export function useDocumentTools({ fileManager, currentFile, onChanged = () => {}, getReviewState = () => null }) {
   const files = () => fileManager.openFiles
   const openSet = () => JSON.stringify(files().map(file => [file.id, file.path]))
 
@@ -44,16 +45,27 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
 
   async function capture(target = '@editor', signal, retries = 2) {
     checkSignal(signal)
+    if (target === '@editor') {
+      const view = getReviewState()
+      if (view?.kind === 'batch-review') throw new Error('Specify a file path for a batch review.')
+      if (view?.kind === 'history' && typeof (view.historyContent ?? view.content) !== 'string') throw new Error('History is still loading. Read it again when it is ready.')
+      if (view?.kind === 'history') return {
+        documentId: `history:${view.reviewId}`, path: view.path || null, name: view.path?.split('/').pop() || 'History',
+        kind: 'text', content: view.historyContent ?? view.content ?? '', contentSource: 'history', readOnly: true, dirty: false,
+      }
+    }
     const file = target === '@editor' ? currentFile.value
       : files().find(file => file.path === target || `document:${file.id}` === target)
     if (file) {
+      const captured = captureFile(file)
       if (!file.reviewSession && file.kind !== 'graph') {
-        const saved = await loadReview(reviewKey(file))
+        const saved = await loadReview(captured.path || reviewKey(file))
         checkSignal(signal)
-        if (!files().includes(file)) throw conflict()
+        assertCurrent(captured)
         if (saved && !saved.completed) file.reviewSession = saved
+        return captureFile(file)
       }
-      return captureFile(file)
+      return captured
     }
     if (target === '@editor' || target.startsWith('document:')) throw new Error('The document is no longer open.')
     const before = openSet()
@@ -78,7 +90,8 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
     return {
       documentId: snapshot.documentId, path: snapshot.path, name: snapshot.name,
       kind: snapshot.kind, revision: await revision(snapshot), dirty: snapshot.dirty,
-      saved: snapshot.review ? !snapshot.review.saveError : !snapshot.dirty, contentSource: snapshot.review ? 'review' : snapshot.contentSource,
+      ...(snapshot.readOnly ? { readOnly: true } : {}),
+      saved: snapshot.review ? !snapshot.review.saveError && snapshot.review.savedCommentRevision === snapshot.review.commentRevision : !snapshot.dirty, contentSource: snapshot.review ? 'review' : snapshot.contentSource,
       ...(includeContent ? { content: snapshot.reviewContent ?? snapshot.content } : {}),
       ...(snapshot.review ? { review: { id: snapshot.review.id, pendingChanges: snapshot.review.pending,
         ...(includeContent ? { original: snapshot.review.original } : {}) } } : {}),
@@ -95,9 +108,11 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
 
   async function comments(target, signal) {
     const snapshot = await capture(target, signal)
-    const result = { ...await describe(snapshot), comments: snapshot.review ? reviewComments(snapshot.review).map(comment => ({
-      ...comment, anchorText: comment.anchorText || comment.quote, attachment: comment.detached || 'attached',
-      replies: comment.replies.map(reply => ({ ...reply, timestamp: reply.ts || null })),
+    const result = { ...await describe(snapshot), comments: snapshot.review ? reviewComments(snapshot.review, snapshot.review.result, { includeRemoved: true }).map(comment => ({
+      id: comment.id, author: comment.author, text: comment.text, status: comment.status, created: comment.created || null,
+      anchorText: comment.anchorText || comment.quote, attachment: comment.detached || 'attached',
+      ...(comment.change ? { change: comment.change, decision: comment.decision } : {}),
+      replies: comment.replies.map(reply => ({ id: reply.id, author: reply.author, text: reply.text, timestamp: reply.ts || null })),
     })) : documentComments(snapshot.content) }
     checkSignal(signal)
     return result
@@ -105,25 +120,34 @@ export function useDocumentTools({ fileManager, currentFile, onChanged = () => {
 
   function assertCurrent(snapshot) {
     if (snapshot.review && (snapshot.review.completed || snapshot.review.revision !== snapshot.reviewRevision
-      || snapshot.review.commentRevision !== snapshot.commentRevision)) throw conflict()
+      || snapshot.review.commentRevision !== snapshot.commentRevision || reviewContent(snapshot.review) !== snapshot.reviewContent)) throw conflict()
     const file = snapshot.file
     if (file) {
       if (!files().includes(file) || file.path !== snapshot.path || file.content !== snapshot.content
-        || file.kind !== snapshot.kind || file.graph?.version !== snapshot.graphVersion) throw conflict()
+        || file.kind !== snapshot.kind || file.graph?.version !== snapshot.graphVersion
+        || (snapshot.review && file.reviewSession !== snapshot.review)) throw conflict()
     } else if (openSet() !== snapshot.openSet) throw conflict()
   }
 
   async function mutate(action, input, signal) {
     const snapshot = await capture(input.target || '@editor', signal)
+    if (snapshot.readOnly) throw new Error('History is read only. Use the working file path to change its comments.')
     if (snapshot.kind === 'graph') throw new Error('Open Source before editing the Markdown text. The Graph draft is unchanged.')
-    if (snapshot.file?.reviewPending || (snapshot.file?.reviews?.length && !snapshot.review)) throw new Error('Finish the document review before changing its comments.')
+    if (snapshot.file?.reviewPending || snapshot.review?.applying || (snapshot.file?.reviews?.length && !snapshot.review)) throw new Error('The review is being applied. Read the document again when it is complete.')
     if (input.expected_revision && input.expected_revision !== await revision(snapshot)) throw conflict()
     if (snapshot.review) {
+      if (stripCommentTags(snapshot.content).replace(/\r\n?/g, '\n') !== snapshot.review.references.original) {
+        throw new Error('The document text changed after this review began. Reject this review, then request a new proposal.')
+      }
+      if (!snapshot.file) {
+        const latest = await invoke('document_file_read', { path: snapshot.path, openPaths: files().map(file => file.path).filter(Boolean) })
+        if (latest.content !== snapshot.content || latest.path !== snapshot.path) throw conflict()
+      }
       checkSignal(signal)
       assertCurrent(snapshot)
       const result = mutateReviewComment(snapshot.review, action, input)
       let saved = true
-      try { await persistReview(snapshot.review) } catch { saved = false }
+      try { saved = await persistReview(snapshot.review) } catch { saved = false }
       const next = { ...snapshot, reviewContent: reviewContent(snapshot.review) }
       return { ...result, ...await describe(next), saved,
         ...(saved ? {} : { saveError: snapshot.review.saveError }) }

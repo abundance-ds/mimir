@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { PROPOSAL_APPLY_EVENT, DIFF_OPEN_EVENT } from '../../shared/proposalEvents.js'
 import { computeCompoundDiff, computeDiffFromReview, useProposalBridge } from './useProposalBridge.js'
+import { parseCommentTags, stripCommentTags } from '../../services/comments/parser.js'
 
 describe('proposal diff construction', () => {
   it('matches visible editor text across fixed pseudo-XML comment annotations', () => {
@@ -12,10 +13,16 @@ describe('proposal diff construction', () => {
       replacement: 'A precise sentence.',
     }, content)
 
-    expect(diff).toEqual({
-      original: content,
-      modified: 'A precise sentence.',
-    })
+    expect(diff.original).toBe(content)
+    expect(stripCommentTags(diff.modified)).toBe('A precise sentence.')
+    expect(parseCommentTags(diff.modified).comments[0]).toMatchObject({ id: 'c1', detached: 'removed', quote: 'careful' })
+  })
+
+  it('maps compound offsets once even when a later edit detaches a multiline thread', () => {
+    const content = '<comment id="a" text="Keep">alpha\nbeta\ngamma</comment>\nend'
+    const result = computeCompoundDiff([{ targetText: 'alpha', replacement: 'first' }, { targetText: 'gamma\nend', replacement: 'last' }], content)
+    expect(stripCommentTags(result.modified)).toBe('first\nbeta\nlast')
+    expect(parseCommentTags(result.modified).comments).toHaveLength(1)
   })
 
   it('rejects overlapping compound reviews instead of producing a corrupt merge', () => {

@@ -12,6 +12,7 @@ import { useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useDiffStore } from '../stores/diff.js'
 import { createSessionSnapshot } from './sessionPersist.js'
+import { parseCommentTags, stripCommentTags } from '../services/comments/parser.js'
 
 const io = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }))
 vi.mock('../services/session.js', () => ({ loadSession: vi.fn(async () => null), saveSession: vi.fn(async () => {}) }))
@@ -39,6 +40,57 @@ async function setup() {
 }
 
 describe('document lifecycle with the real editor', () => {
+  it('keeps a proposed-text discussion through workspace switching, completion, and document Undo', async () => {
+    const original = 'A prior paragraph.\r\n'
+    const proposed = 'A new passage.\r\n'
+    io.read.mockResolvedValue(original)
+    const { files, wrapper, surface, open } = await setup()
+    await open('/work/a.md')
+    const x = files.currentFile
+    wrapper.vm.mimirReviewProposal({ id: 'comments-review', targetText: original, replacement: proposed })
+    await flushPromises()
+    await wrapper.setProps({ workspacePath: '/other', workspacePaths: ['/work', '/other'] })
+    await open('/other/b.md')
+    const y = files.currentFile
+    const created = await wrapper.vm.mimirDocumentComment('add', { target: x.path, anchor_text: 'A new passage.', text: 'Check this new claim.' })
+    await wrapper.vm.mimirDocumentComment('reply', { target: x.path, comment_id: created.comment_id, text: 'See https://example.com/spec.' })
+    expect(files.currentFile).toBe(y)
+    expect(x.content).toBe(original)
+    await wrapper.setProps({ workspacePath: '/work' })
+    await flushPromises()
+    expect(wrapper.vm.mimirState({ includeContent: true }).view.content).toBe('A new passage.\n')
+    await wrapper.findComponent(DiffBar).findAll('button').find(button => button.text() === 'Accept all').trigger('click')
+    await flushPromises()
+    expect(useDiffStore().active).toBe(false)
+    expect(stripCommentTags(x.content)).toBe(proposed)
+    expect(parseCommentTags(x.content).comments[0].replies[0].text).toContain('https://')
+    expect(undo(surface.vm.getView())).toBe(true)
+    expect(stripCommentTags(x.content)).toBe(original)
+    expect(parseCommentTags(x.content).comments[0]).toMatchObject({ detached: 'rejected', quote: 'A new passage.', replies: [{ text: 'See https://example.com/spec.' }] })
+    expect(redo(surface.vm.getView())).toBe(true)
+    expect(stripCommentTags(x.content)).toBe(proposed)
+    expect(parseCommentTags(x.content).comments).toHaveLength(1)
+  })
+
+  it('keeps an unsent reply visible after the last decision until it is posted', async () => {
+    const original = '<comment id="a" text="Question">Claim</comment> old'
+    io.read.mockResolvedValue(original)
+    const { wrapper, open, files } = await setup()
+    await open('/work/a.md')
+    wrapper.vm.mimirReviewProposal({ id: 'draft-review', targetText: 'old', replacement: 'new' })
+    await flushPromises()
+    await wrapper.find('.review-discussion-bar button').trigger('click')
+    await wrapper.find('.review-thread-heading').trigger('click')
+    await wrapper.find('.review-discussions textarea').setValue('Pending reply')
+    await wrapper.findComponent(DiffBar).findAll('button').find(button => button.text() === 'Accept all').trigger('click')
+    await flushPromises()
+    expect(useDiffStore().active).toBe(true)
+    expect(wrapper.find('.review-discussions textarea').element.value).toBe('Pending reply')
+    await wrapper.find('.review-discussions form').trigger('submit')
+    await flushPromises()
+    expect(useDiffStore().active).toBe(false)
+    expect(files.currentFile.content).toContain('text="Pending reply"')
+  })
   it('keeps hidden comment edits in their document with separate Undo and Redo', async () => {
     const original = 'First\r\nShared anchor\r\n'
     io.read.mockResolvedValue(original)

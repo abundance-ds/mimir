@@ -4,6 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useDiffStore } from '../../stores/diff.js'
 import { proposalIdsFromReviewMeta, useDiffReview } from './useDiffReview.js'
+import { mutateReviewComment } from '../reviewComments.js'
+import { parseCommentTags, stripCommentTags } from '../../services/comments/parser.js'
 
 function makeReviewHarness() {
   const diffStore = useDiffStore()
@@ -15,6 +17,7 @@ function makeReviewHarness() {
   })
   const fileManager = {
     openFiles: [currentFile.value],
+    writeClosedDocument: operation => operation(),
     updateContent: vi.fn((content, file) => { file.content = content; file.dirty = true }),
     setFileReviews: vi.fn((file, reviews) => { file.reviews = reviews }),
     clearFileReviews: vi.fn((file) => { if (file) file.reviews = null }),
@@ -47,6 +50,61 @@ describe('useDiffReview proposal responses', () => {
     setActivePinia(createPinia())
     invoke.mockReset()
     invoke.mockResolvedValue(undefined)
+  })
+
+  it('keeps new discussions and newer prose when a stale proposal is rejected', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({ original: 'old text', modified: 'new claim', path: '/doc.md', review: { id: 'p1' } })
+    mutateReviewComment(diffStore.currentReview, 'add', { anchor_text: 'new claim', text: 'Keep this discussion' })
+    currentFile.value.content = 'A newer draft.'
+    expect(await finishReview(review, diffStore, 'reject')).toEqual({ ok: true })
+    expect(stripCommentTags(currentFile.value.content)).toBe('A newer draft.')
+    expect(parseCommentTags(currentFile.value.content).comments[0]).toMatchObject({ text: 'Keep this discussion', quote: 'new claim', detached: 'rejected' })
+  })
+
+  it('completes another file while the previous file waits for its status receipt', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    const first = currentFile.value
+    let release
+    invoke.mockImplementation(async (command, input) => {
+      if (command === 'proposal_respond' && input.result.id === 'p1') await new Promise(resolve => { release = resolve })
+    })
+    diffStore.activate({ original: 'old text', modified: 'first result', path: first.path, review: { id: 'p1' } })
+    const finishing = finishReview(review, diffStore)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    currentFile.value = { id: 8, path: '/second.md', content: 'second original', reviews: [{ proposalId: 'p2' }] }
+    fileManager.openFiles.push(currentFile.value)
+    diffStore.activate({ original: 'second original', modified: 'second result', path: currentFile.value.path, review: { id: 'p2' } })
+    expect(await finishReview(review, diffStore)).toEqual({ ok: true })
+    expect(currentFile.value.content).toBe('second result')
+    release()
+    expect(await finishing).toEqual({ ok: true })
+    expect(first.content).toBe('first result')
+    expect(diffStore.active).toBe(false)
+  })
+
+  it('preserves a discussion when rejecting a batch file whose prose changed', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activateBatch({ fileList: [{ path: '/doc.md', original: 'old text', modified: 'new claim', proposalId: 'p1' }] })
+    mutateReviewComment(diffStore.files[0].review, 'add', { anchor_text: 'new claim', text: 'Keep this discussion' })
+    currentFile.value.content = 'A newer draft.'
+    diffStore.decideRemainingChanges('reject')
+    expect(await review.onDiffFinish()).toEqual({ ok: true })
+    expect(stripCommentTags(currentFile.value.content)).toBe('A newer draft.')
+    expect(parseCommentTags(currentFile.value.content).comments[0].quote).toBe('new claim')
+  })
+
+  it('preserves Scratchpad history when completing a closed-file review', async () => {
+    const { diffStore, review } = makeReviewHarness()
+    diffStore.activateBatch({ fileList: [{ path: '/shared/scratchpad.md', original: 'Old', modified: 'New', proposalId: 'p-pad' }] })
+    diffStore.decideRemainingChanges('accept')
+    invoke.mockImplementation(async command => {
+      if (command === 'read_text_file') return { content: 'Old' }
+      if (command === 'scratchpad_resolve') return '/shared/scratchpad.md'
+    })
+    expect(await review.onDiffFinish()).toEqual({ ok: true })
+    expect(invoke).toHaveBeenCalledWith('scratchpad_save', { content: 'New', expected: 'Old' })
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
   })
 
   it.each(['accept', 'reject'])('keeps newer edits while a single-file %s response is pending', async action => {
@@ -152,7 +210,7 @@ describe('useDiffReview proposal responses', () => {
     expect(invoke).toHaveBeenCalledWith('graph_source_save', {
       request: { path: '/graph/item.md', content: 'new', expectedRevision: 'revision-1' },
     })
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
   })
 
   it('retains native Graph identity from review creation when the source is later unmounted', async () => {
@@ -167,7 +225,7 @@ describe('useDiffReview proposal responses', () => {
 
     await expect(review.onDiffFinish()).resolves.toMatchObject({ ok: false })
     expect(diffStore.files[0].error).toContain('unavailable')
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
   })
 
@@ -213,7 +271,7 @@ describe('useDiffReview proposal responses', () => {
 
     await expect(review.onDiffFinish()).resolves.toMatchObject({ ok: false })
     expect(diffStore.files[0]).toMatchObject({ status: 'pending', error: 'Graph source changed on disk' })
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
   })
 
@@ -255,7 +313,7 @@ describe('useDiffReview proposal responses', () => {
     expect(fileManager.save).toHaveBeenCalledWith(target)
     expect(target).toMatchObject({ content: 'edit during save', dirty: true })
     if (target.graph) expect(target.graph.sourceRevision).toBe('new revision')
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
   })
 
   it('does not resolve a single-file review against another active tab', async () => {
@@ -501,12 +559,13 @@ describe('useDiffReview proposal responses', () => {
 
     expect(result).toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledWith('read_text_file', { path: '/work/other.md' })
-    expect(invoke).toHaveBeenCalledWith('write_text_file', {
+    expect(invoke).toHaveBeenCalledWith('document_file_write', {
       path: '/work/other.md',
       content: 'other new',
+      expectedContent: 'other old',
     })
     const writeOrder = invoke.mock.invocationCallOrder[
-      invoke.mock.calls.findIndex(call => call[0] === 'write_text_file')
+      invoke.mock.calls.findIndex(call => call[0] === 'document_file_write')
     ]
     const resolveOrder = invoke.mock.invocationCallOrder[
       invoke.mock.calls.findIndex(call => call[0] === 'proposal_respond')
@@ -555,11 +614,12 @@ describe('useDiffReview proposal responses', () => {
         error: expect.stringContaining('changed after the review'),
       }),
     ])
-    expect(invoke).toHaveBeenCalledWith('write_text_file', {
+    expect(invoke).toHaveBeenCalledWith('document_file_write', {
       path: '/work/good.md',
       content: 'good new',
+      expectedContent: 'good old',
     })
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.objectContaining({
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.objectContaining({
       path: '/work/stale.md',
     }))
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
@@ -606,7 +666,7 @@ describe('useDiffReview proposal responses', () => {
     invoke.mockResolvedValue(undefined)
     await review.onDiffFinish()
 
-    expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+    expect(invoke).not.toHaveBeenCalledWith('document_file_write', expect.anything())
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
       result: expect.objectContaining({ id: 'p-other', status: 'applied' }),
     })
