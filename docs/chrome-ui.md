@@ -40,9 +40,10 @@ These checks complement the Sidebar collapse-position checks below.
 
 The four shell tokens are one depth scale. `chrome` is the ground.
 `chrome-mid` is one step up. `chrome-high` is two steps up. This order holds
-in all eight themes. `surface` does not belong to the scale: it is the
-lightest layer in light, slate, and monokai, it sits between `chrome` and
-`chrome-mid` in dracula and zenith, and it equals `chrome-mid` in synthwave.
+in all themes. `surface` does not belong to the scale: it is the
+lightest layer in light, slate, and monokai; it is darkest in slate-contrast.
+It sits between `chrome` and `chrome-mid` in dracula and zenith, and it equals
+`chrome-mid` in synthwave.
 
 | Token | Depth | Purpose | May be used for |
 |---|---|---|---|
@@ -112,6 +113,7 @@ Heights include the rule. Layer is the background token.
 | Surface | File | Content | Before 2026-09-04 |
 |---|---|---|---|
 | Editor toolbar | `editor/components/workspace/EditorToolbar.vue` | Format buttons 22 px, 12 px inset | 30 px, `chrome-mid`, `rule-light` |
+| Editor review | `DiffBar.vue`, `BatchFileDiff.vue` | View, change navigation, decisions, completion | 32 px minimum, `chrome-high`, `rule-light`; the review header wraps in narrow panes |
 | Files view tabs (wide manager) | `FilesActivity.vue` | Project, Changes, Recent, Favorites with 2 px accent underline; three 28 px icon buttons | 40 px |
 | Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Home, Work, Graph, and Changes tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
 | Tracker range | `TrackerApp.vue` | Range tabs, previous, range label, next | 36 px wrapping strip under a 40 px identity header |

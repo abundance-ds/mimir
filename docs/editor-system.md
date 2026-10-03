@@ -39,6 +39,8 @@ and cleanup. `src/stores/files.js` owns open files and save state.
 
 ## CodeMirror surface
 
+Smart quotes default off.
+
 `src/editor/codemirror/` owns formatting, live Markdown preview, comments, and
 ghost completion. `editorHighlightStyle` in `core.js` covers every Markdown
 scope: markers take the quiet marker ink, heading marks take the theme heading
@@ -46,6 +48,11 @@ colour, fenced code takes the nested language for its info string and a
 full-width wash from `markdownCodeBlocks.js`. The file store is the durable renderer state; CodeMirror is
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
+
+Live Preview shows block quote markers on each line that contains a cursor or
+selection. Other quote lines keep their preview border. Nested quotes use one
+border per line. Hidden markers include only `>` and an optional following
+space or tab; text and line breaks stay visible.
 
 Live Preview renders inline Markdown in table headers and cells. File and web
 links use the Editor's open actions and retain the cursor position. Table links
@@ -119,8 +126,9 @@ tests cover opening, editing, Undo, saving, command replacement, and inline AI
 selection and preview. `merge.test.js` and `DiffView.test.js` cover diff content,
 line endings, and completion in unified and split views.
 File-open tests complete reads in reverse order and cancel pending work during
-navigation. Real batch merge views test rejection, mixed decisions, Accept All
-after a partial rejection, and Undo before completion. Proposal tests delay and
+navigation. Real review views test mixed decisions across layouts and previews,
+tab changes, remaining-change actions, Undo/Redo, and explicit completion.
+Proposal tests delay and
 fail status replies, edit during the wait, retry after tab changes, and retain
 newer reviews.
 
@@ -142,10 +150,24 @@ This native check remains open in [issues.md](issues.md).
 
 - Rust owns proposal lifecycle; the renderer owns presentation and dirty
   buffers. Accept or reject is complete only after `proposal_respond` succeeds.
-- A review retains its original text, proposed text, and current result. Batch
-  chunk decisions update that result before the file is resolved. A result equal
-  to the original is rejected; a mixed decision applies only the retained edits.
-  Accept All and Reject All settle pending files and preserve prior decisions.
+- `reviewSession.js` owns each review's immutable original and proposal, working
+  comparison baseline, result, and decision history. Accept advances the working
+  baseline; reject changes the result. Both are retained outside CodeMirror.
+  `reviewView.js` projects this state and retains reading position when a view
+  is replaced. Unified, Split, Original, Result, and file-tab changes preserve
+  decisions and Undo/Redo during the session. Original always shows the initial
+  snapshot; Result shows the current review result.
+- Each pending change has visible check and cross buttons with 28 px targets,
+  accessible names, and keyboard activation. Unified reserves a right margin;
+  Split uses the center column. The View selector combines the four views.
+  The header names remaining work and wraps when the pane is narrow.
+- File actions and All files menus accept or reject only remaining changes.
+  Earlier decisions stay intact. Bulk decisions are one Undo step. The last
+  decision leaves the review open. **Finish review** (Cmd/Ctrl+Enter) applies
+  and reports the result only after every change is decided. Batch completion
+  requires decisions for all files. A result equal to the original is rejected;
+  a mixed result applies only the retained edits. Status retries cannot reapply
+  text or undo a file already applied or reported.
 - Single-file acceptance checks the current draft against the review snapshot,
   then commits the result before reporting it. Rejection keeps the current
   draft. Status replies never write document text. A failed report retains the
