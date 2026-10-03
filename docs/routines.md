@@ -1,7 +1,7 @@
 # Routines
 
-Routines are TOML-defined manual or scheduled runs. Each run launches an agent
-package or CLI preset as a normal durable Activity.
+TOML-defined manual or scheduled runs. Each run launches an agent package or
+CLI preset as a durable Activity.
 
 One file under `~/.mimir/routines/` defines one Routine:
 
@@ -21,20 +21,20 @@ workspace = "/path/to/workspace"
 - `timezone` is an IANA name. `local` falls back to UTC when the GUI process
   lacks `TZ`.
 - `overlap` is `skip` or `parallel`; `missed` is `skip` or `run-once`.
-- Headless mode uses each client’s one-shot adapter. Gemini has no supported
-  headless adapter. Interactive mode opens the seeded live session.
+- Headless mode uses each client’s one-shot adapter (`codex exec`, `claude -p`,
+  `pi --print`). Gemini has no headless adapter. Interactive mode opens the
+  seeded live session (Gemini uses `--prompt-interactive`).
 - Project package and skill resolution uses the Routine workspace.
 
 `routine_runtime.rs` watches definitions and launchers, owns the planner, and
-stores its cursor in `~/.mimir/routines-state.json`. It commits the cursor
+stores its cursor in `~/.mimir/routines-state.json`. The cursor is committed
 before spawn so a crash cannot repeat the same scheduled instant. A reservation
 closes the overlap race before the new Activity becomes visible.
 
-Run now and Run again use the same path as a scheduled fire and resolve the
-current TOML, package, and launcher. Updates and Trash require the current
-`sourceRevision`, so the UI cannot overwrite an external edit. Invalid
-definitions remain visible without disabling valid ones.
+Run now and Run again resolve the current TOML, package, and launcher. Updates
+and Trash require the current `sourceRevision` to prevent overwriting an
+external edit. Invalid definitions remain visible without disabling valid ones.
 
-Native ownership is `routines.rs` and `routine_runtime.rs`. Renderer ownership
-is the Routine service, store, Activity, and cron builder. Private registry
-handlers support that UI but are not public agent tools.
+Native ownership: `routines.rs`, `routine_runtime.rs`. Renderer: Routine
+service, store, Activity, and cron builder. Routines are not public agent
+tools.

@@ -61,8 +61,9 @@ styles keep their existing treatment.
   legible disabled states.
 - Use a filled accent button only for the primary action in a local flow.
 - Inputs use surface background, rule border, and accent focus.
-- Disable autocorrect and autocapitalization for non-prose fields; disable
-  spellcheck too when appropriate.
+- Disable automatic correction, capitalization, completion, and native spelling
+  popups in every text field. Keep explicit spelling help in prose editors;
+  [Editor](editor-system.md#spelling-and-automatic-text-input) owns the behavior.
 - Do not use native `<select>`. Use the shared accessible combobox/listbox with
   Arrow, Home/End, Enter/Space, Escape, and Tab behavior.
 - Keep the base button reset inside `@layer base`.

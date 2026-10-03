@@ -8,23 +8,19 @@ and cleanup. `src/stores/files.js` owns open files and save state.
 
 [Scratchpad](scratchpad.md) is a global Editor tab with its own saved-text history.
 
-- Tabs are `text`, `graph`, `pdf`, or `external`. Graph entries use Details and
-  Source in one tab; [business-graph.md](business-graph.md#product-surface) owns
-  their draft, source, and link rules. Inspect files before opening; only text
-  enters CodeMirror.
+- Tab kinds: `text`, `graph`, `pdf`, `external`. Graph rules are in
+  [business-graph.md](business-graph.md#product-surface). Only text enters
+  CodeMirror; inspect files before opening.
 - A single click opens a clean preview; editing or pinning makes it persistent.
-- Text and Graph open commands share a navigation generation. A newer open, tab change,
-  workspace change, or unmount cancels older requests before they can select a
-  file, replace a preview, move the cursor, or restore focus.
+- Text and Graph opens share a navigation generation (`navigationGuard.js`). A
+  newer open, tab change, workspace change, or unmount cancels older requests.
 - Project tabs are hidden, not closed, when the workspace changes. Dirty state
   and reviews remain attached to their stable file id.
 - Files outside retained projects and untitled drafts are global. The
   standalone Editor shows all tabs.
 - External changes replace only clean buffers. Missing dirty files recover as
   drafts; missing clean files disappear. Graph drafts retain their source identity.
-- Named `.html` and `.htm` tabs show an **Open in browser** action in the Editor
-  header. The action saves dirty content before it opens the file with the
-  operating system's default browser.
+- `.html`/`.htm` tabs show **Open in browser**; it saves dirty content first.
 - Session hydration completes before fallback draft creation, persistence,
   native listeners, file-open draining, and Quit guards.
 - Save, rename, move, and Trash must settle pending Editor writes before paths
@@ -43,38 +39,64 @@ Smart quotes default off.
 
 `src/editor/codemirror/` owns formatting, live Markdown preview, comments, and
 ghost completion. `editorHighlightStyle` in `core.js` covers every Markdown
-scope: markers take the quiet marker ink, heading marks take the theme heading
-colour, fenced code takes the nested language for its info string and a
-full-width wash from `markdownCodeBlocks.js`. The file store is the durable renderer state; CodeMirror is
-the active document projection. Toolbar pointer actions preserve focus and
-selection.
+scope; `markdownCodeBlocks.js` adds fenced-code highlighting. The file store is
+the durable renderer state; CodeMirror is the active document projection.
+Toolbar pointer actions preserve focus and selection.
 
-Live Preview shows block quote markers on each line that contains a cursor or
-selection. Other quote lines keep their preview border. Nested quotes use one
-border per line. Hidden markers include only `>` and an optional following
-space or tab; text and line breaks stay visible.
+Live Preview hides block quote `>` markers (and one following space/tab) on
+lines without a cursor or selection. Nested quotes use one border per line.
 
-Live Preview renders inline Markdown in table headers and cells. File and web
-links use the Editor's open actions and retain the cursor position. Table links
-carry their destination because a block widget cannot map each cell through
-editor coordinates. Authored HTML stays text. Moving the cursor into a table
-shows its Markdown source. Empty header and body cells keep their column
-positions, including alignment; the Markdown syntax tree omits these cells,
-so preview maps its nodes through the complete row before rendering.
+Live Preview renders inline Markdown in table cells. Table links carry their
+destination because a block widget cannot map cells through editor coordinates.
+Authored HTML stays text. Empty header and body cells keep column positions,
+including alignment; the syntax tree omits them, so preview maps nodes through
+the complete row.
 
-Markdown file previews in the Editor support column resizing. Drag a header's
-internal divider, or focus its handle and use Left/Right (8 px; Shift: 32 px).
-The divider transfers width between adjacent columns. The table fills the pane;
-column proportions follow pane width and cell text wraps. Resizing keeps a
-64 px minimum where space permits; fitting the pane takes priority.
-**Reset column widths** restores automatic layout. Escape cancels a drag.
+Column resizing transfers width between adjacent columns. Minimum 64 px where
+space permits; pane fit takes priority. Widths live in CodeMirror document state,
+not in Markdown or settings; changing column count or replacing a table clears
+them. Other embedded Markdown editors keep their own controls.
+`tableResize.js` owns pointer and keyboard controls; `livePreview.js` owns
+width state and table rendering.
 
-Widths live in CodeMirror document state, not in the Markdown or saved settings.
-They survive tab switches, Live Preview toggles, and cell text edits. Changing
-column count or replacing a table clears its widths. Closing the document or
-restarting discards them. Other embedded Markdown editors keep their existing
-controls. `tableResize.js` owns pointer and keyboard controls; `livePreview.js`
-owns width state and table rendering.
+### Spelling and automatic text input
+
+**Settings → Editor → Spell check** controls Mimir-drawn spelling underlines and
+its correction menu in the main Editor, Scratchpad, Graph Markdown, Today, and
+Scribe Markdown. Right-click a word or press Shift+F10 at the text cursor to
+open the menu. Arrow keys select an action; Escape closes it. A chosen correction
+is one ordinary undoable edit. Moving the cursor does not request suggestions.
+
+Native WebKit spellchecking is disabled. Its spelling markers can open a native
+suggestion panel even when HTML autocorrect is off. Mimir instead asks macOS
+`NSSpellChecker` for spelling ranges through `spell_check`; it does not request
+correction, replacement, or popup UI. The existing `spell_suggest` command owns
+explicit menu suggestions. Native checking uses the user's preferred spelling
+languages, returns UTF-16 offsets, and runs asynchronously through AppKit.
+
+`src/editor/codemirror/spelling.js` owns the shared decoration extension. It
+checks visible prose in bounded chunks after a typing pause, excludes Markdown
+code, URLs, and hidden tags, caches repeated text, and ignores results after
+an edit, document switch, settings change, or unmount. Checks wait for input
+composition. Source-code documents and read-only views are not checked.
+
+`src/shared/textInputPolicy.js` disables native spellcheck, autocorrect,
+autocapitalization, browser autocomplete, and writing suggestions on all text
+controls. Workbench and standalone Editor install it before mounting; the
+local-app HTML bridge installs the same policy in each app document. It covers
+library-created fields and fields added or changed later. Native startup also
+disables automatic spelling correction, text replacement, and dash substitution
+for Mimir. The explicit Smart quotes choice above remains independent. macOS
+settings for other applications are unchanged.
+
+`harness/spelling.html` uses a fixed spelling provider for repeatable visual and
+menu checks. It cannot establish native spelling-service or popup behavior.
+Renderer tests cover Unicode offsets, exclusions, bounded requests, stale
+results, composition, undo, menu corrections, and dynamically created fields.
+Before release, check the rebuilt macOS app with Spell check enabled: misspelled
+words stay underlined, cursor movement shows no popup, the custom menu corrects
+the selected word, Undo restores it, and settings changes update every editor.
+Repeat after a tab switch, rapid typing, and with mixed-language prose.
 
 ### Document model
 
@@ -99,50 +121,31 @@ load. Undo back to that text clears the changed flag. Pending writes keep the
 document changed until their result is known. A restored draft with no readable
 saved version keeps an unknown baseline and remains changed.
 
-Store-to-editor updates have an explicit origin. A reload does not add an undo
-step. An accepted edit adds a separate undo step. These updates project the
-stored text exactly and do not pass through typing filters. CodeMirror uses
-logical newlines internally. Selection and change offsets refer to that text,
-not to the stored string: CRLF takes two characters on disk but one editor
-position. Range edits and previews use CodeMirror's change operations before
-serialization. Emitted edits use the first detected line ending; mixed endings
-are retained on open and normalized to that ending on edit. Opening or reading
-a document does not rewrite its text. Diff views compare logical lines.
-Single-file reviews serialize resolved text with the review's line ending.
+Store-to-editor updates have an explicit origin. Reloads add no undo step;
+accepted edits add a separate one. Updates project stored text exactly, bypassing
+typing filters. CodeMirror uses logical newlines; CRLF is two characters on disk
+but one editor position. Selection and change offsets refer to editor text, not
+the stored string. Range edits and previews use CodeMirror change operations
+before serialization. Emitted edits use the first detected line ending; mixed
+endings stay on open and normalize to it on edit. Opening does not rewrite text. Diff views
+compare logical lines. Single-file reviews serialize with the review's ending.
 
-Bun applies `patches/style-mod@4.1.3.patch` to both package exports. CodeMirror
-mounts reuse unchanged stylesheet text instead of replacing its text node and
-invalidating styles across the document. New rules and changed rule order still
-update normally. The editor style tests cover both exports and repeated Graph
-mounts. Remove the patch when the dependency provides the same behavior.
+`patches/style-mod@4.1.3.patch` (both package exports) makes CodeMirror mounts
+reuse unchanged stylesheet text instead of replacing the text node. Remove when the dependency
+provides the same behavior.
 
 ## Verification
 
 `App.documents.test.js` uses the real editor and file store with mocked disk
-I/O. It covers preview replacement, per-document Undo/Redo, typing during a
-pending file read, separate autosaves, saved text, session snapshots, and
-reloads. Close tests cover Cancel, discard, failed save, and retry. Line-ending
-tests cover opening, editing, Undo, saving, command replacement, and inline AI
-selection and preview. `merge.test.js` and `DiffView.test.js` cover diff content,
-line endings, and completion in unified and split views.
-File-open tests complete reads in reverse order and cancel pending work during
-navigation. Real review views test mixed decisions across layouts and previews,
-tab changes, remaining-change actions, Undo/Redo, and automatic completion.
-Proposal tests delay and
-fail status replies, edit during the wait, retry after tab changes, and retain
-newer reviews.
+I/O. `merge.test.js` and `DiffView.test.js` cover diff content in both layouts.
+Run these when document identity, draft updates, history, or save timing changes.
+Also run affected store and composable tests, the production build, and
+`bun run test:scratchpad`. Do not replace these tests with separate editor and
+store mocks; the regression crossed their boundary.
 
-Run these tests when document identity, draft updates, history, or save timing
-changes. Also run the affected store and composable tests, the production build,
-and `bun run test:scratchpad`. Do not replace these tests with separate editor
-and store mocks; the regression crossed their boundary.
-
-Before closing native verification, use disposable LF and CRLF files in the
-current macOS build. Open previews from the Files sidebar, pin and edit two
-files, switch tabs and projects, and use Cmd+Z and Shift+Cmd+Z in each file.
-Check that an untouched file closes without a prompt, Cancel retains edits,
-and Don't Save causes no later autosave. Save and reopen the files, then restart
-with one unsaved draft and check its recovery. Record the build and results.
+Native verification: use disposable LF and CRLF files in the current macOS
+build. Test preview opens, pin-and-edit, tab and project switches, Undo/Redo,
+close prompts, autosave after Don't Save, draft recovery across restart.
 Renderer tests do not prove macOS key routing, native dialogs, or restart.
 This native check remains open in [issues.md](issues.md).
 
@@ -157,16 +160,13 @@ This native check remains open in [issues.md](issues.md).
   is replaced. Unified, Split, Original, Result, and file-tab changes preserve
   decisions and Undo/Redo during the session. Original always shows the initial
   snapshot; Result shows the current review result.
-- Each pending change has visible check and cross buttons with 12 px icons,
-  accessible names, and keyboard activation. Split stacks them in a 30 px center
-  strip. Unified floats a compact pair over a translucent background, with
-  local text clearance instead of a reserved column. Green and red stay subtle
-  until hover; keyboard focus remains visible.
-- The header has direct Original / Diff / Result and Unified / Split buttons,
-  change navigation, Undo/Redo, and **Accept all** / **Reject all**. The bulk
-  actions affect only remaining changes in the current file, or all files in
-  the batch overview. Each batch file also has direct Accept / Reject actions.
-  Earlier decisions stay intact. The header wraps instead of clipping actions.
+  [Comments](comments.md#discussions-in-a-review) owns clean diff text,
+  separate discussion decisions, saved review records, and input drafts.
+- Pending-change buttons: 12 px icons, accessible names, keyboard activation.
+  Split uses a 30 px center strip. Unified floats a compact pair with local text
+  clearance. Green/red stay subtle until hover; keyboard focus stays visible.
+- Bulk actions (Accept all / Reject all) affect only remaining changes. Earlier
+  decisions stay intact.
 - The final decision automatically applies and reports the result. There is
   no extra confirmation step. Cmd/Ctrl+Enter accepts the remaining changes.
   Batch completion requires decisions for all files. Undo/Redo remains available
@@ -174,17 +174,18 @@ This native check remains open in [issues.md](issues.md).
   A result equal to the original is rejected;
   a mixed result applies only the retained edits. Status retries cannot reapply
   text or undo a file already applied or reported.
-- Single-file acceptance checks the current draft against the review snapshot,
-  then commits the result before reporting it. Rejection keeps the current
-  draft. Status replies never write document text. A failed report retains the
-  decision on its document and offers Retry, including after a tab switch.
-  Retry reports only unfinished proposal ids and never reapplies the text.
-  The review result is read-only once decided; document edits made during the
-  report remain intact. A completed report clears only the proposals it owns.
+- Single-file acceptance checks the draft against the review snapshot, then
+  commits the result before reporting. Rejection keeps the current draft. Status
+  replies never write document text.
+  A failed report offers Retry; retry reports only unfinished proposal ids and
+  never reapplies text. The result is read-only once decided; document edits
+  made during the report remain intact. A completed report
+  clears only the proposals it owns.
 - Text actions require Source for Graph entries. Source-location requests and
-  proposal-open actions save Details before changing views; failures keep the
-  draft. Review decisions cannot change an unseen rich draft.
-- Pending proposals survive restart. A source mismatch keeps the review open
+  proposal-open actions save Details first; failures keep the draft. Review
+  decisions cannot change an unseen rich draft.
+- Pending proposals, decisions, and discussions survive restart. A source
+  mismatch keeps the review open
   for recheck or explicit discard.
 - Single-file review is bound to a stable file id, not a visible tab index.
 - Git review uses a separate store and read-only virtual tab. It never accepts,

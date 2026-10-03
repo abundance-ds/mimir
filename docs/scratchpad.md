@@ -4,147 +4,73 @@ Scratchpad is one shared Markdown document for short writing sessions. It is
 global across projects and agents. It has one timeline of saved text. There
 are no task boundaries, named drafts, or special agent write tools.
 
-## Use
+## Behavior
 
-- Type `@scratchpad` in a supported agent terminal and select the file.
-  Ask the agent to edit it with its normal file tools.
-- **Tools → Scratchpad** and **Cmd+P → Scratchpad** open the same Editor tab.
-  They do not open a main tab. Graph remains a main-tab tool.
-- Agent writes reveal the Editor tab without taking keyboard focus. An active
-  review, another focused document, or a displayed history entry stays in place
-  with an update notice. In a one-pane window, an external write does not hide
-  the terminal.
-- Typing saves after a short pause, including when normal file auto-save is off.
-- **Previous / Next** show saved text without changing the live file.
-  **Latest** returns to the live document. **Changes** shows additions and
-  removals from the preceding save. **Restore** writes the selected text as the
-  latest state. Later text remains in history.
-- **Clear** saves empty text; the prior content stays in history. **Copy** copies
-  only authored text. **Save As** exports a copy and keeps the shared tab.
-  If Save As selects a project Scratchpad link, it saves the shared document
-  and keeps the link intact.
-- Closing the tab hides it. The next external write can open it again.
+- Agent writes reveal the Editor tab without taking keyboard focus. Active
+  reviews, focused documents, or history views stay in place with an update
+  notice. One-pane windows keep the terminal visible.
+- Background reveals keep the Editor's scroll position instead of scrolling
+  to the start. Large text replacements can still move the visible content.
+- Typing saves after a short pause, even when auto-save is off.
+- Save As to a project Scratchpad link saves the shared document and keeps the
+  link intact.
+- Closing the tab hides it. The next external write reopens it.
+- History is append-only: Restore and Clear add a new latest state. History
+  inspection is read-only; the live buffer stays mounted.
+- Mimir Files omits links to the central Scratchpad.
 
 ## Storage and conflicts
 
-`~/.mimir/scratchpad.md` is the actual file. Its HTML comment explains the shared
-path to readers outside Mimir. The Editor omits that comment. Mimir adds it back
-after a whole-file write.
+`~/.mimir/scratchpad.md` is the file. The Editor strips the HTML comment header;
+Mimir adds it back after a whole-file write.
 
-Native `scratchpad.rs` keeps the last 100 settled states in
-`~/.mimir/scratchpad-history.json`, using the shared atomic persistence helpers.
-It samples external writes every 500 ms while Mimir runs. Several writes inside
-one interval can become one state. While Mimir is closed, only the final text
-can be captured on the next launch. The timeline is local to this Mac.
+`scratchpad.rs` keeps the last 100 settled states in
+`~/.mimir/scratchpad-history.json`. It polls external writes every 500 ms while
+Mimir runs; several writes in one interval merge to one state. While Mimir is
+closed, only the final text is captured on the next launch.
 
-The renderer saves against the text it last read. If the file changed in the
-meantime, the save fails and the dirty Editor text stays intact. **Keep my text**
-and **Use latest** retain both sides in the same timeline. Ordinary file tools
-do not share a write lock with Mimir; the timeline cannot guarantee capture of
-every intermediate byte during simultaneous external writes.
-
-History inspection is read only and stays on the selected text during new saves.
-The live buffer, document tabs, and pending reviews remain mounted.
+The renderer saves against the text it last read. A concurrent change fails the
+save and keeps the dirty Editor text. Both conflict choices keep both texts in
+the timeline. File tools do not share a write lock; the
+timeline cannot guarantee capture of every intermediate byte.
 
 ## Project links and terminal completion
 
-Opening a workspace or launching a supported agent prepares
-`<working-directory>/scratchpad.md → ~/.mimir/scratchpad.md`. A normal file, a
-tracked file, or a link to another target is never replaced or ignored.
+Mimir prepares `<working-directory>/scratchpad.md → ~/.mimir/scratchpad.md`
+on workspace open or agent launch. A normal file, tracked file, or link to
+another target is never replaced.
 
-For a Git repository, the link receives an anchored path rule in the repository's
-local `info/exclude`, resolved with `git rev-parse --git-path`. No global ignore
-file or project `.gitignore` is changed. Git shares `info/exclude` between linked
-worktrees, so its rule also applies at the same relative path in sibling worktrees.
-Tracked files remain tracked.
+- Git exclude: anchored rule in the repository's local `info/exclude`, resolved
+  with `git rev-parse --git-path`. No global ignore or `.gitignore` is changed.
+  Applies to sibling worktrees that share `info/exclude`.
+- `.ignore`: Codex and Pi need `!/scratchpad.md` in `.ignore` to find the
+  Git-excluded link. Mimir appends it and preserves existing content. A created
+  `.ignore` is excluded locally; a tracked `.ignore` shows a normal project
+  change. Symbolic-link `.ignore` files are left unchanged. Setup failure is
+  reported; the agent still launches.
+- Recovery: `~/.mimir/scratchpad-links.json` records prepared links. If an
+  external editor replaces an owned link with a normal file, Mimir saves the
+  detached text to the timeline, moves the file to
+  `scratchpad-recovered-<time>.md`, and restores the link. An unrelated
+  replacement symlink is left alone. Links are registered
+  before ignore rules, so a failed ignore update does not disable recovery.
+  If Git starts tracking a replacement, Mimir stops managing that path and
+  does not recreate the link.
 
-Codex and Pi need `!/scratchpad.md` in the working directory's `.ignore` to find
-the Git-excluded link. Existing content is preserved. If Mimir creates `.ignore`,
-it also excludes that file locally. If `.ignore` already exists and is tracked,
-the appended rule appears as a normal project change. The native setup checks
-that Git excludes the link. Ignore files that are themselves symbolic links are
-left unchanged; Mimir reports the setup problem and the agent can still launch.
-
-Mimir Files omits links to the central Scratchpad. Finder can show them.
-`~/.mimir/scratchpad-links.json` records prepared links. If an external editor
-replaces an owned link with a normal file, Mimir retains the central text in
-history, saves the detached text, moves the detached file to
-`scratchpad-recovered-<time>.md` beside the link, and restores the link. An unrelated
-replacement symlink is left alone.
-
-Created links are registered before ignore rules are changed, so a failed ignore
-update does not disable recovery. If Git starts tracking a normal replacement,
-Mimir stops managing that path. It does not replace the tracked file or recreate
-the link after the project deletes the file.
-
-| Agent | Completion and launch integration |
+| Agent | Integration |
 |---|---|
-| Codex | Native project-file completion; adds `~/.mimir` with `--add-dir`. Existing sandbox settings stay in effect. |
-| Claude Code | A run-local `fileSuggestion` command returns the canonical path for `@scratchpad`. Its Edit tool refuses symlink paths. The helper forwards an existing suggestion command or searches normal project files with `rg`, with Git as a fallback. Explicit settings are preserved. Adds `~/.mimir` with `--add-dir`. |
-| Pi | Native project-file completion and file tools; no extra directory option. |
-| Gemini CLI | Native project-file completion; adds `~/.mimir` with `--include-directories`. Gemini retains its own workspace trust prompts. |
+| Codex | `--add-dir ~/.mimir` |
+| Claude Code | Its Edit tool refuses symlink paths: a run-local `fileSuggestion` command (`bin/mimir-file-suggestion.mjs`) returns the canonical path and forwards an existing suggestion command. Explicit settings are preserved. `--add-dir ~/.mimir` |
+| Pi | Native completion; no extra directory option |
+| Gemini CLI | `--include-directories ~/.mimir` |
 
-These launch options apply to new Mimir agent sessions. For agents launched
-directly in an external terminal, the prepared project link remains available,
-but their own sandbox, trust, and completion settings apply. A name collision
-leaves the project's file intact; use the canonical path for the shared document.
+A name collision leaves the project's file intact; use the canonical path.
 
-## Source and checks
-
-- Native storage, link preparation, and recovery: `src-tauri/src/scratchpad.rs`.
-- Launcher integration: `src-tauri/src/launchers.rs`, `bin/mimir-file-suggestion.mjs`.
-- IPC and state: `src/services/scratchpad.js`, `src/stores/scratchpad.js`.
-- Editor integration: `useScratchpadEditor.js`, `ScratchpadBar.vue`, and
-  `ScratchpadHistory.vue` under `src/editor/`.
-- Native tests cover conflict rejection, retention, restore, header preservation,
-  file collisions, local exclusions, linked worktrees, and replaced links.
-
-Today remains the daily planning tool. It has separate storage and behavior.
+Today remains the daily planning tool with separate storage and behavior.
 
 ## Verification
 
-Run the focused checks with:
-
-```bash
-bun run test:scratchpad
-```
-
-This runs the renderer state and Editor integration tests, the executable CLI
-helper tests, and the native Scratchpad tests. CI runs the renderer and native
-tests in its standard suites and runs the CLI helper tests in a separate step.
-
-| Area | Automated checks |
-|---|---|
-| Native file and history | Conflict rejection, 100-state retention, restore, comment preservation, missing-file intervals, final text written while closed, corrupt-history preservation, failed journal writes, and retry |
-| Project links | Name collisions, local exclusions, linked worktrees, detached-file recovery, failed ignore setup, and ownership ending when Git tracks a replacement |
-| Renderer state | Listener registration before the first read, snapshot refresh after events, serialized reads and saves, failure cleanup, and retry |
-| Editor | Global tab identity, duplicate link opens, dirty-buffer retention, Save As copies and aliases, focus, history browsing, Clear, typing during Restore, and separate document content and undo during tab/project switches with a concurrent refresh |
-| Claude helper | Real Node process entry, canonical target selection, alias deduplication, unrelated files with the same name, existing suggestion commands, Git fallback without `rg`, and invalid input |
-
-The development-app check on 8 September 2026 used Claude Code 2.1.263:
-`@scratchpad` selected the canonical file; two edits appeared in the Editor;
-terminal input retained focus; Previous did not change the live file; Restore
-and Clear kept the previous text in history; the tab returned after restart.
-
-The earlier terminal experiment also checked native completion and file edits
-with Codex 0.153.4, Pi 0.82.1, and Gemini CLI 0.58.0. These are dated results,
-not verification of later CLI versions or a signed release.
-
-Before release, run the following checks in the installed signed app:
-
-1. Start a fresh session for each of the four agents. Select `@scratchpad`, make
-   two edits, and verify the same Editor tab updates while terminal input keeps
-   focus. Record the CLI versions and any trust prompts.
-2. Close the Scratchpad tab, then edit from the agent. Check that it opens again.
-   Repeat with another document focused, a review open, and history displayed.
-   Check the update notice and the terminal in a one-pane window.
-3. Type in the Editor while the agent writes. Check both conflict choices and
-   confirm that both texts remain in history. Check Copy, Save As, and Clear.
-4. Quit and reopen Mimir. Check the tab and history. Change the file while Mimir
-   is closed, reopen it, and confirm that the final text becomes the latest state.
-5. Switch between Scratchpad and project documents while an agent changes
-   Scratchpad. Repeat with project switches. Edit, then use Undo and Redo in
-   each document. Check that each buffer contains only its own text.
-
-These remaining native checks cannot be proved by renderer mocks. No additional
-draft schema, agent tool, or storage service is required for this trial.
+`bun run test:scratchpad` runs renderer, Editor integration, CLI helper, and
+native tests. Before release, test all four agents in the signed app: agent
+writes, conflict handling, tab recovery across restart, Undo/Redo isolation
+between Scratchpad and project documents.

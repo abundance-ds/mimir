@@ -5,108 +5,105 @@ task scope.
 
 ## Open
 
-- Packaged skills: `mimir_cli::tests::packaged_skills_stay_lean` fails because
-  the existing `mimir-config` skill has 227 words against its 220-word limit.
-  Reduce its text without removing its setup or verification instructions.
+- Workspace tests: three `workbenchControllers.test.js` assertions count the
+  new `set_smart_quotes` startup call as workspace I/O. Two `WorkbenchApp.test.js`
+  menu assertions read a Vue `v-if` comment node through `firstChild`. These five
+  failures remain outside the comment review change.
 
-- Interactive sheets (deferred): Markdown tables lack easy cell editing and
-  live formulas for team discussions. Need copy/paste, undo, SUM, AVERAGE,
-  SUMIF, basic formatting, and saved sheets linked from notes. Options:
-  Jspreadsheet CE (first candidate), Univer Sheets, or Handsontable +
-  HyperFormula. Check size, formula support, and licenses. Real-time editing
-  by multiple users is separate scope.
+- Spelling: native macOS verification of Mimir-drawn underlines, the custom menu,
+  and absence of native popups remains open. The development sandbox denies
+  access to the Apple spelling service (`NSCocoaErrorDomain` 4099, sandbox
+  restriction). Renderer mocks and a native compile cannot close this check;
+  follow [Editor spelling verification](editor-system.md#spelling-and-automatic-text-input).
 
-- Connection setup: automated coverage includes credential replacement, OAuth
-  callbacks/timeouts/cancellation, login subprocess termination, and inline forms.
-  Remaining: signed-app checks with real Google/Slack consent, Slack/Granola
-  Keychain storage, and GitHub login. Agent owns execution; user only supplies
-  required login/consent. Slack OAuth configuration is not live verification.
+- `scripts/tauri.mjs`: the Windows release error cites a restoration path in
+  `building.md` that the doc does not contain. Fix the message or add the path.
+
+- Code comments in `useBoardDrag.js` and `BusinessGraphApp.test.js` cite a
+  `gotchas.md` anchor that does not exist; the constraint is a bullet under
+  [UI and input](gotchas.md#ui-and-input).
+
+- Packaged skills: `skills/mimir-config/SKILL.md` has 227 words; limit in
+  `mimir_cli.rs` is 220. `packaged_skills_stay_lean` test fails.
+
+- Interactive sheets (deferred): Markdown tables lack cell editing and live
+  formulas. Candidates: Jspreadsheet CE, Univer Sheets, Handsontable +
+  HyperFormula. Check size, formulas, and licenses. Multi-user editing is
+  separate scope.
+
+- Connection setup: automated coverage exists for credentials, OAuth flows,
+  login subprocess lifecycle, and inline forms. Remaining: signed-app checks
+  with real Google/Slack consent, Slack/Granola Keychain storage, and GitHub
+  login. The agent runs the checks; the user supplies only login and consent.
 
 - Native Editor menu: Select All, Undo, and Redo call the Editor surface even
-  when a Go to search input has focus. Route these edit commands to the active
-  text control and verify them in macOS. Copy, Cut, and Paste use native roles.
+  when a non-editor text input (e.g. Go to search) has focus. Route these edit
+  commands to the active text control. Copy/Cut/Paste use native roles.
 
-- Editor document changes need a native macOS verification record for sidebar
-  opens, key routing, close decisions, and restart recovery. Follow
-  [Editor verification](editor-system.md#verification) with disposable files;
-  renderer tests do not establish this evidence.
+- Editor document changes: native macOS verification needed for sidebar opens,
+  key routing, close decisions, and restart recovery. Follow
+  [Editor verification](editor-system.md#verification).
 
-- CLI entry path: running `bin/mimir.mjs` through a symlink path can exit with
-  status 0 and no output. The script-entry check compares the raw argument URL
-  with the resolved module URL. On macOS, `/tmp` versus `/private/tmp` reproduces
-  this. Resolve both paths before comparison and test a symlink entry point.
+- CLI entry path: `bin/mimir.mjs` compares `pathToFileURL(process.argv[1])`
+  against `import.meta.url` without resolving symlinks. A symlink (e.g.
+  `/tmp` vs `/private/tmp` on macOS) silently exits with status 0. Resolve both
+  paths before comparison.
 
-- Scribe notification repair: real banner/RECORD behavior and repeated-call CPU
-  observations need a record from the repaired app. A long run with call
-  transitions and signed installed-app verification remain open. Automated
-  lifecycle tests do not establish these results; behavior belongs in
-  [meetings.md](meetings.md).
+- Scribe notification repair: banner/RECORD behavior, repeated-call CPU, call
+  transitions, and signed installed-app verification need real-app records.
+  See [meetings.md](meetings.md).
 
-- Files sidebar: native file-drop, workspace-switch-during-search, and
-  click/Return rename-focus checks remain open. The current development build
-  has native evidence for search order, match navigation, separate panel
-  queries, and the revised Files layout;
-  see [files.md](files.md#verification).
+- Files sidebar: native verification open for file-drop,
+  workspace-switch-during-search, and click/Return rename-focus.
+  See [files.md](files.md#verification).
 
-- Release 0.3.3: basic signed installed-app checks passed; see
-  [building.md](building.md#release-smoke). Capture permission prompts and
-  the Scribe and managed Git evidence gaps below remain open.
+- Release 0.3.3: basic signed-app checks passed
+  ([building.md](building.md#release-smoke)). Permission prompt capture,
+  Scribe smoke, and managed Git evidence remain open.
 
 - Image preview: verify physical pinch, default-app opening, and return-focus refresh in the installed macOS app.
 
-- Review the local Git and GitHub CLI dependency after real Team onboarding.
-  Keep it while it reuses existing small-team setup with no Mimir-owned token.
-  Reconsider GitHub device login only if installing or signing in to `gh`
-  creates repeated setup friction. Also review the existing-repository-only
-  URL handoff. Keep it while GitHub's form is the simplest place to choose a
-  personal or organization owner, visibility, and collaborators.
+- Git dependency review: revisit the local Git and `gh` dependency after real
+  Team onboarding. Keep it (no Mimir-owned token) unless `gh` install or
+  sign-in causes repeated setup friction; only then consider GitHub device
+  login. Keep the existing-repository-only URL handoff while GitHub's form
+  handles owner, visibility, and collaborator choices.
 
-- Managed Team needs one signed-release smoke record for real GitHub login,
-  personal/organization repository URL setup, two-machine sync, offline
-  recovery, History, and moving Team between repositories.
-  Local automated coverage owns setup rollback, repository validation,
-  resource limits, batching, merging, and recovery references.
+- Managed Team: needs a signed-release smoke record covering GitHub login,
+  repository URL setup, two-machine sync, offline recovery, History, and
+  repository migration. Automated tests cover rollback, validation, limits,
+  batching, merging, and recovery.
 
-- Project-specific agent context is intentionally deferred. The unfinished
-  `contextPolicy` and isolation behavior were removed because the boundary and
-  user journey were not clear enough. Before this returns, define the retrieval
-  boundary, workspace behavior, and simple human control as one coherent design.
-  For now, a workspace Project link associates new work but does not restrict
-  graph reads.
+- Project-specific agent context (deferred): `contextPolicy` and isolation
+  code removed. Before reintroducing, define retrieval boundary, workspace
+  behavior, and human control as one design. A workspace Project link
+  associates new work but does not restrict graph reads.
 
-- Local Apps have no management surface. The empty `Settings > Apps` section
-  was removed because it exposed no installed local definitions and duplicated
-  built-in product navigation. The native app commands, catalog store/service,
-  launch pipeline, and SDK remain. Revive the manager only for real definitions
-  under `~/.mimir/apps`: add one direct Settings destination, show local apps
-  and diagnostics only, reconnect definition editing and app launch to the
-  Editor and Workbench, and restore focused UI tests. Do not put Today, Scribe,
-  Business graph, or Tracker in that manager.
+- Local Apps management (deferred): `Settings > Apps` was removed (no local
+  definitions, duplicated navigation). Native app commands, catalog, launch
+  pipeline, and SDK remain. Revive only for real definitions under
+  `~/.mimir/apps`: one Settings destination, local apps and diagnostics only.
+  Built-in apps (Today, Scribe, Business graph, Tracker) stay out.
 
-- Scribe is not ready. The retired application identity passed first-run TCC
-  registration, known-playback microphone/system signal, dual-channel local
-  live transcription, Stop, and fast historical-library reads on the reference
-  Mac. The current `com.abundanceds.mimir` identity needs the same signed
-  installed-app smoke. A real endpoint-bound Keychain credential completed
-  OpenAI transcription-session creation, but live audio-to-durable transcript
-  and interrupted-recording recovery still require signed end-to-end records.
-  Automated contracts are necessary evidence, not a substitute for those
-  provider/recovery paths.
+- Scribe not ready: `com.abundanceds.mimir` identity needs signed installed-app
+  smoke (TCC, microphone, live transcription, Stop, library reads). Live
+  audio-to-durable transcript and interrupted-recording recovery still need
+  signed end-to-end records. Automated contracts do not substitute for those.
 
-- Business graph: desktop screenshots (narrow/default/wide, rail and
-  reduced-motion states) remain a manual release check.
+- Business graph: desktop screenshots (narrow/default/wide, rail,
+  reduced-motion) remain a manual release check.
 
-- Terminal command-aware `working` status is a future specification candidate.
-  The current truthful live-shell state is `idle`; any later implementation
-  needs the explicit shell command-boundary contract in
+- Terminal `working` status (deferred): current live-shell state is `idle`.
+  Any implementation needs the command-boundary contract in
   [activities.md](activities.md#plain-terminal-status).
 
-- Terminal: verify no replay after >5 minutes minimized in a rebuilt macOS app;
-  mocked tests cannot prove WebKit scheduling or GPU frames.
+- Terminal replay: verify no replay after >5 min minimized in rebuilt macOS app.
+  Mocked tests cannot prove WebKit scheduling or GPU behavior.
 
-- Live Preview hides only the outer marks of nested emphasis. `***bold
-  italic***` keeps its inner `**` because the Emphasis and StrongEmphasis
-  handlers in `livePreview.js` stop at the outer node.
+- Live Preview nested emphasis: `***bold italic***` keeps its inner `**`
+  visible. In `livePreview.js`, `StrongEmphasis` is never reached
+  because `Emphasis` returns false; the Emphasis handler hides only the
+  outer marks (first and last `EmphasisMark`).
 
 - Editor comment navigation is available only while the formatting toolbar is
   enabled. Add reusable keyboard or menu commands before treating comment
@@ -117,7 +114,7 @@ task scope.
   block shows the raw pseudo-XML tags. Editor panes and both split panes
   conceal correctly; only the library-rendered deletion widget is affected.
 
-- Proposal restart recovery covers `edit` proposals. A pending `create`
-  proposal survives in `~/.mimir/proposals.json` but has no open tab to
-  re-offer it after a restart, so it stays invisible until a caller applies
-  or rejects it.
+- Proposal restart: `create` proposals survive in `proposals.json` but have
+  no open tab after restart. `checkProposalsForFile` in
+  `useEditorProposalLifecycle.js` only checks proposals matching the
+  current file's path, so `create` proposals stay invisible.

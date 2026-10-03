@@ -2,93 +2,51 @@
 
 ## Sidebar browser
 
-Files stays beside the main tabs and Editor. Its compact view has File tree, Favorites, and Recent icon buttons,
-one file actions menu, a Collapse control beside that menu, and a full-width
-search field. The project selector
-at the top of the sidebar sets the file scope. Files can collapse and resize;
-main tab and sidebar structure belongs to
-[workbench-design.md](workbench-design.md).
+Sidebar has File tree, Favorites, and Recent views, a file actions menu, and
+a search field. Layout and sizing belong to
+[workbench-design.md](workbench-design.md) and
+[design-system.md](design-system.md).
 
-- Project uses 28 px rows, 12 px indentation per folder, and subtle vertical
-  guides without horizontal row separators. Names keep their extension visible when shortened. Git state uses a
-  small marker; metadata columns and permanent star buttons are omitted.
-  Favorites have a muted 10 px filled star at the right edge in Project,
-  Recent, and compact search results. The star is a status marker, separate
-  from Git state. It stays visible without hover and is omitted in Favorites.
-- Recent and Favorites replace the tree with path-labelled lists. Each view
-  retains selection and scroll while switching views. Project folder expansion
-  and the chosen view are remembered across project switches in the app session.
-- One search field searches filenames first, then file contents automatically.
-  Focusing it does not add controls or change the layout. Filename results use
-  the native ranking: exact name, name prefix, name substring, then fuzzy path
-  match, with modification time as a tie-breaker. Content results follow in
-  recent-first order. Each file appears once; content-only results include a
-  line location and excerpt. Literal matches are highlighted as safe text.
-- Compact search covers the project even when started from Recent or Favorites.
-  Clear and Escape restore the previous view, selection, and scroll. Each view
-  button leaves search and opens that view. The clear control stays available
-  during search. Up/Down enters the results; Enter in the field opens the first
-  result. Result rows support Up/Down, Home/End, Enter to open, and Space to preview.
-- `useFileSearch.js` owns query, results, request generation, and status for
-  each presentation. After a 130 ms debounce it publishes filename hits, then
-  appends content hits without moving or duplicating the filename results.
-  Sidebar and File Manager results, errors, and loading states stay separate
-  from each other and from Quick Open. Clear, query changes, workspace changes,
-  and unmount invalidate late responses. A changed index reruns the active query.
-  A failed content search retains filename results and offers Retry. Bounded
-  searches report when results were omitted, including after an empty response.
-- Native content search can return one location per file for this combined list.
-  One file with many matching lines cannot consume the whole result budget.
-  Other callers retain their existing multiple-location behavior. File count,
-  byte, and result limits and token-scoped cancellation still apply.
-- One file actions menu lists New file, New folder, Name, Modified, Refresh, Collapse all,
-  and Open File Manager. Collapse all closes all folders in the current
-  project, including nested folders, in both the sidebar and File Manager.
-  It keeps the current view and search query, and returns focus to the menu
-  button. The item stays visible but is disabled when no folders are open.
-  Folder loads started before collapse cannot reopen folders when they finish.
-  Right-click exposes file commands, including Favorites.
-  Hover shows the relative path. There is no selected-path footer.
-  Native drops apply only to an active file surface.
-- The sidebar has two sort rows in File actions: Name and Modified. Each row
-  shows its direction; a check mark identifies the active field. Selecting the
-  other field uses A–Z for Name or Newest first for Modified. Selecting the
-  active field reverses its direction. The menu stays open and keeps focus on
-  that row. Escape closes it and returns focus to File actions; a click outside
-  also closes it. Project and Favorites default to Name, A–Z. Recent defaults
-  to Recently opened, with neither sort row checked until a sort is selected.
-  Folders stay first in either direction. Each folder is sorted separately;
-  selection and open folders are retained. Settings are saved per project and
-  view. Name and Modified orders are shared with File Manager. File Manager's
-  other sort fields use the view's default order in the sidebar. During search,
-  both sort rows are disabled and show Search relevance. Clearing search
-  restores the browsing order. Created is not available because the file data
-  has no creation date.
-- File previews and search matches open in the Editor without replacing the
-  main session or collapsing a manually expanded sidebar. Content matches
-  reveal their line and column. A single click or Space previews a file and
-  keeps keyboard focus in Files. A double-click opens the file, keeps its tab
-  open, and moves focus into the Editor. Editing a preview also keeps its tab
-  open. Later previews replace only an unchanged preview tab.
-- In Project, Recent, and Favorites, Return on macOS starts inline rename for
-  one selected file or folder. F2 and the context menu use the same rename
-  field. The filename is selected without its extension. Return saves the
-  name; Escape cancels. Both return focus to the row. Clicking elsewhere
-  confirms the name and retains focus at the clicked control. Losing window
-  focus or hiding the field does not confirm the name. Input composition and
-  repeated Return do not start or confirm rename.
-  Command+Down on macOS opens the selected file and focuses the Editor.
-  On other platforms, Enter opens and F2 renames. Search keeps Enter to open
-  the result. These rules apply to the sidebar and File Manager.
-- Open File Manager provides the wide ledger in a unique main tab for metadata
-  comparison and file organization. Its Return control selects the session
-  that was active before opening it. Both presentations use the same file
+- Each view keeps selection and scroll across view switches. Folder expansion
+  and the chosen view persist across project switches in the app session.
+- `useFileSearch.js` owns query, results, and status per presentation. After a
+  130 ms debounce it publishes filename hits, then appends content hits without
+  moving or duplicating filename results. Each file appears once.
+  Sidebar, File Manager, and Quick Open searches stay independent. Clear, query
+  changes, workspace changes, and unmount invalidate late responses. A changed
+  index reruns the active query. A failed content search keeps filename
+  results. Bounded searches report omitted results.
+- Search covers the project from any view. Clear and Escape restore the
+  previous view, selection, and scroll.
+- Native content search returns one location per file in the combined list so
+  one file cannot consume the result budget. Other callers keep multi-location
+  behavior. Limits and token-scoped cancellation apply to both.
+- File actions menu: New file, New folder, Name, Modified, Refresh, Collapse
+  all, Open File Manager. Name and Modified are sort rows; selecting the active
+  row reverses it. Folders stay first in either direction. Sort settings are
+  saved per project and view. Name and Modified orders are shared with File
+  Manager; its other sort fields fall back to the view default in the sidebar.
+  Recent defaults to recently-opened order with no row checked. Sort rows are
+  disabled during search. No Created field (file data has no creation date).
+- Collapse all applies to the sidebar and File Manager. A folder load started
+  before collapse must not reopen the folder.
+- Single click or Space previews a file (focus stays in Files). Double-click
+  opens and moves focus to Editor. Editing a preview keeps its tab. Later
+  previews replace only an unchanged preview tab. Previews and search matches
+  do not replace the main session or collapse the sidebar.
+- Return renames on macOS (Command+Down opens); F2 renames on other platforms.
+  In search, Enter opens. Click elsewhere confirms a rename; window blur or a
+  hidden field does not. IME composition and key repeat neither start nor
+  confirm rename. These rules apply to both sidebar and File Manager.
+- Native drops apply only to an active file surface.
+- File Manager opens as a unique main tab. Both presentations use the same
   stores and mutation commands.
 
 ## Architecture
 
-- `file_index.rs` owns a recent-first index of reviewable regular files for
-  path and bounded content search.
+- `file_index.rs` owns a recent-first index of regular files for path and
+  bounded content search. A `text_readable` flag marks content-searchable
+  entries; non-text files remain in the index for path search.
 - `workspace_files.rs` owns the lazy directory tree, file classification, and
   mutation boundary. The tree includes directories and must not be derived
   from the index.
@@ -113,35 +71,15 @@ main tab and sidebar structure belongs to
 
 ## Verification
 
-- Search regression tests cover index loading after mount, independent panel
-  queries, late responses, cancellation, retry, partial results, and return to
-  browsing. Files and Editor integration tests cover match locations and
-  preview/pin behavior. Native `file_index` tests cover ranking, search limits,
-  cancellation, and workspace changes.
-- `WorkbenchFiles.integration.test.js` mounts Files and the real Editor to
-  check click/Return focus, delayed previews, rename completion and failure,
-  search locations, and retention of opened or edited tabs. Native I/O is
-  mocked. Check the same focus sequence in the native macOS app before release.
-- `harness/files.html` mounts the real sidebar and File Manager with fixture
-  native replies. Use it with the dev server to check 240, 280, and 400 px
-  widths in light and dark themes. Search `alpha` or `beta` for matches,
-  or search `limit`, `error`, and `slow` for partial results,
-  failure, and cancellation. It does not test the native index.
-- Before closing native-app verification, use a disposable workspace in the
-  current Mimir build. Check filename and content search, opening a match at
-  its line, Clear/Escape and all view buttons, and independent searches with
-  File Manager open. Also check a workspace switch during search, an external
-  file change, native file drops, and menu focus. Record the build and result;
-  browser fixtures cannot establish this evidence. Open gaps live in
-  [issues.md](issues.md).
-
-Native development check, 2026-09-12 (0.3.2 working tree): a disposable
-workspace returned filename hits before content hits, with one result per file.
-Opening a content hit placed the cursor on its line. Sidebar and File Manager
-queries stayed separate. The Files height survived collapse and restore. The
-header Collapse control, full-height file list, and bottom rail restore icon
-were checked in the current native window. Native file-drop and pending-search
-workspace-switch checks remain open in [issues.md](issues.md).
+- `WorkbenchFiles.integration.test.js` mounts Files with the real Editor.
+  Native I/O is mocked; check focus sequences in the native macOS app before
+  release.
+- `harness/files.html` mounts sidebar and File Manager with fixture native
+  replies. Check 240, 280, and 400 px in light and dark. Search `alpha`/`beta`
+  for matches; `limit`, `error`, `slow` for partial results, failure, and
+  cancellation. It does not test the native index.
+- Native-app checks require a disposable workspace in a current build. Open
+  gaps live in [issues.md](issues.md).
 
 ## Managed Project Git
 

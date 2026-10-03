@@ -26,12 +26,11 @@ The managed Team repository has one fixed layout:
 └── agents/       # optional
 ```
 
-Setup accepts an existing GitHub repository URL. An existing non-empty
-repository must already have this layout and a GitHub `origin`; an empty
-repository is initialized by Mimir. Setup is installed atomically after a
-successful first sync. Old Team-folder settings are ignored: there is no
-backward-compatible folder mode. Repository creation, organization, visibility,
-and collaborators remain on GitHub.
+Setup accepts a GitHub repository URL. A non-empty repository must already have
+this layout and a GitHub `origin`; an empty one is initialized by Mimir. Setup
+installs atomically after a successful first sync. Repository creation,
+visibility, and collaborators remain on GitHub. There is no folder mode; old
+Team-folder settings are ignored.
 
 ## Workspaces, projects, and files
 
@@ -69,10 +68,12 @@ resolve to several local workspaces; absolute local paths never enter Team.
 
 ## Data model
 
-Primary kinds are `project`, `company`, `person`, `issue`, `meeting`, `note`,
-`resource`, `journal`, `decision`, `record`, and `timesheet`. Legacy kinds remain readable,
-but new public writes accept only the bounded ontology. Unknown metadata is
-preserved.
+Accepted kinds (`ENTITY_KINDS`): `issue`, `person`, `company`, `project`,
+`note`, `journal`, `decision`, `record`, `meeting`, `resource`, `timesheet`,
+`study`, `evidence`, `dataset`, `analysis`, `model`, `endpoint`, `publication`,
+`submission`, `research-question`, `method`, `client-request`. Writes with any
+other kind are rejected. Existing files with unknown kinds remain readable and
+produce a diagnostic. Unknown metadata fields are preserved.
 
 - Client is a Company role, not a separate kind.
 - Tasks are `issue` nodes. Project and assignee use `part_of` and `assigned_to`.
@@ -85,518 +86,190 @@ preserved.
 ## Time sheets
 
 A `timesheet` stores one person's project work across any dates.
-Use `part_of` for the Project and `assigned_to` for the Person. These links
-remain optional. Graph creation offers Time sheet, and Project details offers
-**Add time sheet**. Graph's kind filter includes **Time sheets**.
+Use `part_of` for the Project and `assigned_to` for the Person (both optional).
 
-The Markdown header stores `entries` as a list:
+The Markdown header stores `entries` as a YAML list. Each row requires:
+- `id`: permanent, unique within the sheet. Alphanumeric first char, then
+  letters/digits/underscores/hyphens. Max 128 chars.
+- `date`: valid `YYYY-MM-DD`.
+- `minutes`: whole number, 1--1440.
+- `description`: non-empty string.
+- `invoice` (optional): absent = Open; non-empty string = Invoiced. Boolean
+  and empty values are invalid. The reference records inclusion on an invoice,
+  not payment. Invoiced rows remain editable.
 
-```yaml
-kind: timesheet
-title: Atlas — 2026–2028
-entries:
-  - id: time-001
-    date: "2026-01-15"
-    minutes: 90
-    description: Test the export
-  - id: time-002
-    date: "2028-12-15"
-    minutes: 45
-    description: Project meeting
-    invoice: "INV-014"
-```
-
-The body holds free-form notes. Each row has a permanent ID, a valid date,
-a whole number of minutes from 1 to 1,440, and a
-non-empty description. IDs contain letters, digits, underscores, or hyphens;
-the first character is a letter or digit. IDs must be unique within the
-sheet and contain at most 128 characters. A sheet can contain 10,000 rows.
-Unknown fields stay intact; old `period` does not restrict dates.
-
-An absent `invoice` means **Open**. A non-empty invoice reference means
-**Invoiced**. This records inclusion on an invoice, not payment or invoice
-creation. Boolean and empty invoice values are invalid. Invoiced rows remain
-editable; the reference does not freeze their amounts or descriptions.
-
-Details shows an editable table and Open, Invoiced, and Total durations.
-Totals cover all rows and do not change with row filters.
-**Show** filters All, Open, Invoiced, or one invoice reference. Checkboxes,
-Shift-click, and **Select all shown rows** provide a separate selection total.
-A filter change clears selection. Hidden rows never receive selection actions.
-**Mark invoiced** applies a reference to the selected open rows and preserves
-references on already invoiced rows. **Mark open** removes selected invoice
-references. Duplicate creates an open row with a new ID.
-
-Duration inputs accept minutes, `90m`, `1h 30m`, or `1:30`. Storage always
-uses whole minutes. New rows leave duration and work blank. Invalid inputs
-stay in the draft. Totals show **Incomplete** and exclude invalid rows.
-Structured saves reject invalid data; Source remains available for repairs.
-Malformed source data stays intact and produces Graph diagnostics.
-**Save As** can export an invalid draft as a separate Markdown recovery copy.
-That copy retains unfinished duration text for repair in Source.
-
-Details uses the existing draft and save queue. Row undo and redo remain
-available in the open tab after a save. A Source or external row replacement
-clears that history. Selection and undo history are transient; session restore
-retains unsaved row values through the normal Graph draft.
-
-**Export selected CSV** exports the selection. With no selection,
-**Export shown CSV** exports the filtered rows. Both use the current draft
-and include project, person, date, exact minutes, duration, invoice, and a
-calculated total. Invalid sheets cannot export. The export freezes its data
-before the file dialog opens. Authored text cannot become a spreadsheet formula.
-
-The user and AI choose the span: one month, 36 months, or any other span.
-Sync still resolves conflicts at complete-file level; row selection does not
-change this rule. Totals are calculated and never written into the header.
-Tracker imports and automatic invoice generation are outside this feature.
-
+Max 10,000 rows per sheet. Unknown fields stay intact; old `period` does not
+restrict dates. Totals are calculated at read time and never written into the
+header. Structured saves reject invalid data; malformed source stays intact and
+produces diagnostics. Sync resolves conflicts at complete-file level.
 Native validation and agent writes share tests with renderer validation.
-Tests cover 36-month sheets, edits, selection, exports, invoices, undo after
-save, and invalid-source recovery. The browser preview is
-`harness/timesheet.html`; it uses fixture data and does not write Graph files.
-Chrome checks covered years in dates, totals, a 760 px light pane, and a
-380 px dark pane. These checks do not
-establish native dialog or installed-app behavior.
+
+CSV export uses the current draft and freezes its data before the file dialog
+opens. Authored text cannot become a spreadsheet formula. Invalid sheets cannot
+export; **Save As** exports an invalid draft as a recovery copy. Hidden rows
+never receive selection actions. Tracker import and invoice generation are out
+of scope. Fixture preview: `harness/timesheet.html`.
 
 ## Inline links and backlinks
 
-In a Graph working note, type `@` and part of an entry title, or use **Link**.
-The same lookup works in the [Home canvas](#project-home) and in the body of
-a Graph source in the Editor. Ordinary
-Markdown and frontmatter do not enable Graph completion or reference checks.
-The menu shows the title, kind, and scope. Arrow keys select a result;
-Enter inserts it; Escape closes the menu. Lookup ignores case and accents,
-prefers title and word prefixes, and searches every entry in the selected
-scopes. Work filters and the renderer's first list page do not limit lookup.
-Code, existing links, escaped text, email addresses, and IME composition do not
-start the menu. Create supports insertion; links open after the entry is saved.
-
-Links are ordinary Markdown with a Mimir target:
+Links use Markdown with a Mimir target:
 `[Jon Minton](mimir://graph/jon-minton)`. Mimir generates the target ID; users
-select titles. The Graph editor shows the target's current title and exposes
-the Markdown when the cursor enters the link. Alt-click also permits source
-editing. The stored label remains fallback text. No alias system is used.
+select titles. The stored label remains fallback text. No alias system is used.
+`@` lookup and **Link** work in working notes, the [Home canvas](#project-home),
+and Graph source in the Editor. Lookup ignores case and accents, prefers title
+and word prefixes, and searches every entry in the selected scopes. Code,
+existing links, escaped text, email addresses, and IME composition do not
+start the menu. Ordinary Markdown files do not enable Graph completion or
+reference checks.
 
-Click a resolved link to open its entry in an Editor tab. Details shows
-**Links** and **Backlinks**. A backlink opens the referring entry and selects
-the reference in its current view. The previous draft stays in its own tab.
-If the source changed, Mimir finds a current occurrence of that target. If
-none remains, it opens the body without selecting unrelated text.
-Canvas backlinks follow the navigation rules in [Project home](#project-home).
-
-The suggestion menu has a 320 px preferred width, bounded by the pane and
-viewport. Each row separates the title from its kind and scope. The popup
-sits outside clipping containers, stays keyboard-accessible, and follows
-pane resizing.
-
-Rust derives `references` connections from the saved body and Project canvas. Repeated links keep
-their separate locations but produce one connection. Removing the last link
-removes that connection; undo restores it on save. Explicit relations such as
-Assigned to remain independent. Derived references never enter YAML `links`
-or editable relation drafts. Native and editor parsers share a syntax fixture
-for inline, reference-style, and automatic links, Unicode, and exclusions.
-Code, images, and HTML comments do not create body references.
+Rust derives `references` connections from the saved body and Project canvas.
+Repeated links keep separate locations but produce one connection. Removing the
+last link removes that connection. Explicit relations (e.g. Assigned to) remain
+independent. Derived references never enter YAML `links` or editable relation
+drafts. Code, images, and HTML comments do not create body references. Native
+and editor parsers share one syntax fixture; change both together.
 
 Title changes and scope moves preserve the generated filename and ID. New
-generated IDs include a full UUID, so creating a new entry with a deleted
-entry's title does not reuse its identity. Existing IDs remain unchanged;
-explicit IDs supplied by agents or source files remain deliberate identities.
-Deleting an entry preserves referring text and marks links **Unavailable**.
-Restoring the same ID resolves them again. Hidden or unmounted targets also
-show Unavailable; this state does not claim permanent deletion. Native graph
-diagnostics report unresolved body targets. Restore rejects an unmounted
-source before writing. Renaming source files outside Mimir changes their IDs.
+generated IDs include a UUID v4 suffix, so creating an entry with a deleted
+entry's title does not reuse its identity. Existing and explicitly supplied IDs
+remain unchanged. Deleting an entry preserves referring text and marks links
+**Unavailable**. Restoring the same ID resolves them again. Hidden or unmounted
+targets also show Unavailable. Restore rejects an unmounted source before
+writing. Diagnostics report unresolved body targets. Renaming source files outside Mimir changes
+their IDs.
 
-GraphStore owns the title and reference indexes in memory. Lookup and target
-resolution read those indexes without reading files. A saved body or canvas reparses
+GraphStore owns title and reference indexes in memory. Lookup and target
+resolution read indexes without reading files. A saved body or canvas reparses
 only that entry; a title edit reuses its parsed references. Watcher events
-reconcile only affected direct `graph/*.md` files across mounted roots, with
-the same duplicate-ID precedence as startup. Unchanged events do not change
-the graph revision or reload the UI. The existing worker checks file metadata
-every six hours to catch missed events; it sleeps between events and checks.
-Startup and manual Refresh perform a full reconciliation. Scans run outside
-the store lock; a mutation gate orders publication, writes, and scope changes.
-Native mutation commands run on background workers. No separate database or
-persistent index format is required.
-
-Verification covers 10,000 entries and 10,000 Markdown files, indexed lookup
-during scans and writes, single-file updates, syntax, deletion/restoration,
-scope restrictions, stale requests, undo, and tool/context consistency. Native
-benchmarks print measured costs with `cargo test --manifest-path
-src-tauri/Cargo.toml --lib business_graph -- --nocapture`. These debug tests do
-not establish native webview geometry, input-to-display latency, fan behavior,
-or energy use. Computer and browser interaction were excluded from this
-feature's verification. On the reference Mac, a debug run with 10,000 files
-measured lookup p95 at 35.2 ms during full scans and writes, one-file
-reconciliation at 1.5 ms, and full reconciliation at 1.81 s. These are measured
-native costs, not input-to-display guarantees.
+reconcile only affected `graph/*.md` files, with the same duplicate-ID
+precedence as startup. The background worker checks file metadata every six
+hours to catch missed events. Startup and manual Refresh perform full
+reconciliation. Scans run outside the store lock; a mutation gate serializes
+writes and scope changes. Unchanged events do not change the graph revision or
+reload the UI. There is no separate database or persistent index.
 
 ## Product surface
 
-Home, Work, Graph, and Changes share the top navigation. Home shows the
-Project overview directly in Main. Work is the default issue
-projection with Board and List views. Graph has one entry table. Its column
-headers sort and filter entries. Changes opens the event stream.
-[Scribe](meetings.md) owns meeting preparation
-and filing. Entry details open in Editor tabs, leaving the Graph projection
-in Main. Preview, pinning, close, and session restore use the Editor tab
-lifecycle. Reopening an entry or its source selects the same tab and keeps
-its current view and draft. Working-note undo, caret, and scroll stay with the
-open tab; an external body replacement starts a fresh undo history.
-Title, summary, and file fields resize with their text and the Editor width.
-Sizing skips hidden rail content and runs again when the pane opens.
-Changed fields resize in one batch, with height reads before final height
-writes. Mounting and text changes share one watcher to avoid repeated sizing.
-**Details** and **Source** share one save queue.
-Changing views waits for pending writes and saves; a conflict keeps the draft
-and view intact. Details saves after a short pause; Source follows the Editor
-auto-save setting. Native source writes check the mounted path and revision.
-Malformed Graph YAML stays editable in Source; Details becomes available when
-it parses. Deleted or unmounted entries keep unsaved drafts without recreating
-the source. **Save As** exports the current draft, including a deleted or
-unmounted entry, as a separate Markdown copy. Rust formats rich recovery
-exports with the existing serializer; export does not write the original
-source. Confirmed scope moves retain the tab and update its path.
+Home, Work, Graph, and Changes share the top navigation.
+[Scribe](meetings.md) owns meeting preparation and filing. Entry details open
+in Editor tabs. **Details** and **Source** share one save queue. Changing views
+waits for pending writes; a conflict keeps the draft and view intact. Details
+saves after a short pause; Source follows the Editor auto-save setting. Native
+source writes check the mounted path and revision. Malformed Graph YAML stays
+editable in Source; Details becomes available when it parses. An external body
+replacement starts a fresh undo history. Deleted or unmounted entries keep
+unsaved drafts without recreating the source; **Save As** exports the draft as
+a separate copy and never writes the original source.
 
-Workspace startup owns Graph mounting and event listening, even when its Main
-app is closed. Refresh updates clean open Graph documents and retains dirty
-drafts with their original revision. Session restore keeps both the saved
-baseline and the current draft; remount checks source identity before writing.
+- Reopening an entry or its source selects the same tab and keeps its view and
+  draft, without a source read or a wait for its pending save.
+- Refresh updates clean open Graph documents and keeps dirty drafts with their
+  original revision. Session restore keeps the saved baseline and the draft;
+  remount checks source identity before writing.
+- Opening a listed entry uses its mounted scope to locate the source; Rust
+  validates source and id, and a stale path falls back to native lookup.
+  References, neighbors, Git History availability, and Team file discovery
+  load lazily and do not block the document.
+- Details keeps the last Source editor state without updating the hidden
+  document. Pending reviews activate after the Source buffer catches up.
+- Field auto-size batches height reads before height writes and skips hidden
+  rail content.
+- Incoming explicit relations show under **Related**; body links show only
+  under **Links** and **Backlinks**. Raw ids and revisions stay out of normal UI.
+- Escape closes Details through the normal tab close check; open menus and
+  link suggestions consume Escape first.
 
 Entry-open requests pass from `BusinessGraphApp` through `AppActivity` to the
-Workbench's mounted Editor. Workbench integration tests click Board, List,
-and Groups entries through this route, including when the Editor is a rail.
-The full-component test also checks draft editing, close cancellation, and
-focus return to the Board row. Escape closes Details through the normal tab
-close check; open menus and link suggestions consume Escape first.
-
-Details puts the title, essential work fields, and working note first.
-Issues show status, priority, project, owner, and due date; a waiting reason
-appears when set or when status is Waiting. Project and owner fields include
-direct entry links. Existing files and explicit relations use compact rows.
-Incoming explicit relations appear under **Related**; body links appear only
-under **Links** and **Backlinks**. Those groups start collapsed, show counts
-and unavailable-link warnings, and disappear when empty. **More properties**
-holds reminders, snooze, tags, output/file path editors, and timestamps.
-Set reminders, snooze dates, and tags remain visible beside its toggle.
-Project entries retain their Markdown editor and property controls in Details.
-The Project overview belongs to Home in Main.
+Workbench’s mounted Editor. Workspace startup owns Graph mounting and event
+listening, even when its Main app is closed.
 
 ### Issue creation
 
-New issue uses a compact dialog with a title and an always-visible Markdown
-description. It is centred in the application window. The background stays
-unchanged, with no tint or blur. The dialog uses a thin rule, small corners,
-and no shadow. Description text wraps, including long URLs; long drafts
-use the dialog body's vertical scroll area, without a separate editor scrollbar.
-Project, status, owner, priority, and due date sit in a wrapping
-row below the description. Each control shows a symbol and its value, with a
-full accessible name. Empty owner and date controls show **Assign** and
-**Due date**. Project search uses the complete Project catalog, independently
-of the first entry page. **No project** is an explicit choice.
-
-The initial Project comes from the selected Project column, then the Work
-Project filter, then the workspace link. An unassigned column or filter means
-No project. A related issue starts with its source entry's Project. The
-submitted selection supplies the sole new Project assignment; creation never
-adds the old default as a second assignment. This does not change the workspace
-link or its default storage.
-
-The footer separates **Save to** storage from Project membership. Its Link
-button opens a search menu without editing the description. Selecting an
-entry inserts its Markdown link at the description cursor; cancelling changes
-nothing. `@` completion also works in the description and can extend beyond
-the dialog into the available window space. More issue options opens a
-separate menu for tags and **Create another**, without changing dialog size. Repeated creation
-keeps Project, owner, status, priority, and storage, but clears the title,
-description, tags, and due date. Title receives focus on open; Enter moves to
-the description. Cmd/Ctrl+Enter creates the issue from the title, description,
-or any open property menu, before an editor or menu can consume the shortcut.
-Escape first closes an open menu or an active `@` lookup. Otherwise it closes
-an empty issue. If the title, description, or tags contain text, Escape and
-the close button ask before discarding it. **Keep editing** receives focus;
-Escape from that confirmation keeps the draft and restores focus. Failed saves
-retain the draft and show an inline error.
-Outside clicks do not close an issue draft, and a pending save blocks close
-and repeated submission. Successful creation uses the existing Editor opening
-behaviour. Other entry kinds keep the general Graph creation form.
-
-`harness/issue-create.html` mounts the production dialog with fixture data.
-It does not read or write user Graph files. `harness/shell.html?section=work&workbench`
-shows the production Graph inside the workbench panes with fixture data. The
-standalone design comparison is `harness/issue-dialog-mockups.html`.
-
-Chrome checks on 2026-09-21 covered the production composer in light and dark
-themes, including a 375 × 400 px window. Title focus, stable dialog geometry
-when options open, link-search cancellation and insertion, and completion-menu
-window bounds passed. Component tests cover the submitted fields, project
-overrides, No project, repeat creation, failed saves, and link selection.
-These checks do not establish signed installed-app behaviour.
-
-Chrome and WebKit checks on 2026-09-22 covered the composer over the workbench
-panes in light and dark themes. Empty descriptions, long URLs, code, and long
-drafts had no horizontal overflow, including at 375 × 400 px. The dialog body
-scrolled to the cursor while the footer stayed visible. Cmd+Enter submitted
-the complete text; Escape closed an empty issue and preserved a draft when
-discard was cancelled. The focused dialog/editor tests and production build
-also passed. These browser fixtures do not establish installed-app behaviour.
+New issues use a compact dialog with title, Markdown description, project,
+status, owner, priority, and due date. The initial Project comes from the
+selected Project column, then the Work Project filter, then the workspace link.
+A related issue starts with its source entry’s Project. The submitted selection
+is the sole new Project assignment; creation never adds the old default as a
+second assignment. **Save to** storage is separate from Project membership.
+Repeated creation keeps Project, owner, status, priority, and storage but
+clears title, description, tags, and due date. Project search uses the complete
+Project catalog, not the first entry page. Cmd/Ctrl+Enter creates the issue
+before an editor or menu can consume the shortcut. Outside clicks do not close
+a draft; Escape and close ask before discarding text. A pending save blocks
+close and repeated submission; a failed save keeps the draft. Other kinds use
+the general creation form. Fixtures: `harness/issue-create.html`,
+`harness/shell.html?section=work&workbench`.
 
 ### Project home
 
-**Home** is the first top-level tab beside **Work**, **Graph**, and **Changes**.
-It opens in Main, without opening or selecting an Editor document. The first
-visit uses the current workspace's linked Project. A searchable Project
-selector in the page heading switches directly to any available Project;
-the current workspace Project appears first. The selection stays while moving
-between views and resets when the workspace or its Project link changes.
-If the workspace has no linked Project, Home offers the same selector and a
-direct action to link a Project in workspace settings.
+Home opens in Main using the current workspace’s linked Project. It uses the
+optional `home.canvas` property in the Project’s Markdown file -- a Markdown
+string separate from the stable Project body. No separate entry kind or file.
+The body is never copied into the canvas. Home never opens or selects an Editor
+document.
 
-Home uses the optional `home.canvas` property in the Project's existing
-Markdown file. It is a Markdown string, separate from the stable Project body.
-There is no new entry kind, file, or resource store. Existing Projects start
-with an empty canvas. The body is never copied into it.
+Canvas edits autosave after 600 ms. Failed and conflicting drafts stay in Home
+and in the session snapshot, including on Quit; recovery never depends on an
+Editor tab. A canvas conflict shows the saved text and keeps the local draft
+until the user chooses a version. Home writes only its
+field against a fresh source path and revision. It retries independent context
+changes. Details and Source can rebase a context-only draft over a canvas-only
+disk change. Team sync merges canvas separately from other Project fields; when
+both canvases changed, the later canvas timestamp wins (commit time as
+fallback), and both parent versions remain in History.
 
-```yaml
-home:
-  canvas: |
-    Any Markdown the team chooses to put here.
-  updatedAt: '2026-09-19T08:00:00Z'
-  updatedBy:
-    kind: human
-    id: local-human
-    label: You
-    initials: ME
-```
-
-The canvas is always editable in Main. It uses the standard Editor typography,
-syntax colours, live Markdown preview, undo, links, tables, and checkboxes.
-There is no read mode, edit button, start button, or suggested-purpose text.
-Markdown sections and links stay in authored order; no heading has a special
-layout rule. Link text opens its target using the normal Editor behaviour.
-The Project body is in a collapsed **Project context** section below. Its
-**Edit context** action opens the existing Project document in Editor.
-
-Canvas edits autosave after 600 ms. The quiet status shows saving, saved, or
-failed state. Failed and conflicting drafts remain in Home and in the normal
-atomic session snapshot, including on native Quit. Recovery never depends on
-an Editor tab. A canvas conflict shows the saved text and keeps the local draft
-until the user chooses a version. Choosing the saved version keeps the local
-text available through **Restore my previous draft**.
-
-Home writes only its field against a fresh source path and revision. It retries
-independent context changes. Details and Source can also rebase a context-only
-draft over a canvas-only disk change. Other changes keep the normal conflict
-check. Team sync applies the separate-field rule described above; this is not
-a real-time collaborative editor.
-
-Structured Graph writes and Source saves set `home.updatedAt` and
-`home.updatedBy` only when canvas text changes. Direct external file authors
-must maintain these optional fields themselves. Missing metadata produces no
-invented date or author. Search, agent context, and Graph references include
-canvas text. Canvas backlinks open that Project's Home in Main.
+`home.updatedAt` and `home.updatedBy` are set only when canvas text changes.
+Missing metadata produces no invented date or author. Search, agent context,
+and Graph references include canvas text. Canvas backlinks open that Project's
+Home in Main.
 
 **Needs attention** shows up to five open tasks that are waiting, in review,
-overdue, or due today. Each row gives the task title, reason, owner, and due
-date when set. Closed and snoozed tasks are excluded. The query reads all pages
-of explicitly assigned Project tasks in the active storage scopes. Graph table
-filters, Work filters, and the initial 500-entry catalog do not restrict it.
-The first load orders tasks by urgency. Background updates keep visible tasks
-in place and fill free places. Dates update each minute and on window focus.
-Failures show **Retry**, not an empty result. More tasks link to Work.
+overdue, or due today. Closed and snoozed tasks are excluded. The query reads
+all pages of explicitly assigned Project tasks; Graph and Work filters do not
+restrict it. A failure shows **Retry**, not an empty result. Fixture:
+`harness/project-home.html`.
 
-The canvas sits beside Needs attention in wide panes. Narrow panes
-stack these sections. **Open Work** selects this Project in Work and clears
-search, Owner, Priority, and collapsed status columns. It keeps the Board/List
-view, grouping, sorting, and closed-task preference. Project-filtered Work
-loads all task pages and matches explicit secondary Project assignments too.
-A mounted source scope is enabled if necessary. Following a task or file opens
-it in Editor while Home stays visible in Main. Home retains its scroll when
-switching between the top-level views. The **Open Home** icon beside Work's
-Project selector returns to the selected Project's Home in Main.
+### Graph table and Work
 
-`harness/project-home.html` mounts the production Business Graph app with local
-fixtures. It does not read or write user Graph files. Component and Workbench
-integration tests cover direct Home access without changing Editor, Project
-switching, task/file actions, direct typing, undo, autosave, conflict recovery,
-and the return from Work. Native tests cover canvas metadata, search, links,
-Source rebasing, and two-clone Team sync with both versions retained.
+Graph has one table: Title, Kind, Project, Created, Updated. Default sort is
+Updated descending. Kind and Project columns have filter buttons. Kind lists
+kinds in the selected scopes independently of other filters and paging. Project
+filter includes text search and **No project**.
 
-Browser checks on 2026-09-19 used the fixture page in WebKit and Chrome at
-320, 520, 760, and 1000 px. Direct typing, autosave, undo, empty canvases, view
-switching, and horizontal bounds passed. File, web, and Graph links opened
-with one click. These checks do not establish installed-app or two-machine
-sync behaviour.
-
-Opening a listed entry uses its mounted scope to locate the source. Rust
-validates that source and its entry id; a stale path falls back to native
-lookup. This removes the separate full-entry read on the common opening path.
-Reopening the exact open tab reuses its snapshot and draft without a source
-read or a wait for its pending save. Git History availability runs when More
-actions opens; Team file discovery runs when More properties opens. References
-and neighbors load separately and do not block the initial document.
-Details retains the last Source editor state without updating its hidden
-document or extensions. Selecting Source applies the latest saved content and
-retains each open text tab’s undo, selection, and scroll state. Pending reviews
-activate after the Source buffer has caught up.
-Working-note theme and highlighting rules are shared across editor instances,
-so repeated opens do not add a new set for each entry.
-
-A WebKit check on 2026-09-14 compared four entry opens in each recording.
-With the [shared stylesheet fix](editor-system.md#codemirror-surface), the
-largest style calculation fell from 33.3 ms to 1.9 ms, and the largest forced
-layout fell from 53.1 ms to 1.9 ms. The repeated 77–84 ms style/layout pauses
-were absent from the final recording. These are recorded event durations,
-not complete click-to-display timings.
-
-In Work, search filters the loaded issues
-immediately by title, summary, tags, project, owner, and work details. Terms
-combine and ignore case and accents. Board keeps its columns, and List keeps
-its groups and sort order. Empty search columns remain visible; clearing the
-query restores the work. Graph uses debounced content search.
-Graph has one table with **Title**, **Kind**, **Project**, **Created**, and
-**Updated** columns. Rows have no separator lines and use 11.5 px type.
-Click a column label to sort; click it again to reverse
-the order. One arrow marks the active sort. The default is Updated, newest
-first. There is no separate sort menu or List/Groups switch. **Changes** in
-the top navigation opens event history; **Graph** returns to the table.
-Opening Changes clears search, including a pending search. Work retains its
-chosen Board or List view. Graph retains its column filters. The table starts
-directly below the top navigation, with no extra toolbar or command footer. Cmd/Ctrl+F,
-Cmd/Ctrl+K, and `/` focus search. **New** creates an entry.
-
-Click anywhere in a row to open that row's entry in Editor. Every cell has
-the same action. Project names in rows are plain text. A Project row shows
-its own name in the Project column. An entry assigned to more than one
-project shows the first project by name and a count of the other projects;
-the full list is available in the cell tooltip. Arrow keys move between rows;
-Enter opens the focused entry. Background updates keep the selected entry
-and anchor the first visible row. They do not open or replace a document.
-An explicit search, filter, or sort change starts at the top. Narrow panes
-scroll across the columns and keep Title visible. No column control is
-removed at small widths.
-
-Kind and Project have separate, always-visible filter buttons beside their
-sort labels. Kind lists the kinds present in the selected scopes, independently
-of active filters and paging. Project has a text search, puts
-the current workspace project first when nothing is selected, and offers
-**No project**. Both use
-checkboxes. Changes apply at once, and the filter stays open for further
-selections. Clicking the filter icon again closes it without clearing selections.
-Selected options appear first when the menu reopens. Their order stays fixed
-while the menu is open, so a click does not move the next option.
-Escape closes the filter and returns focus to its button.
-Clicking outside also closes it. Filter menus render above the app panes and
-stay inside the window. A click anywhere in an option selects it. Multiple selections match any value within
-a column; filters across columns must all match. Active filter buttons show
-the selected count, with the names in their tooltip and accessible label.
-The adjacent × clears that column in one click and keeps the search text.
-No filter row appears or disappears, so the table stays in place. Filters
-remain available when no entries match; the empty state also offers
-**Clear filters** to clear both columns.
+Search uses **Best match** relevance: exact title matches, then titles
+containing all terms, then content matches. Native queries apply scope,
+project, and kind filters, then sorting, before pagination. **Show more**
+loads the next page: 500 entries for browsing (`MAX_QUERY_LIMIT`) and 100 for
+search (`MAX_SEARCH_LIMIT`). A changed order or filter rejects late pages.
+Background refresh keeps the loaded entry count, the selected entry, and the
+first visible row; it never opens or replaces a document. Selections within a
+column match any value; filters across columns must all match. Browse order and
+column filters persist; search order lasts for the current query. Missing or
+invalid dates and unassigned projects sort last in both directions. Fixture:
+`harness/graph.html` (`?pane=380&offset=260` for a narrow clipped pane).
 
 Project filtering includes the Project entry and entries with explicit
-`part_of` assignments to it. A resolved legacy project id is also accepted.
-Body mentions, backlinks, and other relation types do not assign a project.
-**No project** includes entries with no assignment or with no resolved project
-in the selected storage scopes. Kind and storage scope filters still apply.
-The project list is loaded independently of table filters and includes
-projects beyond the first result page. Project sorting uses project titles,
-with unassigned entries last in both directions. Multiple memberships use
-the first project by name for sorting and match any selected project.
+`part_of` assignments. A resolved legacy project id is also accepted. Body
+mentions, backlinks, and other relation types do not assign a project.
+**No project** includes entries with no assignment or no resolved project in
+the selected scopes. Multiple memberships use the first project by name for
+sorting and match any selected project.
 
-Each new search starts with **Best match**: exact title matches, then other
-titles containing all search terms, then content matches. A column click
-sorts the search results. **Best match**, beside Title in the table heading,
-restores relevance.
-Clearing search restores the browse sort. Browse order and active column
-filters persist; search order is limited to the current query. Old Timeline
-and Groups selections open the table. Old single-kind category settings are
-ignored. Missing or invalid dates sort last in both directions. Dates display
-in local time, with Today and Yesterday where applicable.
+Work hides Done and Cancelled issues by default. Missing status uses Backlog.
+Work treats missing project assignments, old labels, and references without a
+matching loaded Project as No project. A named Project filter also matches
+explicit secondary assignments. Board drag into No project clears project
+assignment; drag within a column changes rank only and preserves stored
+references. Board and List share one row grammar (`business-graph/workRow.js`).
+Board column visibility follows task filters but ignores search, so typing does
+not move columns. Undo of a UI close or bulk status change restores the prior
+status and rank only at the saved revision; it never overwrites later edits.
 
-Native queries apply scope, project, and kind filters, then sorting, before
-pagination. Created is included in entry summaries. **Show more** loads the
-next page: 500 entries for browsing and 100 matches for search. A changed
-order or filter rejects late pages. Background refresh retains the number
-of entries already loaded.
-
-Tests cover order and filters before limits, explicit project membership,
-project title sorting, title relevance, dates, search pages, stale requests,
-refresh after loading more, saved preferences, row actions, filter keyboard
-use, and scroll anchoring. `harness/graph.html` mounts the production entry
-table with local fixtures for browser checks. `?pane=380&offset=260` places
-it in a narrow, clipped pane. It does not read or write
-Graph files. Browser checks do not establish installed native-app behavior.
+Settings > Graph > You selects the reader’s Person node
+(`businessGraphSelfPersonId`). It drives the `you` token in Work.
 
 Entry Details offers **Work with agent** in More actions. It saves the entry,
-then prepares bounded context for an agent Activity. Raw ids and source
-revisions stay out of normal UI. Projection navigation stays direct at every
-width.
-
-Work rows share one grammar (`business-graph/workRow.js`) across Board and
-List. A Board card has a fixed height and fixed slots: a two-line title with
-the owner at its right, the project beneath, then the due date with the
-waiting reason after it, and the priority control at the bottom right. Only
-the title and the waiting reason truncate. Due dates are words relative
-to today (`due today`, `due tomorrow`, `due 3d`, `due 22 Sep`, `4d overdue`);
-a missing date is a quiet calendar control. The waiting slot reads
-`waiting for <reason>`, and `me`, `human`, or `owner` reads as `you`. The
-owner slot shows the assignee's initials, or `you` for the configured person;
-the last editor stays in Changes. Board columns share the width and scroll
-when there is no room. Column sizing is independent of card text and search
-results. Cards are `chrome-high` plates with a 2 px radius
-and a 4 px gap on a `chrome` column. The List is single-line
-rows under sticky group headers and follows the Board grouping (status or
-project). The second header keeps frequent task filters beside the views:
-Project, an Owner icon until a person is selected, and Filter for Priority.
-The Project menu puts the linked workspace Project first, marked **Current
-workspace**, then All projects, the other projects by name, and No project.
-Text search is always available. This order does not change the chosen filter.
-An **Open Home** icon beside the selector opens Home in Main for the selected
-Project, or the current workspace Project when All projects is selected. It
-does not change the Work filter.
-Selected values have adjacent clear actions. In narrow panes, these controls
-move into Filter, with named, clearable active-filter chips. The available pane
-width determines the layout. The smallest panes
-show the active filter count; open Filter to read or clear each selected value.
-Display stays separate at the right and contains Group by, Sort, Columns, and
-Show closed issues. Work hides Done and Cancelled issues by default. This setting
-applies to both groupings, Board, List, and Work search, and persists across
-restarts. Graph is not affected. Done stays on the status Board as a drop target;
-Cancelled has its own column when closed issues are shown. Closing issues from
-the UI offers Undo for the last action, including bulk status changes. Undo
-restores the prior status (and rank after a drag) only at the saved revision;
-it does not overwrite later edits. Failed restores remain available to retry.
-Columns appears only on a status-grouped Board; collapsed columns do not count
-as task filters. A project-grouped Board hides empty project columns by default.
-Display offers Show empty projects for that Board only and saves the choice
-across restarts. Column visibility follows the project, owner, priority, and
-closed-issue filters, but ignores search so typing does not move columns.
-All projects remain available in project selectors, including hidden projects.
-Showing empty projects provides empty columns for creating or moving work;
-it does not add empty groups to List or change status columns. A
-scoped project drops the project slot from rows. The Owner list offers You,
-active team members, and Unassigned.
-
-Work treats missing project assignments, old labels, and references without a
-matching loaded Project as No project. Board grouping, List grouping, and the
-No project filter share this rule; stored references are preserved. A named
-Project filter also matches explicit secondary assignments. Old project
-labels do not get their own columns or filter options. The No project column
-appears only when needed by issues that match the task filters, even with Show
-empty projects enabled. It remains in place while search filters its cards.
-Drag ordering uses the same project-resolution rule as column grouping. With
-Manual order selected, a drag within a column changes rank only and preserves
-stored project references. A drag from a project into No project clears the
-moved issue's project assignment and places it at the drop position. Status,
-owner, and other relations stay unchanged; other cards receive rank changes only.
-Missing status continues to use Backlog.
-
-Settings > Graph > You selects the reader's Person node
-(`businessGraphSelfPersonId`). It drives the `you` token and the Owner
-list's You entry; without it, rows show initials for every assignee.
+then prepares bounded context for an agent Activity.
 
 Public Graph commands are defined only in [agent-interface.md](agent-interface.md).
 Native ownership is under `src-tauri/src/business_graph/`; renderer ownership

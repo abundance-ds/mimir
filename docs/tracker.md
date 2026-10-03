@@ -1,7 +1,7 @@
 # Tracker
 
-Tracker is Mimir's first-party, opt-in activity timeline. It is disabled by
-default, built into Mimir, and supported for collection on macOS.
+Tracker is a first-party, opt-in activity timeline. Disabled by default.
+Collection supported on macOS.
 
 ## State and lifecycle
 
@@ -14,20 +14,21 @@ default, built into Mimir, and supported for collection on macOS.
 | needs-access | Window-title collection waits for Accessibility |
 | error/unsupported | Stored history remains available |
 
-- `enabled` and `armed` are separate native states. Hiding UI is not disabling.
-- Closing the window does not stop enabled tracking. Confirmed application Quit
-  closes the current interval and checkpoints SQLite.
-- Enabling Tracker adds login launch; disabling removes it but retains all data.
+- `enabled` and `armed` are separate native config fields. Hiding UI is not
+  disabling.
+- Window close does not stop tracking. Application Quit closes the current
+  interval and checkpoints SQLite.
+- Enabling Tracker adds login launch; disabling removes it but retains data.
 
 ## Evidence and privacy
 
-- App and bundle identity use `NSWorkspace` and need no permission.
-- Window titles use Accessibility, are capped at 512 characters, and are
-  requested lazily.
-- Browser domains are separately opt-in; only the normalized host is retained.
-- Screenshots, pixels, and full browser URLs are never collected.
-- Tracker data is absent from Graph context, automatic Mimir context, and the
-  public agent tool projection. Titles enter AI only after explicit opt-in.
+- App and bundle identity use `NSWorkspace`; no permission needed.
+- Window titles use Accessibility, capped at 512 characters, requested lazily.
+- Browser domains are separately opt-in (`collect_browser_domains`); only the
+  normalized host is retained.
+- No screenshots, pixels, or full browser URLs.
+- Tracker data is absent from Graph context, Mimir context, and agent tools.
+  Titles enter AI only after explicit opt-in (`include_window_titles_in_ai`).
 
 ## Timeline and classification
 
@@ -46,8 +47,8 @@ default, built into Mimir, and supported for collection on macOS.
 
 `~/.mimir/tracker/tracker.sqlite` is the WAL-mode authority for configuration,
 intervals, rules, jobs, AI usage, nudges, and imports. A damaged database and
-its sidecars move to a timestamped corrupt sibling; a newer schema fails closed.
-Disabling never deletes history.
+its sidecars move to a timestamped `.corrupt-<ms>.sqlite` sibling; a newer
+schema fails closed. Disabling never deletes history.
 
 Argus import is one idempotent SQLite transaction. It refuses to run while
 Tracker is enabled or the legacy Argus process is live, preserves source files,

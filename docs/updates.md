@@ -11,15 +11,16 @@ signing/notarization are separate required checks.
 - Mimir does not download before **Update** or restart before **Restart**.
 - `src/stores/appUpdate.js` owns one shared state for Settings and the toast.
   Only one check, install, or restart runs at a time.
-- Active download/install state cannot be dismissed. Available, ready, and
-  user-requested error states can.
-- Native update handles remain outside persisted Pinia state.
+- The toast cannot be dismissed while checking, downloading, installing, or
+  restarting.
+- The native update handle stays in a store closure, not in reactive state.
 
 ## Restart safety
 
-Before relaunch, the Editor flushes content, resolves dirty documents, writes
-the session, flushes Settings, and checks for active Scribe capture. The user
-can cancel. A failure leaves Mimir open with the update ready to retry.
+Restart runs the renderer part of the [Quit](runtime-architecture.md#quit)
+sequence (`completeNativeQuit` in `src/editor/appQuit.js`): close guard without
+native close, Settings flush, confirmation if Scribe records. It ends with
+`app_prepare_relaunch`, not `app_quit_confirmed`. Cancel or failure leaves Mimir
+open with the update ready.
 
-Mimir 0.1.0 cannot use the feed; users install the first updater-enabled DMG
-once. Release creation and signing are documented in [building.md](building.md).
+Release creation and signing: [building.md](building.md).

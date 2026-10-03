@@ -13,9 +13,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
-Use Bun wrappers rather than invoking Vitest or Vite directly. Native tests
-normally live beside their Rust authority. Renderer tests normally sit beside
-the service, store, component, or composable.
+Use `bun run` wrappers, not Vitest or Vite directly (`scripts/test.mjs` sets
+`NODE_OPTIONS`). Vitest includes `src/**/*.test.js`. Rust tests sit beside their
+module; `src-tauri/tests/` holds the CLI contract test and fixtures.
 
 ## Important limits
 
@@ -23,8 +23,8 @@ the service, store, component, or composable.
   native windows, PTYs, dialogs, Keychain, Trash, capture, or GPU geometry.
 - The default invoke mock returns `undefined`; tests that consume native data
   must provide a representative result.
-- `src/test/setup.js` and Rust `generate_handler!` are separate command-name
-  seams; `bun run check:commands` checks them.
+- `src/test/setup.js` (`VALID_TAURI_COMMANDS`) and Rust `generate_handler!` are
+  separate command lists; `bun run check:commands` compares them. Edit both.
 - Golden IPC fixtures under `src-tauri/tests/fixtures/ipc/` pin important Rust
   response shapes used by renderer tests. Regenerate an intentional change with:
 
@@ -32,8 +32,8 @@ the service, store, component, or composable.
 UPDATE_IPC_FIXTURES=1 cargo test --manifest-path src-tauri/Cargo.toml ipc_fixtures
 ```
 
-- Component tests cannot prove macOS permissions, signed identity, real audio,
-  GitHub login, two-machine sync, or installed update behavior.
+- Tests cannot prove macOS permissions, signed identity, real audio, GitHub
+  login, two-machine sync, or installed update behavior.
 
 ## Change routing
 

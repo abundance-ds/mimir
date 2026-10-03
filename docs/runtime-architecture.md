@@ -1,9 +1,8 @@
 # Runtime architecture
 
 Rust owns processes, durable stores, tools, Graph, Tracker, Scribe, Chat, and
-filesystem boundaries. Renderer stores project native state and own the
-Workbench, Editor buffers, and UI-only navigation. Do not move authority into a
-convenient caller.
+filesystem boundaries. Renderer stores project native state. The renderer owns
+the Workbench, Editor buffers, and UI-only navigation. Do not move authority into a convenient caller.
 
 ## Bootstrap
 
@@ -20,7 +19,7 @@ Native setup in `src-tauri/src/lib.rs`:
 The renderer starts the MCP socket only after its relay listeners exist.
 Native runtimes must not depend on a mounted renderer or one particular window.
 
-Workbench startup:
+Workbench startup (`WorkbenchApp.vue`):
 
 1. Install singleton Tool records and global handlers.
 2. Load settings and restore a valid pane layout with Editor expanded.
@@ -28,16 +27,12 @@ Workbench startup:
 4. Open the saved workspace after those initializers settle.
 5. Restore the selected Activity when it still exists.
 
-One initializer failure must not cancel unrelated systems. Workspace opening
-mounts Private, Workspace, and optional Team Graph roots separately. Editor
-session hydration completes before draft creation, persistence, native
-listeners, and file-open draining.
+One initializer failure must not block unrelated systems. Graph roots (Private,
+Workspace, Team) mount separately. Editor session hydration completes before
+draft creation, persistence, native listeners, and file-open draining.
 
 ## IPC and lifecycle
 
-- Renderer invokes normally go through `src/services/`.
-- Install event listeners before starting producers, then read the native
-  snapshot that closes the startup gap.
 - Core singleton Activities are renderer records; PTY Activities are native.
 - Editor buffers stay renderer-owned. Native proposal state coordinates callers
   and restart recovery but is not a second editor store.
@@ -46,17 +41,19 @@ listeners, and file-open draining.
 
 ## Quit
 
-1. Rust intercepts application exit and asks the main renderer to quit.
-2. Editor hydration and content synchronization finish.
-3. The user resolves every dirty document.
+1. Rust intercepts `ExitRequested` and emits `mimir://quit-requested` to the
+   main renderer.
+2. Renderer finishes Editor hydration and content sync.
+3. User resolves every dirty document.
 4. Session and Settings snapshots flush.
-5. Renderer confirms native exit.
-6. Native code stops Scribe, disconnects Chat, stops Tracker and Routines,
-   interrupts live Activities, and flushes durable stores.
+5. Renderer calls `app_quit_confirmed` (stops active meeting, flushes managed
+   Git, calls `exit(0)`).
+6. `RunEvent::Exit` stops Scribe, disconnects Chat, stops Tracker and
+   Routines, interrupts live Activities, and flushes durable stores.
 
 Direct window close uses its own guarded close path. Repeated close requests
 share one promise. HMR and destroyed windows still run component cleanup; they
-cannot depend on the application Quit sequence.
+cannot depend on the Quit sequence.
 
-Event names and relay details are in [ipc.md](ipc.md). Ordering traps are in
+Event contracts are in [ipc.md](ipc.md). Ordering traps are in
 [gotchas.md](gotchas.md).
