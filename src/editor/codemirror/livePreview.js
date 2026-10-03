@@ -346,6 +346,7 @@ function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => [], {
 
   const decos = []
   const excludedLinks = ownedLinks(state)
+  let quoteEnd = -1
 
   syntaxTree(state).iterate({
     from: start,
@@ -520,19 +521,23 @@ function buildDecorations(view, isEnabled, getFilePath, ownedLinks = () => [], {
         return false
       }
 
-      if (name === 'Blockquote' && !onCursorLine) {
-        syntaxTree(state).iterate({
-          from: nFrom, to: nTo,
-          enter(child) {
-            if (child.type.name === 'QuoteMark') {
-              const hideEnd = Math.min(child.to + 1, nTo)
-              decos.push(Decoration.replace({}).range(child.from, hideEnd))
-            }
-          },
+      if (name === 'Blockquote' && nFrom >= quoteEnd) {
+        // Scan each outer quote once. QuoteMark nodes also occur inside code
+        // and inline nodes that the main preview traversal skips.
+        quoteEnd = nTo
+        node.node.cursor().iterate(child => {
+          if (child.to < start || child.from > end) return false
+          if (child.type.name !== 'QuoteMark') return
+          const line = state.doc.lineAt(child.from)
+          if (cursorLines.has(line.number)) return
+          const next = state.sliceDoc(child.to, Math.min(child.to + 1, line.to))
+          const hideEnd = child.to + (next === ' ' || next === '\t' ? 1 : 0)
+          decos.push(Decoration.replace({}).range(child.from, hideEnd))
         })
-        const startLine = state.doc.lineAt(nFrom).number
-        const endLine = state.doc.lineAt(Math.min(nTo, state.doc.length)).number
+        const startLine = state.doc.lineAt(Math.max(nFrom, start)).number
+        const endLine = state.doc.lineAt(Math.min(nTo, end)).number
         for (let l = startLine; l <= endLine; l++) {
+          if (cursorLines.has(l)) continue
           const lineStart = state.doc.line(l).from
           decos.push(Decoration.line({ class: 'cm-lp-blockquote-line' }).range(lineStart))
         }

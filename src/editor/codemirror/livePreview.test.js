@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EditorState, StateEffect } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { EditorState, EditorSelection, StateEffect } from '@codemirror/state'
+import { EditorView, keymap } from '@codemirror/view'
+import { defaultKeymap, history, undo } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
 import { syntaxHighlighting, syntaxTree, ensureSyntaxTree } from '@codemirror/language'
@@ -17,8 +18,9 @@ function makeView(doc, cursorPos = 0) {
   const parent = document.createElement('div')
   const state = EditorState.create({
     doc,
-    selection: { anchor: cursorPos },
+    selection: typeof cursorPos === 'number' ? { anchor: cursorPos } : cursorPos,
     extensions: [
+      EditorState.allowMultipleSelections.of(true),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
     ],
   })
@@ -48,6 +50,118 @@ function getDecos(doc, cursorPos = 0) {
 }
 
 describe('livePreview', () => {
+  describe('blockquotes', () => {
+    const doc = '> here is\n> a block quote\n\noutside'
+
+    it.each([0, 4, 10, 11, 12, 18])('reveals only the cursor line at position %i', cursor => {
+      const decos = getDecos(doc, cursor)
+      const hiddenLine = cursor < 10 ? 10 : 0
+      expect(decos.filter(d => d.replace).map(d => [d.from, d.to]))
+        .toEqual([[hiddenLine, hiddenLine + 2]])
+      expect(decos.filter(d => d.class === 'cm-lp-blockquote-line').map(d => d.from))
+        .toEqual([hiddenLine])
+    })
+
+    it.each([
+      { anchor: 4, head: 18 },
+      { anchor: 18, head: 4 },
+      EditorSelection.create([EditorSelection.cursor(4), EditorSelection.cursor(18)]),
+    ])('reveals all selected quote lines', selection => {
+      expect(getDecos(doc, selection)).toEqual([])
+    })
+
+    it('hides nested markers once and adds one border per line', () => {
+      const text = '> > one\n> > two\n\noutside'
+      const decos = getDecos(text, text.length)
+      expect(decos.filter(d => d.replace).map(d => [d.from, d.to]))
+        .toEqual([[0, 2], [2, 4], [8, 10], [10, 12]])
+      expect(decos.filter(d => d.class === 'cm-lp-blockquote-line').map(d => d.from))
+        .toEqual([0, 8])
+      expect(getDecos(text, 14).filter(d => d.replace).map(d => d.from))
+        .toEqual([0, 2])
+    })
+
+    it.each([
+      ['>one\n>two\n\noutside', ['>', '>']],
+      ['> one\n>\n> two\n\noutside', ['> ', '>', '> ']],
+      ['>\tone\n>  two\n\noutside', ['>\t', '> ']],
+      ['outside\n\n>', ['>']],
+    ])('hides only markers and optional whitespace in %j', (text, hidden) => {
+      const decos = getDecos(text, text.indexOf('outside'))
+      expect(decos.filter(d => d.replace).map(d => text.slice(d.from, d.to))).toEqual(hidden)
+    })
+
+    it.each(['> **one\n> two**', '> ```js\n> foo\n> ```'])('keeps quote markers hidden inside %j', quote => {
+      const text = quote + '\n\noutside'
+      const decos = getDecos(text, text.length)
+      const quoteMarks = decos.filter(d => d.replace && text[d.from] === '>')
+      expect(quoteMarks.map(d => text.slice(d.from, d.to)))
+        .toEqual(Array(quote.split('\n').length).fill('> '))
+      const active = getDecos(text, text.indexOf('\n') + 3)
+      expect(active.some(d => d.replace && d.from === text.indexOf('\n') + 1)).toBe(false)
+    })
+
+    it('keeps the border on lazy continuation lines only when inactive', () => {
+      const text = '> one\nlazy\n\noutside'
+      expect(getDecos(text, text.length).filter(d => d.class === 'cm-lp-blockquote-line').map(d => d.from))
+        .toEqual([0, 6])
+      expect(getDecos(text, 7).filter(d => d.class === 'cm-lp-blockquote-line').map(d => d.from))
+        .toEqual([0])
+    })
+
+    it('limits a long quote to the viewport margin', () => {
+      const text = '> line\n'.repeat(400) + '\noutside'
+      const state = EditorState.create({
+        doc: text,
+        selection: { anchor: text.length },
+        extensions: [markdown({ base: markdownLanguage })],
+      })
+      ensureSyntaxTree(state, text.length, 1000)
+      const decorations = _buildDecorations({ state, viewport: { from: 1400, to: 1470 } }, () => true)
+      const hidden = []
+      const borders = []
+      for (let iter = decorations.iter(); iter.value; iter.next()) {
+        if (iter.value.spec.class) borders.push(iter.from)
+        else hidden.push(iter.from)
+      }
+      expect(hidden).toContain(1400)
+      expect(hidden.every(from => from >= 899 && from <= 1970)).toBe(true)
+      expect(borders.every(from => from >= state.doc.lineAt(900).from && from <= 1970)).toBe(true)
+    })
+
+    it.each([
+      ['Backspace', 12, '> here is\na block quote\n\noutside'],
+      ['Delete', 10, '> here is\n a block quote\n\noutside'],
+    ])('reveals the second marker and permits %s without joining lines', (key, cursor, expected) => {
+      const parent = document.createElement('div')
+      document.body.appendChild(parent)
+      const view = new EditorView({
+        parent,
+        state: EditorState.create({
+          doc,
+          selection: { anchor: doc.length },
+          extensions: [markdown({ base: markdownLanguage }), history(), keymap.of(defaultKeymap),
+            livePreviewExtension(() => true, () => '/test.md')],
+        }),
+      })
+      try {
+        const lines = () => [...view.contentDOM.querySelectorAll('.cm-line')].map(line => line.textContent)
+        expect(lines().slice(0, 2)).toEqual(['here is', 'a block quote'])
+        view.dispatch({ selection: { anchor: cursor } })
+        expect(lines().slice(0, 2)).toEqual(['here is', '> a block quote'])
+        view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+        expect(view.state.doc.toString()).toBe(expected)
+        expect(undo(view)).toBe(true)
+        expect(view.state.doc.toString()).toBe(doc)
+        view.dispatch({ selection: { anchor: doc.length } })
+        expect(lines().slice(0, 2)).toEqual(['here is', 'a block quote'])
+      } finally {
+        view.destroy()
+        parent.remove()
+      }
+    })
+  })
+
   describe('buildDecorations', () => {
     it('returns no decorations when disabled', () => {
       const view = makeView('**bold**')
