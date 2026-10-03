@@ -43,32 +43,35 @@ describe('AppearanceSection', () => {
     const labels = wrapper.findAll('.swatch-label').map((el) => el.text())
 
     expect(labels).toEqual([
-      'Light', 'North', 'Studio', 'Dark', 'Monokai', 'Dracula', 'Zenith', 'Synthwave',
+      'Light', 'North', 'Studio', 'Dark', 'Dark Contrast', 'Monokai', 'Dracula', 'Zenith', 'Synthwave',
     ])
     expect(wrapper.findAll('.theme-swatch.active')).toHaveLength(1)
     expect(swatchFor(wrapper, 'Light').classes()).toContain('active') // default parchment
   })
 
-  it('selects a theme, persists it via the store, and applies it to the document', async () => {
+  it.each([
+    ['Dark', 'slate'],
+    ['Dark Contrast', 'slate-contrast'],
+  ])('selects %s, persists it via the store, and applies it to the document', async (label, theme) => {
     const { wrapper, store } = await render()
     expect(document.documentElement.getAttribute('data-theme')).toBe('parchment')
 
-    await swatchFor(wrapper, 'Dark').trigger('click')
+    await swatchFor(wrapper, label).trigger('click')
     await flushPromises()
 
-    expect(store.editorTheme).toBe('slate')
+    expect(store.editorTheme).toBe(theme)
     expect(store.isDarkTheme).toBe(true)
-    expect(swatchFor(wrapper, 'Dark').classes()).toContain('active')
+    expect(swatchFor(wrapper, label).classes()).toContain('active')
     expect(swatchFor(wrapper, 'Light').classes()).not.toContain('active')
     expect(wrapper.findAll('.theme-swatch.active')).toHaveLength(1)
-    expect(document.documentElement.getAttribute('data-theme')).toBe('slate')
-    expect(localStorage.getItem('mimir:theme')).toBe('slate')
+    expect(document.documentElement.getAttribute('data-theme')).toBe(theme)
+    expect(localStorage.getItem('mimir:theme')).toBe(theme)
 
     // Persist immediately so the debounced editor-settings save cannot leak
     // into a later test, then verify the snapshot survived.
     await store.flush()
     const saved = JSON.parse(localStorage.getItem('mimir:editor:settings:v1'))
-    expect(saved.editorTheme).toBe('slate')
+    expect(saved.editorTheme).toBe(theme)
   })
 
   it('saves and restores the main tab preference', async () => {

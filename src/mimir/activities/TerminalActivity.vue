@@ -123,6 +123,7 @@ import {
   eventActivityId,
   isEndedStatus,
   prepareTerminalFonts,
+  readTerminalContrast,
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
@@ -263,7 +264,7 @@ async function initialize() {
       convertEol: false,
       customGlyphs: true,
       drawBoldTextInBrightColors: false,
-      minimumContrastRatio: 3,
+      minimumContrastRatio: readTerminalContrast(),
       linkHandler: {
         activate: (_event, uri) => openTerminalUrl(uri),
       },
@@ -837,7 +838,10 @@ function snapDelta(value, scale) {
 function installThemeObserver() {
   if (themeObserver || typeof MutationObserver === 'undefined') return
   themeObserver = new MutationObserver(() => {
-    if (terminal) terminal.options.theme = readTerminalTheme()
+    if (terminal) {
+      terminal.options.theme = readTerminalTheme()
+      terminal.options.minimumContrastRatio = readTerminalContrast()
+    }
   })
   themeObserver.observe(document.documentElement, {
     attributes: true,

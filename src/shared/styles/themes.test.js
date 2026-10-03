@@ -69,6 +69,7 @@ describe('theme text contrast', () => {
       'studio',
       'glacier',
       'slate',
+      'slate-contrast',
       'monokai',
       'dracula',
       'zenith',
@@ -94,5 +95,36 @@ describe('theme text contrast', () => {
     const defaults = colorTokens(defaultBlock)
     expect(defaults['ink-3']).toBe(themeTokens.parchment['ink-3'])
     expect(defaults['ink-4']).toBe(themeTokens.parchment['ink-4'])
+  })
+
+  it('gives Dark Contrast strong text, boundaries, and readable highlighted content', () => {
+    const tokens = themeTokens['slate-contrast']
+    const block = themesSource.match(/:root\[data-theme="slate-contrast"\]\s*\{([^}]*)\}/)[1]
+    const extra = Object.fromEntries(
+      [...block.matchAll(/--([\w-]+):\s*(#[\da-f]{6})/gi)]
+        .map(([, name, value]) => [name, value]),
+    )
+
+    expect(contrastRatio(tokens.ink, tokens.surface)).toBeGreaterThanOrEqual(17)
+    for (const background of ['chrome', 'chrome-mid', 'chrome-high', 'surface']) {
+      expect(contrastRatio(tokens['ink-4'], tokens[background]), `quiet text on ${background}`).toBeGreaterThanOrEqual(7)
+      expect(contrastRatio(tokens.rule, tokens[background]), `boundary on ${background}`).toBeGreaterThanOrEqual(3.5)
+    }
+    for (const background of ['selection', 'code-block-bg', 'inline-code-bg', 'diff-add-line', 'diff-rem-line', 'diff-add-text', 'diff-rem-text']) {
+      expect(contrastRatio(tokens.ink, extra[background]), `text on ${background}`).toBeGreaterThanOrEqual(7)
+      for (const token of SYNTAX_TOKENS) {
+        expect(contrastRatio(extra[token], extra[background]), `${token} on ${background}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+    for (const background of ['accent', 'accent-2']) {
+      expect(contrastRatio(tokens['accent-ink'], tokens[background]), `button on ${background}`).toBeGreaterThanOrEqual(7)
+    }
+    expect(contrastRatio(tokens['rem-ink'], tokens.rem)).toBeGreaterThanOrEqual(7)
+
+    for (const [name, value] of Object.entries(extra)) {
+      if (/^terminal-(yellow|blue|magenta|cyan|bright-)/.test(name)) {
+        expect(contrastRatio(value, tokens.surface), name).toBeGreaterThanOrEqual(7)
+      }
+    }
   })
 })

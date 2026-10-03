@@ -352,7 +352,7 @@ onUnmounted(() => {
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
-  color: white;
+  color: var(--color-accent-ink);
   background: var(--color-accent);
   border: none;
   border-radius: 5px;

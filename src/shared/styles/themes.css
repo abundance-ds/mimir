@@ -1,13 +1,14 @@
 /*
  * Mimir — Theme System
  *
- * Eight themes controlled by a `data-theme` attribute on :root (<html>).
+ * Nine themes controlled by a `data-theme` attribute on :root (<html>).
  * The attribute is set by useSettingsStore and persisted in settings.json.
  *
  *   <html data-theme="parchment">   — Light     (default, warm light)
  *   <html data-theme="studio">      — Studio    (cool aluminium frame, warm paper)
  *   <html data-theme="glacier">     — North     (cool blue-gray light)
  *   <html data-theme="slate">       — Dark      (neutral dark)
+ *   <html data-theme="slate-contrast"> — Dark Contrast (high contrast dark)
  *   <html data-theme="monokai">     — Monokai   (classic dark)
  *   <html data-theme="dracula">     — Dracula   (deep purple-black, iconic palette)
  *   <html data-theme="zenith">      — Zenith    (carbon charcoal, electric cyan)
@@ -165,7 +166,70 @@
 }
 
 
-/* ─── 5. Monokai  ────────────────────────────────────────────────────
+/* ─── 5. Dark Contrast (slate-contrast) ────────────────────────────────
+   Near-black canvas, bright ink, distinct steel layers, and teal states.
+   Strong existing rules and fills; geometry and link styles stay fixed. */
+
+:root[data-theme="slate-contrast"] {
+  --color-ink:         #f4f6f8;
+  --color-ink-2:       #e0e5e9;
+  --color-ink-3:       #c9d1da;
+  --color-ink-4:       #b7c2cd;
+  --color-chrome:      #14191f;
+  --color-chrome-mid:  #202730;
+  --color-chrome-high: #2b333d;
+  --color-surface:     #080b0f;
+  --color-accent:      #8ce8d0;
+  --color-accent-soft: #24483f;
+  --color-accent-ink:  #061b16;
+  --color-accent-2:    #6dccb4;
+  --color-accent-tint: #19372f;
+  --color-add:         #97e6a9;
+  --color-rem:         #ff9eac;
+  --color-rem-ink:     #260b13;
+  --color-attn:        #ffd08a;
+  --color-info:        #9dceff;
+  --color-rule:        #81909f;
+  --color-rule-light:  #526171;
+  --color-line-soft:   rgba(157, 206, 255, 0.10);
+  --color-line-hl:     rgba(140, 232, 208, 0.16);
+
+  --editor-heading: #dbd0ff;
+  --syntax-keyword: #d5c1ff;
+  --syntax-property: #9ed8ff;
+  --syntax-string: #abedb2;
+  --syntax-number: #ffd19a;
+  --syntax-tag: #ffb4c2;
+  --selection: #265448;
+  --code-block-bg: #19222c;
+  --inline-code-bg: #293642;
+  --ghost-text-opacity: 0.85;
+
+  --diff-add-line: #142f23;
+  --diff-rem-line: #3a1d26;
+  --diff-add-text: #24523a;
+  --diff-rem-text: #61313e;
+
+  --terminal-minimum-contrast: 7;
+  --terminal-selection: #265448;
+  --terminal-selection-inactive: #253a42;
+  --terminal-scrollbar: #81909f;
+  --terminal-scrollbar-hover: #c9d1da;
+  --terminal-scrollbar-active: #8ce8d0;
+  --terminal-yellow: #ffd08a;
+  --terminal-blue: #9dceff;
+  --terminal-magenta: #d5c1ff;
+  --terminal-cyan: #8ce8d0;
+  --terminal-bright-red: #ffc0ca;
+  --terminal-bright-green: #c2f4cb;
+  --terminal-bright-yellow: #ffe2b0;
+  --terminal-bright-blue: #c4e4ff;
+  --terminal-bright-magenta: #e5d9ff;
+  --terminal-bright-cyan: #b7f4e5;
+}
+
+
+/* ─── 6. Monokai  ────────────────────────────────────────────────────
    Near-black surfaces, vibrant warm orange accent. Classic coding feel
    with rich, saturated syntax colors.                                  */
 
@@ -202,7 +266,7 @@
 }
 
 
-/* ─── 6. Dracula  ────────────────────────────────────────────────────
+/* ─── 7. Dracula  ────────────────────────────────────────────────────
    Deep purple-black canvas, evolved from the classic Dracula palette.
    Violet accent, pink keywords, green strings. High-saturation syntax
    on a low-saturation background for effortless readability.            */
@@ -240,7 +304,7 @@
 }
 
 
-/* ─── 7. Zenith  ─────────────────────────────────────────────────────
+/* ─── 8. Zenith  ─────────────────────────────────────────────────────
    Ultra-deep cool charcoal, like carbon fibre under glass. Electric
    cyan accent, triadic vivid syntax: hot pink keywords, neon green
    strings, bright amber numbers. Monokai's boldness, rebuilt cold.    */
@@ -278,7 +342,7 @@
 }
 
 
-/* ─── 8. Synthwave  ─────────────────────────────────────────────────
+/* ─── 9. Synthwave  ─────────────────────────────────────────────────
    Purple-black void with neon magenta accent. Electric cyan keywords,
    warm amber strings, soft violet numbers. Mint-green diffs. The retro
    future distilled into a genuinely readable, high-contrast palette.   */

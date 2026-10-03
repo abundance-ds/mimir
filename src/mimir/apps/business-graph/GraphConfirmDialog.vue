@@ -299,7 +299,7 @@ function trapFocus(event) {
   align-items: center;
   gap: 7px;
   background: var(--color-rem);
-  color: white;
+  color: var(--color-rem-ink);
 }
 
 .confirm-submit:hover {

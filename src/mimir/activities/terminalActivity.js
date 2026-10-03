@@ -67,28 +67,33 @@ export function readTerminalTheme(root = document.documentElement) {
     foreground: ink,
     cursor: accent,
     cursorAccent: surface,
-    selectionBackground: withAlpha(accent, '33'),
-    selectionInactiveBackground: withAlpha(accent, '1f'),
-    scrollbarSliderBackground: withAlpha(ink3, '66'),
-    scrollbarSliderHoverBackground: withAlpha(ink2, '99'),
-    scrollbarSliderActiveBackground: withAlpha(accent, 'aa'),
+    selectionBackground: token('--terminal-selection', withAlpha(accent, '33')),
+    selectionInactiveBackground: token('--terminal-selection-inactive', withAlpha(accent, '1f')),
+    scrollbarSliderBackground: token('--terminal-scrollbar', withAlpha(ink3, '66')),
+    scrollbarSliderHoverBackground: token('--terminal-scrollbar-hover', withAlpha(ink2, '99')),
+    scrollbarSliderActiveBackground: token('--terminal-scrollbar-active', withAlpha(accent, 'aa')),
     black: dark ? token('--color-chrome', '#1e1e1e') : ink,
     red: token('--color-rem', '#c05d3c'),
     green: token('--color-add', '#5e8b3e'),
-    yellow: '#d4a520',
-    blue: '#4a7c9b',
-    magenta: '#7c4dff',
-    cyan: '#5a9e8f',
+    yellow: token('--terminal-yellow', '#d4a520'),
+    blue: token('--terminal-blue', '#4a7c9b'),
+    magenta: token('--terminal-magenta', '#7c4dff'),
+    cyan: token('--terminal-cyan', '#5a9e8f'),
     white: dark ? ink2 : ink3,
     brightBlack: ink3,
-    brightRed: '#e07070',
-    brightGreen: '#7cc68a',
-    brightYellow: '#f0c040',
-    brightBlue: '#6ea8c8',
-    brightMagenta: '#b39dff',
-    brightCyan: '#7cc6b8',
+    brightRed: token('--terminal-bright-red', '#e07070'),
+    brightGreen: token('--terminal-bright-green', '#7cc68a'),
+    brightYellow: token('--terminal-bright-yellow', '#f0c040'),
+    brightBlue: token('--terminal-bright-blue', '#6ea8c8'),
+    brightMagenta: token('--terminal-bright-magenta', '#b39dff'),
+    brightCyan: token('--terminal-bright-cyan', '#7cc6b8'),
     brightWhite: ink,
   }
+}
+
+export function readTerminalContrast(root = document.documentElement) {
+  const value = Number.parseFloat(getComputedStyle(root).getPropertyValue('--terminal-minimum-contrast'))
+  return Number.isFinite(value) ? Math.max(1, Math.min(21, value)) : 3
 }
 
 function withAlpha(color, alpha) {

@@ -26,7 +26,7 @@ must explain the interface without decorative copy or motion.
   (`themes.test.js`). Markdown markers use `ink-4`; the heading colour is
   the only hue on heading marks. Judge changes in
   `harness/editor-themes.html`, which mounts the real editor on one sample
-  document across all eight themes.
+  document across all themes.
 - Workbench surfaces are square with one-pixel rules. Shadows and rounded
   corners are reserved for functional overlays.
 - Raw ids, revisions, counters, and technical state do not belong in normal UI.
@@ -46,6 +46,14 @@ Tokens live in `src/shared/styles/app.css`; theme overrides live in
 
 Do not invent ad-hoc gray values. Every theme must preserve these roles and
 readable contrast.
+
+Dark Contrast (`slate-contrast`) uses a near-black content canvas, bright text,
+distinct steel-grey shell layers, and strong existing borders. Secondary text
+reaches 7:1 on the four base surfaces; structural rules reach 3.5:1. Row rules
+remain quieter. Teal selection fills, code blocks, and diff fills have explicit
+colours. The terminal uses a bright ANSI palette and a 7:1 text contrast floor,
+which updates when the theme changes. Fonts, geometry, border widths, and link
+styles keep their existing treatment. This theme adds no control outlines.
 
 ## Controls
 

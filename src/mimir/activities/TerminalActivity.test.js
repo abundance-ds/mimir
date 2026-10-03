@@ -382,6 +382,36 @@ describe('TerminalActivity', () => {
     expect(externalLinks.open).toHaveBeenNthCalledWith(2, 'https://example.com/osc8')
   })
 
+  it('updates and restores terminal contrast and palette without reattaching the session', async () => {
+    const root = document.documentElement
+    const before = root.getAttribute('style')
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    const originalTheme = { ...terminal.options.theme }
+    try {
+      root.style.setProperty('--terminal-minimum-contrast', '7')
+      root.style.setProperty('--terminal-blue', '#9dceff')
+      root.style.setProperty('--terminal-selection', '#265448')
+      await vi.waitFor(() => {
+        expect(terminal.options.minimumContrastRatio).toBe(7)
+        expect(terminal.options.theme.blue).toBe('#9dceff')
+        expect(terminal.options.theme.selectionBackground).toBe('#265448')
+      })
+
+      if (before === null) root.removeAttribute('style')
+      else root.setAttribute('style', before)
+      await vi.waitFor(() => {
+        expect(terminal.options.minimumContrastRatio).toBe(3)
+        expect(terminal.options.theme).toEqual(originalTheme)
+      })
+      expect(api.attach).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+      if (before === null) root.removeAttribute('style')
+      else root.setAttribute('style', before)
+    }
+  })
+
   it('opens detected and OSC 8 Graph links through the Workbench event', async () => {
     xterm.bufferText = 'mimir://graph/issue-1787176211-88fe'
     const wrapper = await initialize()

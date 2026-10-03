@@ -431,11 +431,11 @@ function errorMessage(cause) {
 .launcher-button-primary {
   border-color: var(--color-accent);
   background: var(--color-accent);
-  color: white;
+  color: var(--color-accent-ink);
 }
 .launcher-button-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  color: white;
+  background: var(--color-accent-2);
+  color: var(--color-accent-ink);
 }
 .launcher-icon-button {
   display: grid;

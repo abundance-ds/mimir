@@ -18,7 +18,7 @@
         </div>
         <button
           type="button"
-          class="h-7 shrink-0 bg-accent px-3 text-[9px] font-semibold text-white hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="h-7 shrink-0 bg-accent px-3 text-[9px] font-semibold text-accent-ink hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           @click="carryAll"
         >
           Carry all {{ carryCandidates.length }}
@@ -59,7 +59,7 @@
         <div class="mt-2 flex justify-end">
           <button
             type="button"
-            class="h-7 bg-accent px-3 text-[9px] font-semibold text-white hover:bg-accent/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            class="h-7 bg-accent px-3 text-[9px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             @click="applySelectedCarry"
           >
             {{ selectedCarryCount ? `Append ${selectedCarryCount} to Today` : 'Keep all in Journal' }}

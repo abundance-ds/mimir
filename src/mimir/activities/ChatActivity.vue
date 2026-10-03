@@ -551,7 +551,7 @@
                         <button class="h-6 rounded-[2px] px-2 text-[10px] text-ink-3 hover:bg-chrome" @click="deleteConfirmId = ''">
                           Cancel
                         </button>
-                        <button class="h-6 rounded-[2px] bg-rem px-2 text-[10px] font-semibold text-white" @click="deleteOwnMessage(message)">
+                        <button class="h-6 rounded-[2px] bg-rem px-2 text-[10px] font-semibold text-rem-ink" @click="deleteOwnMessage(message)">
                           Delete
                         </button>
                       </div>

@@ -4,9 +4,9 @@ const params = new URLSearchParams(location.search)
 const theme = params.get('theme')
 
 // Mirrors DARK_THEMES in src/stores/settings.js
-const DARK_THEMES = ['slate', 'monokai', 'dracula', 'zenith', 'synthwave']
+const DARK_THEMES = ['slate', 'slate-contrast', 'monokai', 'dracula', 'zenith', 'synthwave']
 
-const ALL_THEMES = ['parchment', 'studio', 'glacier', 'slate', 'monokai', 'dracula', 'zenith', 'synthwave']
+const ALL_THEMES = ['parchment', 'studio', 'glacier', 'slate', 'slate-contrast', 'monokai', 'dracula', 'zenith', 'synthwave']
 
 const SAMPLE_DOC = `# Heading 1
 
@@ -138,7 +138,7 @@ async function initCell(themeName) {
 }
 
 // ---------------------------------------------------------------------------
-// Grid page: shows all eight themes in iframes
+// Grid page: shows all themes in iframes
 // ---------------------------------------------------------------------------
 
 function initGrid() {
