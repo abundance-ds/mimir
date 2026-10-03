@@ -41,7 +41,7 @@ main tab and sidebar structure belongs to
   One file with many matching lines cannot consume the whole result budget.
   Other callers retain their existing multiple-location behavior. File count,
   byte, and result limits and token-scoped cancellation still apply.
-- One file actions menu lists New file, New folder, Refresh, Collapse all,
+- One file actions menu lists New file, New folder, Name, Modified, Refresh, Collapse all,
   and Open File Manager. Collapse all closes all folders in the current
   project, including nested folders, in both the sidebar and File Manager.
   It keeps the current view and search query, and returns focus to the menu
@@ -50,6 +50,20 @@ main tab and sidebar structure belongs to
   Right-click exposes file commands, including Favorites.
   Hover shows the relative path. There is no selected-path footer.
   Native drops apply only to an active file surface.
+- The sidebar has two sort rows in File actions: Name and Modified. Each row
+  shows its direction; a check mark identifies the active field. Selecting the
+  other field uses A–Z for Name or Newest first for Modified. Selecting the
+  active field reverses its direction. The menu stays open and keeps focus on
+  that row. Escape closes it and returns focus to File actions; a click outside
+  also closes it. Project and Favorites default to Name, A–Z. Recent defaults
+  to Recently opened, with neither sort row checked until a sort is selected.
+  Folders stay first in either direction. Each folder is sorted separately;
+  selection and open folders are retained. Settings are saved per project and
+  view. Name and Modified orders are shared with File Manager. File Manager's
+  other sort fields use the view's default order in the sidebar. During search,
+  both sort rows are disabled and show Search relevance. Clearing search
+  restores the browsing order. Created is not available because the file data
+  has no creation date.
 - File previews and search matches open in the Editor without replacing the
   main session or collapsing a manually expanded sidebar. Content matches
   reveal their line and column. A single click or Space previews a file and

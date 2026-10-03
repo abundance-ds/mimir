@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
@@ -80,6 +80,7 @@ describe('FilesActivity', () => {
   let pinia
 
   beforeEach(() => {
+    localStorage.removeItem('mimir:editor:settings:v1')
     pinia = createPinia()
     setActivePinia(pinia)
     vi.clearAllMocks()
@@ -132,6 +133,13 @@ describe('FilesActivity', () => {
       configurable: true,
       value: { writeText: vi.fn(async () => undefined) },
     })
+  })
+
+  afterEach(async () => {
+    // Settings use a delayed save. Settle it before the next test creates a
+    // store, so one test's sort order cannot become another test's default.
+    await useSettingsStore(pinia).flush()
+    localStorage.removeItem('mimir:editor:settings:v1')
   })
 
   it('provides compact views and file actions without metadata columns', async () => {
@@ -474,6 +482,175 @@ describe('FilesActivity', () => {
     })
   }
 
+  async function openCompactActions(wrapper) {
+    await wrapper.get('[aria-label="File actions"]').trigger('click')
+    return new DOMWrapper(document.querySelector('[role="menu"][aria-label="File actions"]'))
+  }
+
+  function sortRow(menu, label) {
+    return menu.get(`[role="menuitemradio"][aria-label^="${label},"]`)
+  }
+
+  it('toggles Name and Modified in the open sidebar menu and shares saved order with File Manager', async () => {
+    const store = useWorkspaceFilesStore()
+    const child = (name, mtime) => ({ ...indexed[0], path: `/w/docs/${name}`, relativePath: `docs/${name}`, name, mtime })
+    store.treeChildren = {
+      '': [browseEntries[0], { ...browseEntries[1], mtime: 100 }, { ...browseEntries[2], mtime: 200 }],
+      docs: [child('old.md', 100), child('new.md', 200)],
+    }
+    store.expandedDirectories = new Set(['docs'])
+    const sidebar = render({ compact: true })
+    const manager = render()
+    document.body.appendChild(sidebar.element)
+    const paths = wrapper => wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))
+    try {
+      await sidebar.get('[data-file-row="/w/new.md"] button').trigger('click')
+      const menu = await openCompactActions(sidebar)
+      expect(menu.findAll('[role="menuitemradio"]').map(item => item.attributes('aria-label')))
+        .toEqual(['Name, A–Z', 'Modified, Newest first'])
+      expect(document.querySelector('[data-files-sort-menu]')).toBeNull()
+      expect(sortRow(menu, 'Name').attributes('aria-checked')).toBe('true')
+      await sortRow(menu, 'Modified').trigger('click')
+      expect(paths(sidebar)).toEqual(['/w/docs', '/w/docs/new.md', '/w/docs/old.md', '/w/chart.png', '/w/new.md'])
+      expect(paths(manager)).toEqual(paths(sidebar))
+      expect(manager.get('[data-file-sort-header="modified"]').attributes('aria-label')).toContain('Newest first')
+      expect(document.activeElement).toBe(sortRow(menu, 'Modified').element)
+      expect(sortRow(menu, 'Modified').attributes('aria-checked')).toBe('true')
+      expect(sortRow(menu, 'Name').attributes('aria-checked')).toBe('false')
+
+      await sortRow(menu, 'Modified').trigger('click')
+      expect(sortRow(menu, 'Modified').attributes('aria-label')).toBe('Modified, Oldest first')
+      expect(paths(sidebar)).toEqual(['/w/docs', '/w/docs/old.md', '/w/docs/new.md', '/w/new.md', '/w/chart.png'])
+      expect(paths(manager)).toEqual(paths(sidebar))
+      await sortRow(menu, 'Name').trigger('click')
+      expect(sortRow(menu, 'Name').attributes('aria-label')).toBe('Name, A–Z')
+      await sortRow(menu, 'Name').trigger('click')
+      expect(sortRow(menu, 'Name').attributes('aria-label')).toBe('Name, Z–A')
+      expect(paths(sidebar)).toEqual(['/w/docs', '/w/docs/old.md', '/w/docs/new.md', '/w/new.md', '/w/chart.png'])
+      expect(manager.get('[data-file-sort-header="name"]').attributes('aria-label')).toContain('Z–A')
+      expect(sidebar.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
+      expect([...store.expandedDirectories]).toEqual(['docs'])
+      expect(useSettingsStore().workbenchFileSort['/w'].project).toEqual({ key: 'name', direction: 'desc' })
+      await useSettingsStore().flush()
+      expect(JSON.parse(localStorage.getItem('mimir:editor:settings:v1')).workbenchFileSort['/w'].project)
+        .toEqual({ key: 'name', direction: 'desc' })
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBe(menu.element)
+      expect(document.activeElement).toBe(sortRow(menu, 'Name').element)
+
+      const restored = render({ compact: true })
+      try { expect(paths(restored)).toEqual(paths(sidebar)) } finally { restored.unmount() }
+      await menu.findAll('[role="menuitem"]').find(item => item.text() === 'Open File Manager').trigger('click')
+      expect(sidebar.emitted('openManager')).toHaveLength(1)
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBeNull()
+    } finally {
+      sidebar.unmount()
+      manager.unmount()
+    }
+  })
+
+  it('keeps per-view sorts and uses the sidebar default for File Manager-only fields', async () => {
+    const settings = useSettingsStore()
+    settings.set('workbenchFileSort', {
+      '/w': { project: { key: 'name', direction: 'desc' } },
+      '/other': { project: { key: 'size', direction: 'desc' } },
+    })
+    useFileStore().setRecentFiles(['/w/src/lib.rs', '/w/new.md'])
+    const sidebar = render({ compact: true })
+    try {
+      await sidebar.get('[data-files-mode="recent"]').trigger('click')
+      const recent = await openCompactActions(sidebar)
+      expect(recent.findAll('[role="menuitemradio"]')).toHaveLength(2)
+      expect(recent.find('[aria-checked="true"]').exists()).toBe(false)
+      expect(sidebar.findAll('[data-file-row]').map(row => row.attributes('data-file-row')))
+        .toEqual(['/w/src/lib.rs', '/w/new.md'])
+      await sortRow(recent, 'Modified').trigger('click')
+      expect(sidebar.findAll('[data-file-row]').map(row => row.attributes('data-file-row')))
+        .toEqual(['/w/new.md', '/w/src/lib.rs'])
+      await sidebar.get('[data-files-mode="favorites"]').trigger('click')
+      const favorites = await openCompactActions(sidebar)
+      expect(sortRow(favorites, 'Name').attributes('aria-checked')).toBe('true')
+      expect(sortRow(favorites, 'Name').attributes('aria-label')).toBe('Name, A–Z')
+      await sidebar.get('[data-files-mode="project"]').trigger('click')
+      const project = await openCompactActions(sidebar)
+      expect(sortRow(project, 'Name').attributes('aria-label')).toBe('Name, Z–A')
+      useWorkspaceFilesStore().workspacePath = '/other'
+      await flushPromises()
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBeNull()
+      const other = await openCompactActions(sidebar)
+      expect(sortRow(other, 'Name').attributes('aria-checked')).toBe('true')
+      expect(sortRow(other, 'Name').attributes('aria-label')).toBe('Name, A–Z')
+      expect(settings.workbenchFileSort['/other'].project).toEqual({ key: 'size', direction: 'desc' })
+      expect(settings.workbenchFileSort['/w'].recent).toEqual({ key: 'modified', direction: 'desc' })
+    } finally {
+      sidebar.unmount()
+    }
+  })
+
+  it('disables both sort rows during search and restores the browsing order', async () => {
+    const settings = useSettingsStore()
+    settings.set('workbenchFileSort', { '/w': { project: { key: 'name', direction: 'desc' } } })
+    const sidebar = render({ compact: true })
+    try {
+      await sidebar.get('[data-files-search]').setValue('new')
+      const search = await openCompactActions(sidebar)
+      for (const row of search.findAll('[role="menuitemradio"]')) {
+        expect(row.attributes('aria-label')).toContain('Search relevance')
+        expect(row.element.disabled).toBe(true)
+        expect(row.attributes('aria-checked')).toBe('false')
+        await row.trigger('click')
+      }
+      await sidebar.get('[aria-label="Clear search"]').trigger('click')
+      expect(sidebar.findAll('[data-file-row]').map(row => row.attributes('data-file-row')))
+        .toEqual(['/w/docs', '/w/new.md', '/w/chart.png'])
+      expect(sortRow(await openCompactActions(sidebar), 'Name').attributes('aria-label')).toBe('Name, Z–A')
+      expect(settings.workbenchFileSort['/w'].project).toEqual({ key: 'name', direction: 'desc' })
+      useWorkspaceFilesStore().workspacePath = ''
+      await flushPromises()
+      expect((await openCompactActions(sidebar)).findAll('[role="menuitemradio"]').every(row => row.element.disabled)).toBe(true)
+    } finally {
+      sidebar.unmount()
+    }
+  })
+
+  it('keeps keyboard focus on sort rows until Escape, Tab, or an outside click closes the menu', async () => {
+    const sidebar = render({ compact: true })
+    document.body.appendChild(sidebar.element)
+    try {
+      const trigger = sidebar.get('[aria-label="File actions"]')
+      await trigger.trigger('keydown', { key: 'ArrowDown' })
+      const menu = new DOMWrapper(document.querySelector('[role="menu"][aria-label="File actions"]'))
+      await menu.trigger('keydown', { key: 'ArrowDown' })
+      await menu.trigger('keydown', { key: 'ArrowDown' })
+      expect(document.activeElement).toBe(sortRow(menu, 'Name').element)
+      document.activeElement.click()
+      await flushPromises()
+      expect(document.activeElement).toBe(sortRow(menu, 'Name').element)
+      expect(sortRow(menu, 'Name').attributes('aria-label')).toBe('Name, Z–A')
+      await menu.trigger('keydown', { key: 'ArrowDown' })
+      expect(document.activeElement).toBe(sortRow(menu, 'Modified').element)
+      document.activeElement.click()
+      await flushPromises()
+      expect(sortRow(menu, 'Modified').attributes('aria-checked')).toBe('true')
+      await menu.trigger('keydown', { key: 'End' })
+      expect(document.activeElement.textContent.trim()).toBe('Open File Manager')
+      await menu.trigger('keydown', { key: 'Home' })
+      expect(document.activeElement.textContent.trim()).toBe('New file')
+      await menu.trigger('keydown', { key: 'Escape' })
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBeNull()
+      expect(document.activeElement).toBe(trigger.element)
+      const tabMenu = await openCompactActions(sidebar)
+      await tabMenu.trigger('keydown', { key: 'Tab' })
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBeNull()
+      expect(document.activeElement).toBe(trigger.element)
+      await openCompactActions(sidebar)
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      await flushPromises()
+      expect(document.querySelector('[role="menu"][aria-label="File actions"]')).toBeNull()
+    } finally {
+      sidebar.unmount()
+    }
+  })
+
   it('starts with a dense Project tree and exposes its stable views', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-file-row]')
@@ -552,14 +729,15 @@ describe('FilesActivity', () => {
     const sortButton = wrapper.get('[data-files-sort-button]')
     sortButton.element.focus()
     await sortButton.trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(wrapper.get('[data-file-sort-option="name"]').element)
+    const popup = () => new DOMWrapper(document.querySelector('[data-files-sort-menu]'))
+    expect(document.activeElement).toBe(popup().get('[data-file-sort-option="name"]').element)
 
-    await wrapper.get('[data-file-sort-option="kind"]').trigger('click')
+    await popup().get('[data-file-sort-option="kind"]').trigger('click')
     expect(wrapper.get('[data-file-sort-header="kind"]').attributes('data-file-sort-active')).toBe('')
     expect(document.activeElement).toBe(sortButton.element)
 
     await sortButton.trigger('click')
-    await wrapper.get('[data-files-sort-menu]').trigger('keydown', { key: 'Escape' })
+    await popup().trigger('keydown', { key: 'Escape' })
     expect(document.activeElement).toBe(sortButton.element)
     wrapper.unmount()
   })

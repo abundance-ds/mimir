@@ -39,41 +39,47 @@
         :aria-activedescendant="selected >= 0 ? `${menuId}-${selected}` : undefined"
       />
       <div :id="`${menuId}-list`" :role="searchable ? 'listbox' : undefined" :aria-label="searchable ? label : undefined">
-      <button
-        v-for="(item, index) in filtered"
-        :id="`${menuId}-${index}`"
-        :key="item.id"
-        type="button"
-        :role="searchable ? 'option' : 'menuitem'"
-        :aria-selected="searchable ? selected === index : undefined"
-        :disabled="item.disabled"
-        :aria-current="item.active ? 'true' : undefined"
-        :class="{ 'bg-accent-soft': searchable ? selected === index : item.active }"
-        @click="choose(item)"
-      >
-        {{ item.label
-        }}<span v-if="item.detail" class="ml-auto pl-3 text-ink-3">{{
-          item.detail
-        }}</span>
-      </button>
-      <span v-if="!filtered.length" class="block px-3 py-2 text-ink-3"
-        >No matches</span>
-      <button
-        v-if="action"
-        :id="`${menuId}-${filtered.length}`"
-        type="button"
-        :role="searchable ? 'option' : 'menuitem'"
-        :aria-selected="searchable ? selected === filtered.length : undefined"
-        data-menu-action
-        :class="{ 'bg-accent-soft': selected === filtered.length }"
-        @click="chooseAction"
-      >{{ action.label }}<span class="ml-auto pl-3 text-ink-3">{{ action.detail }}</span></button>
+        <template v-for="(item, index) in filtered" :key="item.id">
+          <div v-if="item.separatorBefore" role="separator" class="my-1 border-t border-rule-light" />
+          <button
+            :id="`${menuId}-${index}`"
+            type="button"
+            :role="searchable ? 'option' : typeof item.checked === 'boolean' ? 'menuitemradio' : 'menuitem'"
+            :aria-checked="searchable ? undefined : item.checked"
+            :aria-label="item.detail ? `${item.label}, ${item.detail}` : undefined"
+            :aria-selected="searchable ? selected === index : undefined"
+            :disabled="item.disabled"
+            :aria-current="item.active ? 'true' : undefined"
+            :class="{ 'bg-accent-soft': searchable ? selected === index : item.active }"
+            @click="choose(item)"
+          >
+            <span v-if="typeof item.checked === 'boolean'" class="mr-1.5 grid size-3 shrink-0 place-items-center" aria-hidden="true">
+              <IconCheck v-if="item.checked" :size="12" :stroke-width="2" />
+            </span>
+            <span>{{ item.label }}</span><span v-if="item.detail" class="ml-auto pl-3 text-ink-3">{{
+              item.detail
+            }}</span>
+          </button>
+        </template>
+        <span v-if="!filtered.length" class="block px-3 py-2 text-ink-3"
+          >No matches</span>
+        <button
+          v-if="action"
+          :id="`${menuId}-${filtered.length}`"
+          type="button"
+          :role="searchable ? 'option' : 'menuitem'"
+          :aria-selected="searchable ? selected === filtered.length : undefined"
+          data-menu-action
+          :class="{ 'bg-accent-soft': selected === filtered.length }"
+          @click="chooseAction"
+        >{{ action.label }}<span class="ml-auto pl-3 text-ink-3">{{ action.detail }}</span></button>
       </div>
     </div>
   </Teleport>
 </template>
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { IconCheck } from '@tabler/icons-vue'
 const props = defineProps({
   label: { type: String, required: true },
   items: { type: Array, default: () => [] },
@@ -141,8 +147,15 @@ function outside(e) {
     close()
 }
 function choose(item) {
-  close(true)
+  if (item.disabled) return
+  if (!item.keepOpen) close(true)
   emit('select', item.id)
+  if (item.keepOpen) nextTick(() => {
+    // WebKit does not focus a button on click. Keep repeated sort changes and
+    // subsequent arrow keys on the selected menu row.
+    const index = filtered.value.findIndex(candidate => candidate.id === item.id)
+    if (open.value && index >= 0) document.getElementById(`${menuId}-${index}`)?.focus()
+  })
 }
 function chooseAction() {
   close()
@@ -157,6 +170,7 @@ function keydown(e) {
     return
   }
   if (e.key === 'Tab') {
+    returnFocus?.focus()
     close()
     return
   }

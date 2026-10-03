@@ -19,50 +19,58 @@
         {{ sortDirection === 'desc' ? '↓' : '↑' }}
       </span>
     </button>
-    <div
-      v-if="menuOpen"
-      ref="menuRef"
-      data-files-sort-menu
-      role="menu"
-      class="absolute right-0 top-[calc(100%+4px)] z-50 w-40 border border-rule bg-surface py-1 text-[10px] text-ink-2 shadow-lg"
-      @click.stop
-      @pointerdown.stop
-      @keydown="onMenuKeydown"
-    >
-      <button
-        v-for="option in options"
-        :key="option.id"
-        type="button"
-        role="menuitemradio"
-        tabindex="-1"
-        :data-file-sort-option="option.id"
-        :aria-checked="sortKey === option.id"
-        class="flex h-7 w-full items-center gap-2 px-2.5 text-left outline-none hover:bg-chrome focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-        :class="{ 'text-accent': sortKey === option.id }"
-        @click="selectSort(option.id)"
+    <Teleport to="body">
+      <div
+        v-if="menuOpen"
+        ref="menuRef"
+        data-files-sort-menu
+        role="menu"
+        aria-label="Sort files"
+        :style="position"
+        class="fixed z-[250] w-48 max-w-[calc(100vw-8px)] max-h-[calc(100vh-8px)] overflow-y-auto border border-rule bg-surface py-1 text-[11px] text-ink-2 shadow-lg"
+        @click.stop
+        @pointerdown.stop
+        @keydown="onMenuKeydown"
       >
-        <IconCheck v-if="sortKey === option.id" :size="12" :stroke-width="2" />
-        <span v-else class="size-3" />
-        <span>{{ option.label }}</span>
-      </button>
-      <div v-if="sortKey !== 'view'" role="separator" class="my-1 border-t border-rule-light" />
-      <button
-        v-for="option in sortKey === 'view' ? [] : directionOptions"
-        :key="option.id"
-        type="button"
-        role="menuitemradio"
-        tabindex="-1"
-        :data-file-sort-direction="option.id"
-        :aria-checked="sortDirection === option.id"
-        class="flex h-7 w-full items-center gap-2 px-2.5 text-left outline-none hover:bg-chrome focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-        :class="{ 'text-accent': sortDirection === option.id }"
-        @click="selectDirection(option.id)"
-      >
-        <IconCheck v-if="sortDirection === option.id" :size="12" :stroke-width="2" />
-        <span v-else class="size-3" />
-        <span>{{ option.label }}</span>
-      </button>
-    </div>
+        <div role="group" aria-label="Sort by">
+          <button
+            v-for="option in options"
+            :key="option.id"
+            type="button"
+            role="menuitemradio"
+            tabindex="-1"
+            :data-file-sort-option="option.id"
+            :aria-checked="sortKey === option.id"
+            class="flex h-7 w-full items-center gap-2 px-2.5 text-left outline-none hover:bg-chrome-mid focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+            :class="{ 'text-accent': sortKey === option.id }"
+            @click="selectSort(option.id)"
+          >
+            <IconCheck v-if="sortKey === option.id" :size="12" :stroke-width="2" />
+            <span v-else class="size-3" />
+            <span>{{ option.label }}</span>
+          </button>
+        </div>
+        <div v-if="sortKey !== 'view'" role="separator" class="my-1 border-t border-rule-light" />
+        <div v-if="sortKey !== 'view'" role="group" aria-label="Order">
+          <button
+            v-for="option in directionOptions"
+            :key="option.id"
+            type="button"
+            role="menuitemradio"
+            tabindex="-1"
+            :data-file-sort-direction="option.id"
+            :aria-checked="sortDirection === option.id"
+            class="flex h-7 w-full items-center gap-2 px-2.5 text-left outline-none hover:bg-chrome-mid focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+            :class="{ 'text-accent': sortDirection === option.id }"
+            @click="selectDirection(option.id)"
+          >
+            <IconCheck v-if="sortDirection === option.id" :size="12" :stroke-width="2" />
+            <span v-else class="size-3" />
+            <span>{{ option.label }}</span>
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -85,9 +93,13 @@ const rootRef = ref(null)
 const buttonRef = ref(null)
 const menuRef = ref(null)
 const menuOpen = ref(false)
+const position = ref({})
 
 onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown, true))
-onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerDown, true))
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+  window.removeEventListener('resize', onWindowResize)
+})
 
 async function toggleMenu() {
   if (menuOpen.value) {
@@ -99,8 +111,18 @@ async function toggleMenu() {
 
 async function openMenu(edge = 1) {
   emit('open')
+  const anchor = rootRef.value?.getBoundingClientRect()
+  position.value = {
+    left: `${Math.max(4, Math.min(anchor?.left || 0, window.innerWidth - 196))}px`,
+    top: `${Math.max(4, anchor?.bottom || 0)}px`,
+  }
   menuOpen.value = true
+  window.addEventListener('resize', onWindowResize)
   await nextTick()
+  const bounds = menuRef.value?.getBoundingClientRect()
+  if (bounds?.bottom > window.innerHeight - 4) {
+    position.value.top = `${Math.max(4, window.innerHeight - bounds.height - 4)}px`
+  }
   const items = menuItems()
   items[edge < 0 ? items.length - 1 : 0]?.focus()
 }
@@ -108,7 +130,12 @@ async function openMenu(edge = 1) {
 function closeMenu({ restoreFocus = false } = {}) {
   if (!menuOpen.value) return
   menuOpen.value = false
-  if (restoreFocus) nextTick(() => buttonRef.value?.focus())
+  window.removeEventListener('resize', onWindowResize)
+  if (restoreFocus) nextTick(focusTrigger)
+}
+
+function focusTrigger() {
+  buttonRef.value?.focus()
 }
 
 function selectSort(key) {
@@ -126,6 +153,7 @@ function menuItems() {
 }
 
 function onMenuKeydown(event) {
+  if (event.isComposing) return
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -133,6 +161,8 @@ function onMenuKeydown(event) {
     return
   }
   if (event.key === 'Tab') {
+    // The menu is portalled. Continue tab order from its toolbar button.
+    focusTrigger()
     closeMenu()
     return
   }
@@ -151,6 +181,10 @@ function onMenuKeydown(event) {
 }
 
 function onDocumentPointerDown(event) {
-  if (!rootRef.value?.contains(event.target)) closeMenu()
+  if (!rootRef.value?.contains(event.target) && !menuRef.value?.contains(event.target)) closeMenu()
+}
+
+function onWindowResize() {
+  closeMenu({ restoreFocus: true })
 }
 </script>

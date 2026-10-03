@@ -17,7 +17,13 @@
         <component :is="option.icon" :size="14" :stroke-width="1.75" />
       </button>
       <span class="min-w-0 flex-1" />
-      <WorkbenchMenu label="File actions" :items="compactActions" compact @select="compactAction"><IconDots :size="14" /></WorkbenchMenu>
+      <WorkbenchMenu
+        :key="`${files.workspacePath}:${viewMode}:${searchMode}`"
+        label="File actions"
+        :items="compactActions"
+        compact
+        @select="compactAction"
+      ><IconDots :size="14" /></WorkbenchMenu>
       <button v-if="collapsible" type="button" data-files-collapse aria-label="Collapse Files" title="Collapse Files"
         class="grid size-[28px] shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
         @click="$emit('collapse')"><IconChevronDown :size="14" :stroke-width="1.75" /></button>
@@ -728,9 +734,9 @@ const props = defineProps({
 const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace', 'diagnostic', 'openManager', 'collapse'])
 const FILE_SORT_OPTIONS = Object.freeze([
   { id: 'name', label: 'Name' },
+  { id: 'modified', label: 'Modified' },
   { id: 'kind', label: 'Kind' },
   { id: 'git', label: 'Git' },
-  { id: 'modified', label: 'Modified' },
   { id: 'size', label: 'Size' },
   { id: 'favorite', label: 'Favorites' },
 ])
@@ -796,7 +802,14 @@ const compactViews = [
   { id: 'recent', label: 'Recent', icon: IconClock },
 ]
 const searchMode = computed(() => viewMode.value !== 'changes' && Boolean(query.value.trim()))
-const sortState = computed(() => sortStateByView.value[viewMode.value] || sortStateByView.value.project)
+const sortState = computed(() => {
+  const state = sortStateByView.value[viewMode.value] || sortStateByView.value.project
+  // The sidebar exposes only Name and Modified. File Manager's other fields
+  // must not impose an order that the sidebar cannot show or reverse.
+  return props.compact && !['name', 'modified', 'view'].includes(state.key)
+    ? DEFAULT_FILE_SORT_STATES[viewMode.value] || DEFAULT_FILE_SORT_STATES.project
+    : state
+})
 const sortKey = computed(() => sortState.value.key)
 const sortDirection = computed(() => sortState.value.direction)
 const sortOptions = computed(() => (
@@ -1431,12 +1444,21 @@ function isPendingTrashPath(path) {
 const compactActions = computed(() => [
   { id: 'file', label: 'New file', disabled: !files.workspacePath },
   { id: 'folder', label: 'New folder', disabled: !files.workspacePath },
-  { id: 'refresh', label: 'Refresh' },
+  ...['name', 'modified'].map((key, index) => ({
+    id: `sort-${key}`, label: key === 'name' ? 'Name' : 'Modified',
+    detail: searchMode.value ? 'Search relevance' : sortHeaderDirectionLabel(key),
+    checked: !searchMode.value && sortKey.value === key,
+    keepOpen: true,
+    separatorBefore: index === 0,
+    disabled: !files.workspacePath || searchMode.value,
+  })),
+  { id: 'refresh', label: 'Refresh', separatorBefore: true },
   { id: 'collapse-all', label: 'Collapse all', disabled: !files.workspacePath || !files.expandedDirectories.size },
   { id: 'manager', label: 'Open File Manager' },
 ])
 function compactAction(id) {
   if (id === 'manager') emit('openManager')
+  else if (['sort-name', 'sort-modified'].includes(id) && files.workspacePath && !searchMode.value) sortByHeader(id.slice(5))
   else if (id === 'refresh') void refresh()
   else if (id === 'collapse-all') collapseAll()
   else if (id === 'file' || id === 'folder') promptNew(id)
