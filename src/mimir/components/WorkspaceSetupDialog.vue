@@ -51,7 +51,7 @@
 
           <label v-if="projectChoice === NEW_PROJECT" class="workspace-new-project">
             <span>New Project name</span>
-            <input
+            <input spellcheck="false" writingsuggestions="false"
               ref="newProjectInput"
               v-model="newProjectTitle"
               data-workspace-new-project

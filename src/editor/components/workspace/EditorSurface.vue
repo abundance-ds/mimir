@@ -4,7 +4,7 @@
     :class="showBorder ? 'border-r border-rule-light' : ''"
     :style="wrapperStyle"
   >
-    <div ref="cmHost" class="flex-1 min-w-0" @contextmenu.prevent="onContextMenu" @keydown="onContextMenuKeydown"></div>
+    <div ref="cmHost" class="flex-1 min-w-0" @contextmenu="onContextMenu" @keydown="onContextMenuKeydown"></div>
     <EditorContextMenu
       :visible="ctxMenu.show"
       :x="ctxMenu.x"
@@ -22,7 +22,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
 import { Compartment, Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { undo, redo, selectAll, isolateHistory } from '@codemirror/commands'

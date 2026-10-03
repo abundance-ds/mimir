@@ -339,11 +339,11 @@
           <form class="block" @submit.prevent="saveKey">
             <span class="scribe-settings-label">{{ hostedKeyLabel }}</span>
             <span class="flex gap-2">
-              <input
+              <input autocorrect="off" autocapitalize="off" spellcheck="false" writingsuggestions="false"
                 v-model="apiKey"
                 data-scribe-api-key
                 type="password"
-                autocomplete="new-password"
+                autocomplete="off"
                 class="scribe-settings-input min-w-0 flex-1"
                 :placeholder="config.apiKeyConfigured ? 'Enter replacement key' : 'Enter API key'"
               />
@@ -390,7 +390,7 @@
             <div class="mt-3 space-y-3">
               <label class="block">
                 <span class="scribe-settings-label">Endpoint URL</span>
-                <input
+                <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
                   v-model="customUrl"
                   type="url"
                   class="scribe-settings-input"
@@ -402,7 +402,7 @@
               </label>
               <label class="block">
                 <span class="scribe-settings-label">Model</span>
-                <input
+                <input autocomplete="off" writingsuggestions="false"
                   v-model="customModel"
                   class="scribe-settings-input"
                   placeholder="gpt-live-transcribe"
@@ -472,7 +472,7 @@
               Reset to preset
             </button>
           </div>
-          <textarea
+          <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
             id="scribe-summary-prompt"
             v-model="summaryPrompt"
             data-scribe-summary-prompt

@@ -753,7 +753,7 @@ fn starter_html(title: &str) -> String {
       </div>
       <span id="state">Ready</span>
     </header>
-    <textarea id="note" aria-label="{title} note" placeholder="Shape this instrument into whatever you need."></textarea>
+    <textarea id="note" autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false" aria-label="{title} note" placeholder="Shape this instrument into whatever you need."></textarea>
     <footer>
       <span>Autosaves locally · MCP tool <code>read</code> is live while open</span>
       <button id="save">Save now</button>
@@ -999,7 +999,13 @@ pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
         );
     }
     if path == "_sdk/text-input.js" || path.ends_with("/_sdk/text-input.js") {
-        return response(200, "application/javascript", include_str!("../../src/shared/textInputPolicy.js").as_bytes().to_vec());
+        return response(
+            200,
+            "application/javascript",
+            include_str!("../../src/shared/textInputPolicy.js")
+                .as_bytes()
+                .to_vec(),
+        );
     }
     if path == "_sdk/theme.css" || path.ends_with("/_sdk/theme.css") {
         return response(200, "text/css", theme_css_content().as_bytes().to_vec());
@@ -1334,6 +1340,24 @@ pub async fn app_http_request(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn local_documents_receive_the_shared_text_input_policy() {
+        let html = inject_sdk("<html><head></head><body><textarea></textarea></body></html>");
+        assert!(html.contains("installTextInputPolicy();"));
+        let response = serve_app_file(
+            tauri::http::Request::builder()
+                .uri("app://localhost/_sdk/text-input.js")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.body(),
+            include_str!("../../src/shared/textInputPolicy.js").as_bytes()
+        );
+        assert!(starter_html("Notes").contains("spellcheck=\"false\""));
+    }
 
     fn write_embedded_app(root: &Path, id: &str, title: &str) {
         let directory = root.join(id);

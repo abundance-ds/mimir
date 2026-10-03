@@ -46,7 +46,7 @@
         <IconFolderPlus v-if="editKind === 'folder'" :size="14" :stroke-width="1.7" />
         <IconFilePlus v-else :size="14" :stroke-width="1.7" />
       </span>
-      <input
+      <input writingsuggestions="false"
         data-files-inline-name
         :value="editDraft"
         :placeholder="editKind === 'folder' ? 'folder-name' : 'file-name.md'"

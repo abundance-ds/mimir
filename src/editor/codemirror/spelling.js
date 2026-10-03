@@ -5,7 +5,9 @@ import { checkSpelling } from '../../services/spelling.js'
 import { manualTextInputAttributes } from '../../shared/textInputPolicy.js'
 
 const spellingResults = StateEffect.define()
-const misspelling = Decoration.mark({ class: 'cm-misspelled', attributes: { 'data-spelling-error': 'true' } })
+const misspelling = Decoration.mark({ class: 'cm-misspelled', attributes: {
+  'data-spelling-error': 'true', 'aria-invalid': 'spelling',
+} })
 const excludedNodes = new Set(['FencedCode', 'CodeBlock', 'InlineCode', 'URL', 'Autolink',
   'HTMLTag', 'HTMLBlock', 'LinkReference'])
 const CHUNK_SIZE = 8192
@@ -37,6 +39,17 @@ export function spellingChunks(state, visibleRanges) {
       let text = state.sliceDoc(from, to)
       const masked = []
       tree.iterate({ from, to, enter(node) {
+        if (node.name === 'HTMLBlock' && /^\s*<\/?(?:comment|reply)\b/.test(state.sliceDoc(node.from, Math.min(node.to, node.from + 128)))) {
+          // A comment at the start of a paragraph is parsed as an HTML block.
+          // Its anchor is still authored prose; hide only the metadata tags.
+          const raw = state.sliceDoc(node.from, node.to)
+          for (const tag of raw.matchAll(/<\/?(?:comment|reply)\b(?:"[^"]*"|'[^']*'|[^'">])*\/?\s*>/g)) {
+            const start = Math.max(from, node.from + tag.index)
+            const end = Math.min(to, node.from + tag.index + tag[0].length)
+            if (start < end) masked.push([start - from, end - from])
+          }
+          return false
+        }
         if (excludedNodes.has(node.name)) {
           masked.push([Math.max(from, node.from) - from, Math.min(to, node.to) - from])
           return false
@@ -44,6 +57,11 @@ export function spellingChunks(state, visibleRanges) {
       } })
       for (const match of text.matchAll(/(?:https?:\/\/|www\.)\S+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}|\S{256,}/gu)) {
         masked.push([match.index, match.index + match[0].length])
+      }
+      if (from > area.from && /\S/.test(state.sliceDoc(from - 1, from))) {
+        // Do not report a fragment from an exceptionally long unbroken token.
+        const fragment = /^\S+/.exec(text)
+        if (fragment) masked.push([0, fragment[0].length])
       }
       for (const [start, end] of masked) text = text.slice(0, start) + text.slice(start, end).replace(/[^\n]/g, ' ') + text.slice(end)
       if (/\p{L}/u.test(text)) chunks.push({ from, text })
@@ -153,6 +171,7 @@ export function spellingWordAt(state, pos) {
   const offset = pos - line.from
   for (const match of line.text.matchAll(/[\p{L}\p{M}]+(?:['’\-][\p{L}\p{M}]+)*/gu)) {
     if (match.index <= offset && offset <= match.index + match[0].length) {
+      if (match[0].length > 256) return null
       return { from: line.from + match.index, to: line.from + match.index + match[0].length, text: match[0] }
     }
   }

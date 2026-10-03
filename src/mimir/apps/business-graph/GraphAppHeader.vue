@@ -20,7 +20,7 @@
     </nav>
     <div v-if="section !== 'home'" class="graph-search">
       <IconSearch :size="14" aria-hidden="true" />
-      <input
+      <input writingsuggestions="false"
         ref="searchInput"
         :value="searchValue"
         data-graph-search

@@ -5,7 +5,7 @@
       <span class="font-mono text-[9px] tabular-nums text-ink-4">{{ page.total.toLocaleString() }} rows</span>
       <label class="ml-auto flex h-6 min-w-[150px] max-w-[260px] flex-1 items-center border border-rule bg-surface px-2 focus-within:border-accent">
         <IconSearch :size="11" class="shrink-0 text-ink-4" />
-        <input
+        <input autocomplete="off" writingsuggestions="false"
           :value="search"
           data-tracker-log-search
           type="search"

@@ -22,7 +22,7 @@
         @pointerdown="reorder.onPointerDown($event, tab.id)"
         @contextmenu.prevent="showContext(tab, $event)"
       >
-        <input
+        <input autocomplete="off" writingsuggestions="false"
           v-if="renaming === tab.id"
           ref="renameInput"
           v-model="draft"

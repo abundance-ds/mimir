@@ -43,7 +43,7 @@
           />
         </span>
         <template #label>
-          <input
+          <input autocomplete="off" writingsuggestions="false"
             v-if="renaming === tab.id"
             ref="renameInput"
             v-model="draft"

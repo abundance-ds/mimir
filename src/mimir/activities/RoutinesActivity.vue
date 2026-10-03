@@ -412,7 +412,7 @@
               paused so they cannot double-fire.
             </p>
             <RoutineField label="Title" required>
-              <input
+              <input spellcheck="false" writingsuggestions="false"
                 ref="titleInputRef"
                 v-model="draft.title"
                 data-routine-title-input
@@ -425,7 +425,7 @@
           </template>
           <template v-else>
             <RoutineField label="Title" required>
-              <input
+              <input spellcheck="false" writingsuggestions="false"
                 ref="titleInputRef"
                 v-model="draft.title"
                 data-routine-title-input
@@ -438,7 +438,7 @@
             </RoutineField>
 
             <RoutineField label="Agent package" :hint="agentPackageHint">
-              <input
+              <input writingsuggestions="false"
                 v-model="draft.agent"
                 data-routine-agent-input
                 class="routine-input font-mono"
@@ -510,7 +510,7 @@
                 ? `${selectedPackage?.title || selectedAgent?.title || 'This launcher'} runs in this folder`
                 : 'Used when the launcher runs in a workspace'"
             >
-              <input
+              <input autocorrect="off" autocapitalize="off" writingsuggestions="false"
                 v-model="draft.workspace"
                 data-routine-workspace-input
                 class="routine-input font-mono"
@@ -522,7 +522,7 @@
             </RoutineField>
 
             <RoutineField v-if="!draft.agent.trim()" label="Prompt" required>
-              <textarea
+              <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
                 v-model="draft.prompt"
                 data-routine-prompt-input
                 rows="4"
@@ -668,7 +668,7 @@
                   class="flex items-center gap-2 text-[10px] text-ink-3"
                 >
                   at minute
-                  <input
+                  <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
                     v-model.number="draft.scheduleState.minute"
                     data-routine-minute-input
                     type="number"
@@ -704,7 +704,7 @@
                 </div>
 
                 <div v-else-if="draft.scheduleState.frequency === 'cron'">
-                  <input
+                  <input autocorrect="off" autocapitalize="off" writingsuggestions="false"
                     v-model="draft.scheduleState.cron"
                     data-routine-cron-input
                     class="routine-input font-mono"

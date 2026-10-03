@@ -23,7 +23,7 @@
         <button type="button" :data-graph-control="`graph-filter-reset-${column}`" :disabled="!modelValue.length"
           :aria-label="`Clear ${label.toLowerCase()} filter`" @click="$emit('update:modelValue', [])">Clear</button>
       </div>
-      <input v-if="searchable" ref="searchInput" v-model="query" type="search" autocomplete="off"
+      <input autocorrect="off" autocapitalize="off" spellcheck="false" writingsuggestions="false" v-if="searchable" ref="searchInput" v-model="query" type="search" autocomplete="off"
         :data-graph-control="`graph-filter-search-${column}`" :placeholder="`Find a ${label.toLowerCase()}…`"
         :aria-label="`Find a ${label.toLowerCase()}`" />
       <div class="graph-column-filter-options">

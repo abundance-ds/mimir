@@ -13,7 +13,7 @@
       </button>
       <label class="flex h-7 items-center border border-rule-light bg-surface px-2 font-mono text-[9px] text-ink-3">
         <span class="sr-only">PDF page</span>
-        <input
+        <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
           :value="pageNumber"
           type="number"
           min="1"

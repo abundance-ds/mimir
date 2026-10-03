@@ -45,7 +45,7 @@
           :size="13"
           class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4"
         />
-        <input
+        <input writingsuggestions="false"
           ref="searchInput"
           v-model="query"
           data-graph-select-search

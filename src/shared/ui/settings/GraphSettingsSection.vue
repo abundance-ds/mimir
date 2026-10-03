@@ -79,7 +79,7 @@
                 Create repository on GitHub ↗
               </button>
               <div class="team-setup-line">
-                <input
+                <input writingsuggestions="false"
                   v-model="teamMoveRepositoryUrl"
                   data-graph-team-move-repository
                   class="scope-input"
@@ -129,7 +129,7 @@
               Create repository on GitHub ↗
             </button>
             <div class="team-setup-line">
-              <input
+              <input writingsuggestions="false"
                 v-model="teamRepositoryUrl"
                 data-graph-team-repository
                 class="scope-input"
@@ -218,7 +218,7 @@
             <strong>New Project name</strong>
             <small>Created in the Team graph</small>
           </span>
-          <input
+          <input spellcheck="false" writingsuggestions="false"
             v-model="newProjectTitle"
             data-current-workspace-new-project
             class="workspace-name-input"
@@ -291,7 +291,7 @@
                 Create repository on GitHub ↗
               </button>
               <div class="team-setup-line">
-                <input
+                <input writingsuggestions="false"
                   v-model="projectRepositoryUrl"
                   data-current-workspace-repository
                   class="scope-input"

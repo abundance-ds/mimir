@@ -53,7 +53,7 @@
       >
         <div class="flex h-10 shrink-0 items-center gap-2 border-b border-rule px-2.5">
           <IconSearch :size="14" :stroke-width="1.8" class="shrink-0 text-ink-3" />
-          <input
+          <input writingsuggestions="false"
             ref="inputRef"
             v-model="query"
             data-project-search

@@ -28,7 +28,7 @@
           </span>
         </div>
         <div class="key-input-row">
-          <input
+          <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
             v-model="keyInputs[prov.id]"
             type="password"
             class="key-input"

@@ -64,7 +64,7 @@
               Additional instructions
               <small>optional</small>
             </span>
-            <textarea
+            <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
               v-model="draft.instructions"
               data-graph-control="summary-instructions"
               rows="5"

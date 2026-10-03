@@ -7,7 +7,7 @@
         <h2 id="scribe-create-title">New {{ request.kind }}</h2>
         <label>
           <span>Name</span>
-          <input ref="nameInput" v-model="name" aria-label="Name" required :disabled="busy"
+          <input writingsuggestions="false" ref="nameInput" v-model="name" aria-label="Name" required :disabled="busy"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </label>
         <label v-if="request.kind === 'person'">

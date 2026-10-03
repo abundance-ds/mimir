@@ -87,7 +87,7 @@
         >
           <label class="launcher-field">
             <span>CLI flags</span>
-            <input
+            <input autocorrect="off" autocapitalize="off" writingsuggestions="false"
               v-model="row.flagsText"
               data-launcher-args
               type="text"
@@ -119,7 +119,7 @@
           </div>
           <label v-if="row.cwdMode === 'custom'" class="launcher-field mt-2">
             <span>Custom folder</span>
-            <input
+            <input autocorrect="off" autocapitalize="off" writingsuggestions="false"
               v-model="row.cwdPath"
               type="text"
               autocomplete="off"
@@ -148,16 +148,16 @@
           <div v-if="advancedId === row.key" class="mt-2 grid gap-2.5 border-t border-rule-light pt-3 sm:grid-cols-2">
             <label class="launcher-field">
               <span>Name</span>
-              <input v-model="row.title" type="text" autocomplete="off" />
+              <input autocorrect="off" autocapitalize="off" spellcheck="false" writingsuggestions="false" v-model="row.title" type="text" autocomplete="off" />
             </label>
             <label class="launcher-field">
               <span>Preset id</span>
-              <input v-model="row.id" data-launcher-id type="text" autocomplete="off" spellcheck="false" class="font-mono" />
+              <input autocorrect="off" autocapitalize="off" writingsuggestions="false" v-model="row.id" data-launcher-id type="text" autocomplete="off" spellcheck="false" class="font-mono" />
               <small>Routines can refer to this stable id.</small>
             </label>
             <label class="launcher-field sm:col-span-2">
               <span>Command override</span>
-              <input
+              <input autocorrect="off" autocapitalize="off" writingsuggestions="false"
                 v-model="row.binary"
                 data-launcher-binary
                 type="text"
@@ -169,7 +169,7 @@
             </label>
             <label class="launcher-field sm:col-span-2">
               <span>Environment</span>
-              <textarea
+              <textarea autocorrect="off" autocapitalize="off" autocomplete="off" writingsuggestions="false"
                 v-model="row.envText"
                 data-launcher-env
                 rows="2"

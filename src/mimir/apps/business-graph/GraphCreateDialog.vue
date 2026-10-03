@@ -73,7 +73,7 @@
 
           <label class="create-title-field">
             <span v-if="draft.kind !== 'issue'">Title</span>
-            <textarea
+            <textarea autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
               v-if="draft.kind === 'issue'"
               ref="titleInput"
               v-model="draft.title"
@@ -87,7 +87,7 @@
               @input="resizeTitle"
               @keydown.enter="onTitleEnter"
             />
-            <input
+            <input spellcheck="false" writingsuggestions="false"
               v-else
               ref="titleInput"
               v-model="draft.title"
@@ -233,7 +233,7 @@
           <div v-if="detailsOpen && draft.kind !== 'issue'" class="create-details">
             <label v-if="draft.kind !== 'issue'" class="create-field">
               <span>Retrieval summary</span>
-              <input
+              <input autocomplete="off" spellcheck="false" writingsuggestions="false"
                 v-model="draft.summary"
                 data-create-summary
                 data-graph-control="create-summary"
@@ -246,7 +246,7 @@
 
             <label class="create-field">
               <span>Tags <small>comma separated</small></span>
-              <input
+              <input autocomplete="off" writingsuggestions="false"
                 v-model="draft.tags"
                 :disabled="saving"
                 data-create-tags
@@ -332,14 +332,14 @@
       @keydown="onIssuePopoverKeydown">
       <template v-if="issuePopover === 'options'">
         <label class="issue-popover-label">Tags
-          <input v-model="draft.tags" data-create-tags data-graph-control="create-tags"
+          <input autocomplete="off" writingsuggestions="false" v-model="draft.tags" data-create-tags data-graph-control="create-tags"
             placeholder="Separate tags with commas" :disabled="saving" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </label>
         <GraphCheckbox v-model="createAnother" data-create-another :disabled="saving">Create another</GraphCheckbox>
       </template>
       <template v-else>
         <label class="issue-popover-label">Link to an entry
-          <input v-model="linkQuery" data-graph-control="create-link-search" type="search" placeholder="Find a note, project, or person…"
+          <input writingsuggestions="false" v-model="linkQuery" data-graph-control="create-link-search" type="search" placeholder="Find a note, project, or person…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @keydown.enter.prevent="chooseFirstLink" />
         </label>
         <p v-if="linkLoading || linkError || !linkResults.length" class="issue-link-status" role="status">{{ linkLoading ? 'Searching…' : linkError || 'No matching entries' }}</p>

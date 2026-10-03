@@ -112,7 +112,7 @@
       class="files-search mx-2 my-2 flex h-8 shrink-0 items-center">
         <label class="files-search-field flex h-8 min-w-0 flex-1 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60">
           <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
-          <input
+          <input writingsuggestions="false"
             ref="queryInput"
             v-model="query"
             data-files-search

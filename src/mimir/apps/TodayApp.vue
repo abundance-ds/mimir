@@ -174,8 +174,7 @@
             >
               {{ navigationDateLabel }}
             </time>
-          
-</template>
+          </template>
         </DatePicker>
         <button
           type="button"

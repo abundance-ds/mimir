@@ -29,6 +29,7 @@ describe('spelling ranges', () => {
     expect(text).not.toContain('codde')
     expect(text).not.toContain('exammple')
     expect(text).not.toContain('hidden')
+    expect(text).toContain('visibble')
     expect(text.indexOf('mispelled')).toBe(3)
   })
 

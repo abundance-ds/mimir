@@ -72,18 +72,18 @@
               <small v-if="problemFor(item.index, 'date')" class="time-error">{{ problemFor(item.index, 'date') }}</small>
             </td>
             <td>
-              <input :value="item.row.entry.description" :data-graph-control="`time-work-${item.row.entry.id}`" :aria-label="`Work for row ${item.index + 1}`"
+              <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false" :value="item.row.entry.description" :data-graph-control="`time-work-${item.row.entry.id}`" :aria-label="`Work for row ${item.index + 1}`"
                 :aria-invalid="Boolean(problemFor(item.index, 'description'))" placeholder="Describe the work" @input="edit(item, 'description', $event.target.value)" @blur="endEdit" />
               <small v-if="problemFor(item.index, 'description')" class="time-error">{{ problemFor(item.index, 'description') }}</small>
             </td>
             <td>
-              <input :value="item.row.duration" :data-graph-control="`time-duration-${item.row.entry.id}`" :aria-label="`Duration for row ${item.index + 1}`"
+              <input autocomplete="off" writingsuggestions="false" :value="item.row.duration" :data-graph-control="`time-duration-${item.row.entry.id}`" :aria-label="`Duration for row ${item.index + 1}`"
                 :aria-invalid="Boolean(problemFor(item.index, 'minutes'))" placeholder="1h 30m" autocorrect="off" autocapitalize="off" spellcheck="false"
                 @input="edit(item, 'duration', $event.target.value)" @blur="endEdit" />
               <small v-if="problemFor(item.index, 'minutes')" class="time-error">{{ problemFor(item.index, 'minutes') }}</small>
             </td>
             <td>
-              <input :value="item.row.entry.invoice || ''" :data-graph-control="`time-invoice-${item.row.entry.id}`" :aria-label="`Invoice for row ${item.index + 1}`"
+              <input autocomplete="off" writingsuggestions="false" :value="item.row.entry.invoice || ''" :data-graph-control="`time-invoice-${item.row.entry.id}`" :aria-label="`Invoice for row ${item.index + 1}`"
                 :aria-invalid="Boolean(problemFor(item.index, 'invoice'))" placeholder="Open" autocorrect="off" autocapitalize="off" spellcheck="false"
                 @input="edit(item, 'invoice', $event.target.value)" @blur="endEdit" />
               <small v-if="problemFor(item.index, 'invoice')" class="time-error">{{ problemFor(item.index, 'invoice') }}</small>
@@ -110,7 +110,7 @@
         <button type="button" data-graph-control="time-mark-open" :disabled="selectedTotal.incomplete || !selectedInvoiced.length" @click="markOpen">Mark open</button>
       </div>
       <form v-if="invoiceOpen" class="time-invoice-form" @submit.prevent="markInvoiced" @keydown.esc.stop.prevent="invoiceOpen = false">
-        <label>Invoice reference<input ref="invoiceInput" v-model="invoiceReference" data-graph-control="time-invoice-reference" aria-label="Invoice reference" placeholder="INV-014" autocorrect="off" autocapitalize="off" spellcheck="false" /></label>
+        <label>Invoice reference<input autocomplete="off" writingsuggestions="false" ref="invoiceInput" v-model="invoiceReference" data-graph-control="time-invoice-reference" aria-label="Invoice reference" placeholder="INV-014" autocorrect="off" autocapitalize="off" spellcheck="false" /></label>
         <button type="submit" data-graph-control="time-apply-invoice" :disabled="!invoiceReference.trim() || selectedTotal.incomplete">Apply to {{ selectedOpen.length }} open {{ selectedOpen.length === 1 ? 'row' : 'rows' }}</button>
         <button type="button" data-graph-control="time-cancel-invoice" @click="invoiceOpen = false">Cancel</button>
       </form>

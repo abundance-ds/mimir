@@ -111,7 +111,7 @@
   <article class="focus-document">
     <header class="focus-hero">
       <p class="graph-entry-context">{{ human(node.kind) }} · {{ human(node.provenance?.scopeKind || node.provenance?.scopeId?.split(':')[0] || 'Graph') }}</p>
-      <textarea
+      <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
         ref="titleInput"
         v-model="draft.title"
         data-inspector-title
@@ -210,7 +210,7 @@
         </div>
         <label v-if="draft.status === 'waiting' || draft.waitingFor || waitingFocused" class="object-metadata-field">
           <span>Waiting for</span>
-          <input
+          <input autocomplete="off" writingsuggestions="false"
             v-model="draft.waitingFor"
             data-inspector-waiting
             data-graph-control="focus-waiting"
@@ -225,7 +225,7 @@
         </label>
       </div>
 
-      <textarea
+      <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
         v-else-if="node.kind !== 'timesheet'"
         ref="summaryInput"
         v-model="draft.summary"
@@ -455,7 +455,7 @@
       <div v-if="node.kind === 'issue'" class="focus-property-grid">
         <label class="object-metadata-field">
           <span>Waiting for</span>
-          <input v-model="draft.waitingFor" data-inspector-waiting-extra data-graph-control="entry-waiting-extra"
+          <input autocomplete="off" writingsuggestions="false" v-model="draft.waitingFor" data-inspector-waiting-extra data-graph-control="entry-waiting-extra"
             autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Waiting for" placeholder="Nobody" @input="changed" />
         </label>
         <div class="object-metadata-field">
@@ -487,7 +487,7 @@
       <div class="focus-property-grid focus-classification-grid">
         <label class="object-metadata-field">
           <span>Tags</span>
-          <input
+          <input autocomplete="off" writingsuggestions="false"
             v-model="editableTags"
             data-inspector-tags
             data-graph-control="focus-tags"
@@ -504,7 +504,7 @@
       <label v-if="node.kind === 'issue'" class="focus-deliverables-field">
         <span>Outputs</span>
         <small>One path per line. Optional label after “|”.</small>
-        <textarea
+        <textarea autocomplete="off" writingsuggestions="false"
           ref="deliverablesInput"
           v-model="draft.deliverables"
           data-inspector-deliverables
@@ -520,7 +520,7 @@
       <label class="focus-deliverables-field">
         <span>Files</span>
         <small>One path per line. Optional label after “|”.</small>
-        <textarea
+        <textarea autocomplete="off" writingsuggestions="false"
           ref="filesInput"
           v-model="draft.files"
           data-inspector-files
@@ -584,7 +584,7 @@
         <template v-if="node.kind === 'company'">
           <label class="object-metadata-field">
             <span>Relationships</span>
-            <input
+            <input autocomplete="off" writingsuggestions="false"
               v-model="draft.companyRoles"
               data-graph-control="focus-company-roles"
               autocorrect="off"

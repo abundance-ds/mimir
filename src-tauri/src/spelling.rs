@@ -19,10 +19,15 @@ fn text_length(text: &str) -> Result<usize, String> {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub async fn spell_check(app: tauri::AppHandle, text: String) -> Result<Vec<SpellingRange>, String> {
+pub async fn spell_check(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<Vec<SpellingRange>, String> {
     use block2::RcBlock;
     use objc2_app_kit::NSSpellChecker;
-    use objc2_foundation::{NSArray, NSOrthography, NSRange, NSString, NSTextCheckingResult, NSTextCheckingType};
+    use objc2_foundation::{
+        NSArray, NSOrthography, NSRange, NSString, NSTextCheckingResult, NSTextCheckingType,
+    };
     use std::{ptr::NonNull, sync::Mutex, time::Duration};
 
     let length = text_length(&text)?;
@@ -67,7 +72,8 @@ pub async fn spell_check(app: tauri::AppHandle, text: String) -> Result<Vec<Spel
             );
         }
     }).map_err(|error| error.to_string())?;
-    tokio::time::timeout(Duration::from_secs(15), receiver).await
+    tokio::time::timeout(Duration::from_secs(15), receiver)
+        .await
         .map_err(|_| "Spelling check timed out.".to_string())?
         .map_err(|_| "Spelling check ended before returning results.".to_string())
 }
@@ -92,7 +98,9 @@ mod tests {
 
     #[test]
     fn renderer_ranges_keep_utf16_offsets() {
-        assert_eq!(serde_json::to_value(SpellingRange { from: 3, to: 8 }).unwrap(),
-            serde_json::json!({ "from": 3, "to": 8 }));
+        assert_eq!(
+            serde_json::to_value(SpellingRange { from: 3, to: 8 }).unwrap(),
+            serde_json::json!({ "from": 3, "to": 8 })
+        );
     }
 }

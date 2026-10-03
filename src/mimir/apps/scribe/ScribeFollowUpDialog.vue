@@ -74,7 +74,7 @@
 
           <label v-if="mode === 'agent' || promptOpen" class="follow-up-field follow-up-prompt">
             <span>{{ mode === 'agent' ? 'Task' : 'Prompt' }}</span>
-            <textarea
+            <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
               :value="prompt"
               :data-scribe-summary-prompt="mode === 'summary' ? '' : undefined"
               :data-scribe-custom-task-prompt="mode === 'agent' ? '' : undefined"

@@ -5,7 +5,7 @@
       <form @submit.prevent="onSubmit" class="flex items-center gap-1.5 flex-1 min-w-0">
         <span class="shrink-0 font-mono text-[10px] text-ink-3 bg-chrome border border-rule rounded px-1 py-px leading-[14px]">⌘K</span>
         <span class="shrink-0 font-mono text-[9px] text-ink-3" data-inline-ai-scope>{{ selectionScope }}</span>
-        <textarea
+        <textarea spellcheck="false" writingsuggestions="false"
           ref="inputRef"
           v-model="input"
           class="flex-1 min-w-0 h-[24px] max-h-[72px] bg-surface border border-rule-light rounded px-2 py-1 font-sans text-[11px] text-ink leading-snug outline-none resize-none overflow-hidden focus:border-accent disabled:opacity-40"

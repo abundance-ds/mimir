@@ -28,7 +28,6 @@
       :spellcheck-enabled="spellingSettings.editorSpellCheck" :ai-enabled="false" :allow-comments="false"
       @close="spellingMenu.show = false" />
   </div>
-
 </template>
 
 <script setup>

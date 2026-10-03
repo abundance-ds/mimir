@@ -1,6 +1,6 @@
 <template>
   <div class="no-drag min-w-0 text-[12px] font-semibold leading-none">
-    <input
+    <input autocomplete="off" writingsuggestions="false"
       v-if="renaming"
       ref="renameInput"
       v-model="draft"

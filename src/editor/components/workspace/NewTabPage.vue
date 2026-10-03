@@ -18,7 +18,7 @@
         </button>
       </div>
 
-      <input
+      <input autocomplete="off" spellcheck="false" writingsuggestions="false"
         ref="inputRef"
         v-model="query"
         type="text"

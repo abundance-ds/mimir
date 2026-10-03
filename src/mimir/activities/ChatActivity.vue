@@ -30,21 +30,21 @@
 
         <label class="chat-field mt-5">
           <span>Display name</span>
-          <input ref="setupName" v-model="setup.displayName" autocomplete="name" autocorrect="off" autocapitalize="off" />
+          <input spellcheck="false" writingsuggestions="false" ref="setupName" v-model="setup.displayName" autocomplete="off" autocorrect="off" autocapitalize="off" />
         </label>
         <label class="chat-field mt-3">
           <span>Account</span>
-          <input v-model="setup.account" autocapitalize="none" autocomplete="username" spellcheck="false" />
+          <input autocorrect="off" writingsuggestions="false" v-model="setup.account" autocapitalize="off" autocomplete="off" spellcheck="false" />
         </label>
         <label class="chat-field mt-3">
           <span>Passphrase</span>
-          <input ref="setupPassword" v-model="setup.password" type="password" autocomplete="current-password" />
+          <input autocorrect="off" autocapitalize="off" spellcheck="false" writingsuggestions="false" ref="setupPassword" v-model="setup.password" type="password" autocomplete="off" />
         </label>
         <details class="mt-3 text-[10px] text-ink-3">
           <summary class="cursor-default py-1 hover:text-ink">Advanced</summary>
           <label class="chat-field mt-2">
             <span>Server</span>
-            <input v-model="setup.endpoint" autocapitalize="none" spellcheck="false" />
+            <input autocorrect="off" autocomplete="off" writingsuggestions="false" v-model="setup.endpoint" autocapitalize="off" spellcheck="false" />
           </label>
         </details>
         <p v-if="setup.error" class="mt-3 text-[10px] leading-relaxed text-rem" role="alert">
@@ -105,7 +105,7 @@
           <form class="flex shrink-0 items-center gap-2 border-b border-rule bg-chrome-high p-2" @submit.prevent="chat.runSearch()">
             <div class="relative min-w-0 flex-1">
               <IconSearch :size="14" class="pointer-events-none absolute left-2 top-2.5 text-ink-4" />
-              <input
+              <input autocomplete="off" writingsuggestions="false"
                 ref="searchInput"
                 v-model="chat.searchState.query"
                 data-chat-search-input
@@ -332,7 +332,7 @@
                       class="my-1 rounded-[3px] border border-rule bg-chrome-high p-2"
                       @submit.prevent="submitEdit(message)"
                     >
-                      <textarea
+                      <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
                         v-model="editDraft"
                         :data-chat-edit-input="message.id"
                         rows="2"
@@ -634,7 +634,7 @@
               >
                 <IconPaperclip :size="15" :stroke-width="1.8" />
               </button>
-              <textarea
+              <textarea autocomplete="off" spellcheck="false" writingsuggestions="false"
                 ref="composer"
                 v-model="draft"
                 data-chat-composer-input
@@ -753,12 +753,12 @@
             <span>Channel name</span>
             <div class="flex border border-rule bg-surface focus-within:border-accent">
               <span class="grid w-7 place-items-center text-[11px] text-ink-4">#</span>
-              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
+              <input autocomplete="off" writingsuggestions="false" ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
             </div>
           </label>
           <label class="chat-field mt-3">
             <span>Topic <em>optional</em></span>
-            <input v-model="newFlow.topic" autocorrect="off" autocapitalize="off" placeholder="What this channel is for" />
+            <input autocomplete="off" spellcheck="false" writingsuggestions="false" v-model="newFlow.topic" autocorrect="off" autocapitalize="off" placeholder="What this channel is for" />
           </label>
           <button type="submit" class="chat-primary-button" :disabled="newFlow.busy || !newFlow.name.trim()">
             {{ newFlow.busy ? 'Creating…' : 'Create channel' }}
@@ -770,7 +770,7 @@
             <span>Channel name</span>
             <div class="flex border border-rule bg-surface focus-within:border-accent">
               <span class="grid w-7 place-items-center text-[11px] text-ink-4">#</span>
-              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
+              <input autocomplete="off" writingsuggestions="false" ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
             </div>
           </label>
           <button type="submit" class="chat-primary-button" :disabled="newFlow.busy || !newFlow.name.trim()">
@@ -781,7 +781,7 @@
         <form v-else class="mt-3" @submit.prevent="submitDirect">
           <label class="chat-field">
             <span>Find a person</span>
-            <input ref="newFlowInput" v-model="newFlow.person" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Name or account" />
+            <input autocomplete="off" writingsuggestions="false" ref="newFlowInput" v-model="newFlow.person" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Name or account" />
           </label>
           <div class="mt-2 max-h-52 overflow-y-auto border-y border-rule-light py-1">
             <button

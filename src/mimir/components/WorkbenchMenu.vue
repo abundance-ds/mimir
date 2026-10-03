@@ -24,7 +24,7 @@
       @keydown="keydown"
       @contextmenu.prevent
     >
-      <input
+      <input autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" writingsuggestions="false"
         v-if="searchable"
         ref="searchInput"
         v-model="query"

@@ -4,7 +4,7 @@
       <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Classification rules</h2>
       <label class="ml-auto flex h-6 min-w-[160px] max-w-[280px] flex-1 items-center border border-rule bg-surface px-2 focus-within:border-accent">
         <IconSearch :size="11" class="text-ink-4" />
-        <input
+        <input autocomplete="off" writingsuggestions="false"
           v-model="query"
           data-tracker-classification-search
           type="search"
@@ -46,7 +46,7 @@
               />
             </td>
             <td class="px-2 py-1.5">
-              <input
+              <input autocomplete="off" writingsuggestions="false"
                 :value="draft(rule).subcategory"
                 class="h-7 w-full border border-rule bg-surface px-1.5 text-[10px] text-ink outline-none focus:border-accent"
                 placeholder="Uncategorized"

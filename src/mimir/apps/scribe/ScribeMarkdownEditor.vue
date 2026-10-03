@@ -1,7 +1,7 @@
 <template>
   <div
     ref="host"
-      @contextmenu="openSpellingMenu" @keydown="spellingMenuKeydown"
+    @contextmenu="openSpellingMenu" @keydown="spellingMenuKeydown"
     data-scribe-markdown-editor
     class="scribe-markdown-editor"
     :aria-busy="disabled"

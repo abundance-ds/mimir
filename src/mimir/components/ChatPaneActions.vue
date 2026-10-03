@@ -93,7 +93,7 @@
           @keydown.stop
         >
           <label for="chat-topic" class="sr-only">Channel topic</label>
-          <input
+          <input autocomplete="off" spellcheck="false" writingsuggestions="false"
             id="chat-topic"
             ref="topicInput"
             v-model="topicDraft"

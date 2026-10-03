@@ -11,7 +11,7 @@
     <label>
       <IconClock :size="13" />
       <span class="sr-only">{{ ariaLabel }} time</span>
-      <input
+      <input writingsuggestions="false"
         v-model="timePart"
         :data-graph-control="`${controlId}-time`"
         type="text"

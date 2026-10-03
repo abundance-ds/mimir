@@ -40,24 +40,24 @@
           <strong>Display name</strong>
           <small>The human-readable name teammates see.</small>
         </span>
-        <input v-model="form.displayName" autocomplete="name" autocorrect="off" autocapitalize="off" />
+        <input spellcheck="false" writingsuggestions="false" v-model="form.displayName" autocomplete="off" autocorrect="off" autocapitalize="off" />
       </label>
       <label class="chat-setting-row">
         <span>
           <strong>Account</strong>
           <small>Your stable team login and direct-message address.</small>
         </span>
-        <input v-model="form.account" autocomplete="username" autocapitalize="none" spellcheck="false" />
+        <input autocorrect="off" writingsuggestions="false" v-model="form.account" autocomplete="off" autocapitalize="off" spellcheck="false" />
       </label>
       <label class="chat-setting-row">
         <span>
           <strong>Replace passphrase</strong>
           <small>Leave blank to keep the passphrase already in Keychain.</small>
         </span>
-        <input
+        <input autocorrect="off" autocapitalize="off" spellcheck="false" writingsuggestions="false"
           v-model="form.password"
           type="password"
-          autocomplete="new-password"
+          autocomplete="off"
           placeholder="Keep existing"
         />
       </label>
@@ -80,10 +80,10 @@
         <summary class="text-[10px] font-medium text-ink-2 hover:text-ink">Advanced server</summary>
         <label class="mt-3 block">
           <span class="font-mono text-[8px] uppercase tracking-[0.08em] text-ink-3">WebSocket URL</span>
-          <input
+          <input autocorrect="off" autocomplete="off" writingsuggestions="false"
             v-model="form.endpoint"
             class="mt-1 h-8 w-full border border-rule bg-surface px-2 font-mono text-[9px] text-ink-2 outline-none focus:border-accent"
-            autocapitalize="none"
+            autocapitalize="off"
             spellcheck="false"
           />
         </label>

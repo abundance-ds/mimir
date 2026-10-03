@@ -57,7 +57,7 @@
       <main class="scribe-live-main min-h-0 flex-1 px-5 py-4">
         <div :key="meetings.activeMeeting.id" class="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col">
           <div class="shrink-0">
-            <input
+            <input spellcheck="false" writingsuggestions="false"
               v-model="titleDraft"
               data-scribe-live-title
               class="scribe-title-input scribe-live-title"
@@ -234,7 +234,7 @@
             <form class="space-y-4 pt-2" @submit.prevent="saveMeetingEdits">
               <label class="block">
                 <span class="scribe-field-label">Title</span>
-                <input v-model="editedTitle" data-scribe-edit-title class="scribe-input" autocorrect="off" autocapitalize="off" />
+                <input autocomplete="off" spellcheck="false" writingsuggestions="false" v-model="editedTitle" data-scribe-edit-title class="scribe-input" autocorrect="off" autocapitalize="off" />
               </label>
               <div class="flex gap-2">
                 <button type="button" class="scribe-quiet-button" @click="cancelMeetingEdit">
@@ -252,7 +252,7 @@
           </template>
 
           <template v-else>
-            <input
+            <input spellcheck="false" writingsuggestions="false"
               v-model="titleDraft"
               data-scribe-title
               class="scribe-title-input"
@@ -510,7 +510,7 @@
               :size="13"
               class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
             />
-            <input
+            <input writingsuggestions="false"
               ref="meetingSearchInput"
               v-model="meetingSearchDraft"
               data-scribe-meeting-search

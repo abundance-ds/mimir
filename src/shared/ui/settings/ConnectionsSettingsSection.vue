@@ -136,14 +136,14 @@
           </label>
           <p class="mt-1 text-[9px] leading-relaxed text-ink-3">{{ credentialFields[connection.provider].help }}</p>
           <div class="mt-3 flex flex-wrap items-center gap-2">
-            <input
+            <input writingsuggestions="false"
               :id="credentialFields[connection.provider].id"
               :ref="element => credentialInput = element"
               v-model="credential"
               class="credential-input"
               type="password"
               autocomplete="off"
-              autocapitalize="none"
+              autocapitalize="off"
               autocorrect="off"
               spellcheck="false"
               :placeholder="credentialFields[connection.provider].placeholder"
