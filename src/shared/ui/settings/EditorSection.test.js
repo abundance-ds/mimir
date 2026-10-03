@@ -144,6 +144,15 @@ describe('EditorSection', () => {
     await toggle('Spell check')
     expect(store.editorSpellCheck).toBe(true)
 
+    expect(store.smartQuotes).toBe(false)
+    const smartQuotes = wrapper.get('[aria-label="Smart quotes"]')
+    expect(smartQuotes.attributes('aria-pressed')).toBe('false')
+    await toggle('Smart quotes')
+    expect(store.smartQuotes).toBe(true)
+    expect(smartQuotes.attributes('aria-pressed')).toBe('true')
+    await toggle('Smart quotes')
+    expect(store.smartQuotes).toBe(false)
+
     expect(store.editorAutoSave).toBe(true)
     await toggle('Auto-save')
     expect(store.editorAutoSave).toBe(false)

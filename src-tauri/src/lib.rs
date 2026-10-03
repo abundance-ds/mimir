@@ -104,11 +104,47 @@ mod workspace_config;
 mod workspace_files;
 
 #[cfg(target_os = "macos")]
-fn enable_macos_spellcheck() {
+fn configure_macos_text_input() {
     use objc2_foundation::{NSString, NSUserDefaults};
     let defaults = NSUserDefaults::standardUserDefaults();
     let key = NSString::from_str("WebContinuousSpellCheckingEnabled");
     defaults.setBool_forKey(true, &key);
+    // Set this before creating any webview. Otherwise WebKit inherits the
+    // system smart-quotes preference, independently of HTML autocorrect.
+    set_macos_smart_quotes(false);
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_smart_quotes(enabled: bool) {
+    use objc2_app_kit::NSSpellCheckerDidChangeAutomaticQuoteSubstitutionNotification;
+    use objc2_foundation::{NSNotificationCenter, NSString, NSUserDefaults};
+
+    NSUserDefaults::standardUserDefaults().setBool_forKey(
+        enabled,
+        &NSString::from_str("WebAutomaticQuoteSubstitutionEnabled"),
+    );
+    // WebKit caches this preference. Its process pools observe this AppKit
+    // notification and forward the updated state to all web processes.
+    // SAFETY: This runs on the main thread and the notification has no object.
+    unsafe {
+        NSNotificationCenter::defaultCenter().postNotificationName_object(
+            NSSpellCheckerDidChangeAutomaticQuoteSubstitutionNotification,
+            None,
+        );
+    }
+}
+
+#[tauri::command]
+fn set_smart_quotes(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return app
+        .run_on_main_thread(move || set_macos_smart_quotes(enabled))
+        .map_err(|error| error.to_string());
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, enabled);
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1063,7 +1099,7 @@ pub fn run() {
         .manage(meetings::commands::MeetingStartConsentAuthority::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            enable_macos_spellcheck();
+            configure_macos_text_input();
 
             mimir_cli::install().map_err(std::io::Error::other)?;
             let meeting_engine =
@@ -1302,6 +1338,7 @@ pub fn run() {
             meetings::commands::meetings_install_model,
             meetings::commands::meetings_delete_model,
             spell_suggest,
+            set_smart_quotes,
             shell_exec::shell_exec,
             activity_commands::activity_list,
             activity_commands::activity_search_history,

@@ -50,7 +50,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'settings_changed',
   'app_quit_confirmed', 'app_prepare_relaunch',
   // spell
-  'spell_suggest',
+  'spell_suggest', 'set_smart_quotes',
   // shell_exec
   'shell_exec',
   // Activities and launcher presets

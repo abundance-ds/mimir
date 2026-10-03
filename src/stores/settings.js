@@ -2,11 +2,12 @@ import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { emit, listen } from '@tauri-apps/api/event'
 import { DEFAULT_WORKBENCH_ZOOM, applyWorkbenchZoom, clampWorkbenchZoom } from '../shared/workbenchZoom.js'
+import { applySmartQuotes } from '../services/textInput.js'
 
 const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 const STORAGE_KEY = 'mimir:editor:settings:v1'
 
-const DARK_THEMES = ['slate', 'monokai', 'dracula', 'zenith', 'synthwave']
+const DARK_THEMES = ['slate', 'slate-contrast', 'monokai', 'dracula', 'zenith', 'synthwave']
 
 const DEFAULTS = {
   workbenchZoom: DEFAULT_WORKBENCH_ZOOM,
@@ -18,6 +19,7 @@ const DEFAULTS = {
   editorLineWidth: 'normal',
   editorAutoSave: true,
   editorSpellCheck: false,
+  smartQuotes: false,
   editorToolbarMode: 'top',
   editorLivePreview: true,
   aiGhostSuggestions: true,
@@ -187,6 +189,15 @@ export const useSettingsStore = defineStore('settings', () => {
   watch(settings.workbenchZoom, (val) => {
     void applyWorkbenchZoom(val)
   })
+  // Wait for hydration: opening another window must not apply its temporary
+  // default over the app-wide preference. Forced reloads use this same path.
+  watch([settingsReady, settings.smartQuotes], ([ready, enabled]) => {
+    if (ready) {
+      void applySmartQuotes(enabled).catch(error => {
+        console.warn('[useSettings] could not apply smart quotes:', error)
+      })
+    }
+  })
 
   // ── Cross-window sync (Tauri only) ──
   function ensureSyncListener() {
@@ -255,6 +266,7 @@ function cloneSetting(value) {
 }
 
 const NORMALIZERS = {
+  smartQuotes: value => value === true,
   workbenchZoom: clampWorkbenchZoom,
   sidebarFilesHeight: value => Number.isFinite(value) ? Math.max(112, Math.round(value)) : 240,
 }

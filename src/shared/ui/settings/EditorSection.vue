@@ -172,6 +172,23 @@
       </button>
     </div>
 
+    <div class="setting-row">
+      <div class="setting-label">
+        Smart quotes
+        <span class="setting-desc">Use curly quotes while typing in Mimir (macOS)</span>
+      </div>
+      <button
+        type="button"
+        class="toggle-switch"
+        :class="{ 'toggle-on': settings.smartQuotes }"
+        :aria-pressed="settings.smartQuotes"
+        aria-label="Smart quotes"
+        @click="settings.set('smartQuotes', !settings.smartQuotes)"
+      >
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+
     <!-- Auto-save -->
     <div class="setting-row last">
       <div class="setting-label">
