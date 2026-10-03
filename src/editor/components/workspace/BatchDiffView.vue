@@ -1,16 +1,11 @@
 <template>
-  <div class="batch-diff-view flex-1 min-w-0 overflow-y-auto bg-chrome" :style="wrapperStyle">
+  <div class="batch-diff-view flex-1 min-w-0 overflow-y-auto bg-chrome" :style="wrapperStyle" @keydown.capture="onKeydown">
     <template v-for="(file, i) in diffStore.files" :key="file.path">
       <div v-if="i > 0" class="border-t border-rule-light"></div>
       <div :data-file-path="file.path">
         <BatchFileDiff
           :file="file"
           :displayName="fileDisplayNames[i]"
-          @accept="onAcceptFile"
-          @reject="onRejectFile"
-          @reset="onResetFile"
-          @change="diffStore.updateBatchContent"
-          @resolve="onResolveFile"
         />
       </div>
     </template>
@@ -30,8 +25,6 @@ const diffStore = useDiffStore()
 const settings = useSettingsStore()
 const editorUI = useEditorUIStore()
 
-const emit = defineEmits(['all-resolved'])
-
 const fileDisplayNames = computed(() => {
   return disambiguateFilenames(diffStore.files.map(f => f.path))
 })
@@ -45,22 +38,13 @@ const wrapperStyle = computed(() => {
   })
 })
 
-function onAcceptFile(path) {
-  diffStore.acceptFile(path)
-  emitIfResolved()
-}
-
-function onResolveFile(path, content) {
-  if (diffStore.resolveBatchFile(path, content)) emitIfResolved()
-}
-
-function onRejectFile(path) {
-  diffStore.rejectFile(path)
-  emitIfResolved()
-}
-
-function onResetFile(path) {
-  diffStore.resetFile(path)
+function onKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.isComposing) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) diffStore.redoReview()
+    else diffStore.undoReview()
+  }
 }
 
 function scrollToFile(path) {
@@ -69,12 +53,6 @@ function scrollToFile(path) {
 }
 
 defineExpose({ scrollToFile })
-
-function emitIfResolved() {
-  if (diffStore.allResolved) {
-    emit('all-resolved')
-  }
-}
 </script>
 
 <style scoped>

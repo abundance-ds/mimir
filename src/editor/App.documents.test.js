@@ -1,6 +1,8 @@
 import { nextTick } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EditorView } from '@codemirror/view'
+import { acceptChunk, rejectChunk, getChunks } from '@codemirror/merge'
 import { undo, redo } from '@codemirror/commands'
 import { invoke } from '@tauri-apps/api/core'
 import App from './App.vue'
@@ -85,6 +87,37 @@ describe('document lifecycle with the real editor', () => {
     expect(files.currentFile).toBe(y)
   })
 
+  it('retains unfinished decisions and Undo when another file is opened', async () => {
+    const middle = Array.from({ length: 12 }, (_, i) => `same ${i}`).join('\n')
+    const original = `old A\n${middle}\nold B\n${middle}\nold C`
+    const proposed = `new A\n${middle}\nnew B\n${middle}\nnew C`
+    io.read.mockResolvedValue(original)
+    const { files, wrapper, open } = await setup()
+    await open('/work/a.md')
+    const file = files.currentFile
+    wrapper.vm.mimirReviewProposal({ id: 'p1', targetText: original, replacement: proposed })
+    await flushPromises()
+    const diff = useDiffStore()
+    const view = EditorView.findFromDOM(wrapper.get('.diff-view .cm-editor').element)
+    acceptChunk(view, 0)
+    rejectChunk(view, getChunks(view.state).chunks[0].fromB)
+    const result = `new A\n${middle}\nold B\n${middle}\nnew C`
+    expect(diff.currentReview.result).toBe(result)
+    expect(diff.pendingChanges).toBe(1)
+    expect(file.content).toBe(original)
+    await open('/work/b.md')
+    await open('/work/a.md')
+    await flushPromises()
+    expect(diff.currentReview.result).toBe(result)
+    expect(diff.pendingChanges).toBe(1)
+    diff.setLayout('split')
+    diff.undoReview()
+    await flushPromises()
+    expect(diff.pendingChanges).toBe(2)
+    expect(diff.currentReview.result).toBe(proposed)
+    expect(file.content).toBe(original)
+  })
+
   it('retains a failed review decision across tab switches and retries without replacing newer edits', async () => {
     const { files, wrapper, open } = await setup()
     await open('/work/a.md')
@@ -92,13 +125,14 @@ describe('document lifecycle with the real editor', () => {
     files.setFileReviews(file, [{ proposalId: 'p1', targetText: 'Text', replacement: 'Proposed' }])
     const diff = useDiffStore()
     diff.activate({ original: file.content, modified: 'Proposed text', path: file.path, fileId: file.id, review: { id: 'p1' } })
+    diff.decideRemainingChanges('accept')
     let fail
     invoke.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
     await nextTick()
-    await wrapper.findComponent(DiffBar).get('.diff-action-btn.accept').trigger('click')
+    await wrapper.findComponent(DiffBar).get('.review-finish').trigger('click')
     await flushPromises()
     expect(file.content).toBe('Proposed text')
-    expect(wrapper.findComponent(DiffBar).get('button.diff-action-btn').attributes()).toHaveProperty('disabled')
+    expect(wrapper.findComponent(DiffBar).get('button.review-finish').attributes()).toHaveProperty('disabled')
     files.updateContent('Newer user text', file)
     fail(new Error('Registry unavailable'))
     await flushPromises()
@@ -108,7 +142,7 @@ describe('document lifecycle with the real editor', () => {
     expect(diff.decision).toBe(file.reviewDecision)
     expect(wrapper.findComponent(DiffBar).text()).toContain('Retry status')
     invoke.mockResolvedValueOnce(undefined)
-    await wrapper.findComponent(DiffBar).get('.diff-action-btn.accept').trigger('click')
+    await wrapper.findComponent(DiffBar).get('.review-finish').trigger('click')
     await flushPromises()
     expect(file.content).toBe('Newer user text')
     expect(file.reviewDecision).toBeNull()

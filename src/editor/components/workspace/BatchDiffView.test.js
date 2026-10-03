@@ -29,11 +29,14 @@ describe('BatchDiffView resolution', () => {
       diffViewRef: ref(null), batchDiffViewRef: ref(null), scheduleContentSync() {}, flushEditorContent() {},
     })
     diff.activateBatch({ fileList: [{ path: '/work/a.md', original, modified, proposalId: 'p1' }] })
-    let completion
-    const wrapper = mount(BatchDiffView, { props: { onAllResolved: () => { completion = review.onBatchAllResolved() } } })
+    const wrapper = mount(BatchDiffView)
     const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const finish = async () => { await vi.runAllTimersAsync(); await completion; await flushPromises() }
+    const finish = async () => {
+      await flushPromises()
+      expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
+      await review.onDiffFinish()
+      await flushPromises()
+    }
     return { files, diff, view, review, wrapper, finish }
   }
 
@@ -68,44 +71,35 @@ describe('BatchDiffView resolution', () => {
     const h = await reviewFile(`old A\n${middle}\nold B`, `new A\n${middle}\nnew B`)
     rejectChunk(h.view, 0)
     await h.review.onDiffAcceptAll()
+    await h.finish()
     expect(h.files.currentFile.content).toBe(`old A\n${middle}\nnew B`)
   })
 
-  it('cancels a scheduled resolution if Undo restores a pending chunk', async () => {
+  it('keeps the last decision reversible and blocks Finish after Undo', async () => {
     const h = await reviewFile('old', 'new')
     rejectChunk(h.view, 0)
-    const { undo } = await import('@codemirror/commands')
-    undo(h.view)
+    h.diff.undoReview()
     await h.finish()
     expect(h.diff.files[0]).toMatchObject({ status: 'pending', modified: 'new' })
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
   })
 
-  it('emits all-resolved exactly once when the final file is decided', async () => {
+  it('retains all files and permits Undo after the last decision', async () => {
     const diff = useDiffStore()
-    diff.activateBatch({
-      fileList: [
-        { path: '/work/a.md', original: 'a', modified: 'A' },
-        { path: '/work/b.md', original: 'b', modified: 'B' },
-      ],
-    })
-    const wrapper = mount(BatchDiffView, {
-      global: {
-        stubs: {
-          BatchFileDiff: {
-            props: ['file'],
-            emits: ['accept', 'reject', 'reset'],
-            template: '<button class="decide" @click="$emit(\'accept\', file.path)">{{ file.path }}</button>',
-          },
-        },
-      },
-    })
-
-    await wrapper.findAll('.decide')[0].trigger('click')
-    expect(wrapper.emitted('all-resolved')).toBeUndefined()
-
-    await wrapper.findAll('.decide')[1].trigger('click')
+    diff.activateBatch({ fileList: [
+      { path: '/work/a.md', original: 'a', modified: 'A' },
+      { path: '/work/b.md', original: 'b', modified: 'B' },
+    ] })
+    const wrapper = mount(BatchDiffView)
+    diff.decideRemainingChanges('accept')
     await nextTick()
-    expect(wrapper.emitted('all-resolved')).toHaveLength(1)
+    expect(diff.canFinish).toBe(true)
+    expect(wrapper.findAll('.batch-file-section')).toHaveLength(2)
+    expect(wrapper.emitted('all-resolved')).toBeUndefined()
+    diff.undoReview()
+    await nextTick()
+    expect(diff.pendingChanges).toBe(2)
+    expect(diff.canFinish).toBe(false)
+    expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
   })
 })

@@ -1,4 +1,5 @@
 import { computed, nextTick, ref } from 'vue'
+import { useDiffStore } from '../../stores/diff.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const services = vi.hoisted(() => ({
@@ -228,16 +229,9 @@ describe('Editor lifecycle controllers', () => {
       }),
       openFile: vi.fn(),
     }
-    const diffStore = {
-      active: false,
-      reviewMeta: null,
-      activate: vi.fn(() => {
-        diffStore.active = true
-      }),
-      deactivate: vi.fn(() => {
-        diffStore.active = false
-      }),
-    }
+    const diffStore = useDiffStore()
+    vi.spyOn(diffStore, 'activate')
+    vi.spyOn(diffStore, 'deactivate')
     const lifecycle = useEditorProposalLifecycle({
       fileManager,
       diffStore,
@@ -285,16 +279,9 @@ describe('Editor lifecycle controllers', () => {
       }),
       openFile: vi.fn(),
     }
-    const diffStore = {
-      active: false,
-      reviewMeta: null,
-      activate: vi.fn(() => {
-        diffStore.active = true
-      }),
-      deactivate: vi.fn(() => {
-        diffStore.active = false
-      }),
-    }
+    const diffStore = useDiffStore()
+    vi.spyOn(diffStore, 'activate')
+    vi.spyOn(diffStore, 'deactivate')
     const lifecycle = useEditorProposalLifecycle({
       fileManager,
       diffStore,
@@ -343,7 +330,9 @@ describe('Editor lifecycle controllers', () => {
       setFileReviews: vi.fn((target, reviews) => { target.reviews = reviews }),
       clearFileReviews: vi.fn(),
     }
-    const diffStore = { active: false, activate: vi.fn(), deactivate: vi.fn() }
+    const diffStore = useDiffStore()
+    vi.spyOn(diffStore, 'activate')
+    vi.spyOn(diffStore, 'deactivate')
     const lifecycle = useEditorProposalLifecycle({
       fileManager,
       diffStore,
@@ -377,7 +366,9 @@ describe('Editor lifecycle controllers', () => {
       get activeFileIndex() { return activeFileIndex.value },
       get currentFile() { return files.value[activeFileIndex.value] },
     }
-    const diffStore = { active: false, activate: vi.fn(), deactivate: vi.fn() }
+    const diffStore = useDiffStore()
+    vi.spyOn(diffStore, 'activate')
+    vi.spyOn(diffStore, 'deactivate')
     const flushEditorContent = vi.fn()
     const lifecycle = useEditorProposalLifecycle({
       fileManager, diffStore, openFiles: files, activeFileIndex,

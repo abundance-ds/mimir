@@ -1,134 +1,50 @@
 <template>
-  <div class="batch-file-section" :class="file.status">
-    <div
-      class="batch-file-header sticky top-0 z-10 h-[30px] shrink-0 flex items-center gap-2 px-[14px] bg-chrome-mid border-b border-rule-light"
-    >
-      <span class="font-mono text-[11px] text-ink-2 font-medium flex-1 min-w-0 truncate">{{ fileName }}</span>
-      <span class="font-mono text-[10px] flex gap-1.5 shrink-0">
-        <span class="text-add">+{{ addedLines }}</span>
-        <span class="text-rem">-{{ removedLines }}</span>
-      </span>
-      <div class="flex gap-1 shrink-0">
-        <button
-          v-if="file.status === 'pending' && !file.applied"
-          class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent"
-          @mousedown.prevent
-          @click="emit('reject', file.path)"
-        >Reject</button>
-        <button
-          v-if="file.status === 'pending'"
-          class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-add hover:bg-add/10 border-0 bg-transparent"
-          @mousedown.prevent
-          @click="emit('accept', file.path)"
-        >{{ file.applied ? 'Retry status' : 'Accept' }}</button>
-        <template v-if="file.status === 'accepted'">
-          <span class="font-sans text-[10px] font-medium text-add">{{ file.applied ? 'Applied' : 'Accepted' }}</span>
-          <button v-if="!file.applied" class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
-        </template>
-        <template v-if="file.status === 'rejected'">
-          <span class="font-sans text-[10px] font-medium text-ink-3">Rejected</span>
-          <button v-if="!file.lifecycleResolved" class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
-        </template>
-      </div>
+  <section class="batch-file-section" :aria-label="fileName">
+    <div class="batch-file-header">
+      <span class="batch-file-name" :title="file.path">{{ fileName }}</span>
+      <span class="batch-file-status" role="status">{{ file.applied ? 'Applied' : file.lifecycleResolved ? 'Done' : file.review.pending ? `${file.review.pending} ${file.review.pending === 1 ? 'change' : 'changes'}` : 'Reviewed' }}</span>
+      <ReviewActions v-if="!file.applied && !file.lifecycleResolved" compact :pending="file.review.pending > 0" :disabled="diff.finishing"
+        @accept="diff.decideRemainingChanges('accept', file.path)" @reject="diff.decideRemainingChanges('reject', file.path)" />
     </div>
     <div v-if="file.error" class="batch-file-error" role="alert">{{ file.error }}</div>
-    <div
-      v-if="file.status === 'pending' && !file.applied"
-      ref="diffHost"
-      class="batch-file-diff"
-    ></div>
-  </div>
+    <div ref="diffHost" class="batch-file-diff"></div>
+  </section>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { createUnifiedDiffView, resolvedDiffContent } from '../../codemirror/merge.js'
-import { computeLineDelta } from '../../../shared/lineDelta.js'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useDiffStore } from '../../../stores/diff.js'
+import { createReviewView } from '../../codemirror/reviewView.js'
+import ReviewActions from './ReviewActions.vue'
 
-const props = defineProps({
-  file: { type: Object, required: true },
-  displayName: { type: String, default: '' },
-})
-
-const emit = defineEmits(['accept', 'reject', 'reset', 'change', 'resolve'])
-
+const props = defineProps({ file: { type: Object, required: true }, displayName: { type: String, default: '' } })
+const diff = useDiffStore()
 const diffHost = ref(null)
-let editorView = null
-
+let projection = null
 const fileName = computed(() => props.displayName || props.file.path?.split('/').pop() || props.file.path)
-
-const delta = computed(() => computeLineDelta(props.file.original || '', props.file.modified || ''))
-const addedLines = computed(() => delta.value.added)
-const removedLines = computed(() => delta.value.removed)
-
 function buildEditor() {
-  destroyEditor()
-  if (!diffHost.value || props.file.status !== 'pending') return
-
-  editorView = createUnifiedDiffView({
-    parent: diffHost.value,
-    originalContent: props.file.original,
-    modifiedContent: props.file.modified,
-    collapse: true,
-    onChunkCountChange: () => {},
-    onChange: content => emit('change', props.file.path, content),
-    onAllResolved: () => {
-      if (!editorView || props.file.status !== 'pending') return
-      emit('resolve', props.file.path, resolvedDiffContent(editorView.state.doc, props.file.modified, props.file.original))
-    },
+  projection?.destroy()
+  projection = null
+  if (!diffHost.value) return
+  const session = props.file.review
+  projection = createReviewView({
+    parent: diffHost.value, session, collapse: true,
+    locked: Boolean(props.file.applied || props.file.lifecycleResolved || diff.finishing),
+    onChange: (base, result, action) => diff.recordReviewChange(session, base, result, action),
   })
 }
-
-function destroyEditor() {
-  if (editorView) {
-    editorView.destroy()
-    editorView = null
-  }
-  if (diffHost.value) diffHost.value.innerHTML = ''
-}
-
-watch(() => props.file.status, (status) => {
-  if (status !== 'pending') destroyEditor()
-  else buildEditor()
-}, { flush: 'post' })
-
-onMounted(() => {
-  if (props.file.status === 'pending') buildEditor()
-})
-
-onUnmounted(() => {
-  destroyEditor()
-})
+watch(() => [props.file.review, props.file.review.revision, props.file.applied, props.file.lifecycleResolved, diff.finishing], buildEditor, { flush: 'post' })
+onMounted(buildEditor)
+onBeforeUnmount(() => projection?.destroy())
 </script>
 
 <style scoped>
-.batch-file-section.rejected {
-  opacity: 0.5;
-}
-
-.batch-file-error {
-  padding: 6px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-rem) 28%, var(--color-rule-light));
-  background: color-mix(in srgb, var(--color-rem) 7%, var(--color-surface));
-  color: var(--color-rem);
-  font-family: var(--font-sans);
-  font-size: 10.5px;
-}
-
-.batch-file-diff {
-  overflow: auto;
-}
-.batch-file-diff::-webkit-scrollbar { width: 4px; }
-.batch-file-diff::-webkit-scrollbar-thumb { background: var(--color-rule); border-radius: 2px; }
-
-.batch-file-diff :deep(.cm-editor) {
-  font-size: var(--editor-size, 12px);
-}
-.batch-file-diff :deep(.cm-content) {
-  padding: 0 14px;
-}
-.batch-file-diff :deep(.cm-scroller) {
-  font-family: var(--font-mono);
-  line-height: var(--editor-line-height, 20px);
-}
+.batch-file-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; background: var(--color-chrome-high); border-bottom: 1px solid var(--color-rule-light); font: 11px var(--font-sans); }
+.batch-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-2); }
+.batch-file-status { color: var(--color-ink-3); white-space: nowrap; }
+.batch-file-error { padding: 6px 14px; color: var(--color-rem); font: 11px var(--font-sans); }
+.batch-file-diff { overflow: auto; }
+.batch-file-diff :deep(.cm-editor) { font-size: var(--editor-size, 12px); }
+.batch-file-diff :deep(.cm-content) { padding: 0 14px; }
+.batch-file-diff :deep(.cm-scroller) { font-family: var(--font-mono); line-height: var(--editor-line-height, 20px); }
 </style>

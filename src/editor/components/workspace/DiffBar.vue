@@ -1,292 +1,104 @@
 <template>
-  <div class="diff-bar h-[30px] shrink-0 border-b border-rule-light flex items-center gap-3 px-[14px] whitespace-nowrap overflow-hidden">
-    <!-- Batch mode -->
-    <template v-if="diff.isBatch && !diff.isBatchFileFocused">
-      <span class="font-sans text-[11px] font-semibold text-ink-2">
-        {{ diff.files.length }} {{ diff.files.length === 1 ? 'file' : 'files' }}
-      </span>
-
-      <div class="flex items-center gap-[3px] mx-1">
-        <button
-          v-for="f in diff.files"
-          :key="f.path"
-          class="batch-dot"
-          :class="'batch-dot-' + f.status"
-          :title="basename(f.path)"
-          :aria-label="`Review ${basename(f.path)}: ${f.status}`"
-          @mousedown.prevent
-          @click="emit('navigate-file', f.path)"
-        ></button>
+  <div class="diff-bar">
+    <div v-if="!batchOverview" class="diff-views">
+      <div class="view-switch" role="group" aria-label="Review view">
+        <button v-for="view in views" :key="view.value" type="button" :aria-pressed="diff.viewMode === view.value"
+          @mousedown.prevent @click="diff.setViewMode(view.value)">{{ view.label }}</button>
       </div>
-
-      <div class="flex items-center gap-0.5">
-        <button class="chunk-nav-btn" aria-label="Previous pending file" title="Previous pending file" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onPrevPending">&#8592;</button>
-        <span class="font-mono text-[9px] text-ink-3 min-w-[28px] text-center">
-          {{ diff.resolvedCount }}<span class="text-ink-3 mx-px">/</span>{{ diff.files.length }}
-        </span>
-        <button class="chunk-nav-btn" aria-label="Next pending file" title="Next pending file" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onNextPending">&#8594;</button>
+      <div v-if="diff.viewMode === 'diff'" class="view-switch" role="group" aria-label="Diff layout">
+        <button v-for="layout in layouts" :key="layout.value" type="button" :aria-pressed="diff.layout === layout.value"
+          @mousedown.prevent @click="diff.setLayout(layout.value)">{{ layout.label }}</button>
       </div>
-    </template>
-
-    <!-- Single-file mode -->
-    <template v-else>
-      <!-- View mode toggle -->
-      <div class="seg-ctrl">
-        <button
-          v-for="m in viewModes"
-          :key="m.value"
-          class="seg-btn"
-          :class="{ active: diff.viewMode === m.value }"
-          :aria-pressed="diff.viewMode === m.value"
-          @mousedown.prevent
-          @click="diff.setViewMode(m.value)"
-        >{{ m.label }}</button>
+    </div>
+    <span v-else class="review-status">{{ diff.files.length }} {{ diff.files.length === 1 ? 'file' : 'files' }}</span>
+    <div class="diff-actions">
+      <div class="review-navigation" role="group" :aria-label="batchOverview ? 'Pending files' : 'Pending changes'">
+        <button type="button" class="review-icon" :aria-label="previousLabel" :title="previousLabel" :disabled="!pendingCount"
+          @mousedown.prevent @click="batchOverview ? navigateFile(-1) : navigate(-1)"><IconArrowUp :size="13" aria-hidden="true" /></button>
+        <span class="review-count" role="status" :aria-label="pendingLabel" :title="pendingLabel">{{ positionLabel }}</span>
+        <button type="button" class="review-icon" :aria-label="nextLabel" :title="nextLabel" :disabled="!pendingCount"
+          @mousedown.prevent @click="batchOverview ? navigateFile(1) : navigate(1)"><IconArrowDown :size="13" aria-hidden="true" /></button>
       </div>
-
-      <!-- Layout toggle (only in diff mode) -->
-      <div v-if="diff.viewMode === 'diff'" class="seg-ctrl">
-        <button
-          class="seg-btn"
-          :class="{ active: diff.layout === 'unified' }"
-          :aria-pressed="diff.layout === 'unified'"
-          @mousedown.prevent
-          @click="diff.setLayout('unified')"
-        >Unified</button>
-        <button
-          class="seg-btn"
-          :class="{ active: diff.layout === 'split' }"
-          :aria-pressed="diff.layout === 'split'"
-          @mousedown.prevent
-          @click="diff.setLayout('split')"
-        >Split</button>
-      </div>
-
-      <!-- Chunk navigation (only in diff mode with chunks) -->
-      <div v-if="diff.viewMode === 'diff' && diff.chunkCount > 0" class="flex items-center gap-0.5">
-        <button class="chunk-nav-btn" aria-label="Previous change" title="Previous change" @mousedown.prevent @click="onPrevChunk">&#8592;</button>
-        <span class="chunk-counter">{{ diff.currentChunk + 1 }}<span class="chunk-sep">/</span>{{ diff.chunkCount }}</span>
-        <button class="chunk-nav-btn" aria-label="Next change" title="Next change" @mousedown.prevent @click="onNextChunk">&#8594;</button>
-      </div>
-    </template>
-
-    <div class="flex-1"></div>
-
-    <span
-      v-if="diff.reviewError"
-      role="alert"
-      class="max-w-[320px] truncate font-sans text-[10px] text-rem"
-      :title="diff.reviewError"
-    >{{ diff.reviewError }}</span>
-
-    <!-- Actions (both modes) -->
-    <template v-if="diff.decision">
-      <button class="diff-action-btn accept" :disabled="diff.decision.pending" @mousedown.prevent
-        @click="emit(diff.decision.status === 'applied' ? 'accept-all' : 'reject-all')"
-      >{{ diff.decision.pending ? 'Updating status…' : 'Retry status' }}</button>
-    </template>
-    <template v-else-if="isHistory">
-      <span class="history-label">{{ historyLabel }}</span>
-      <button class="diff-action-btn cancel" @mousedown.prevent @click="emit('reject-all')">Cancel</button>
-      <button class="diff-action-btn accept" @mousedown.prevent @click="emit('accept-all')">Restore</button>
-    </template>
-    <template v-else-if="isInlineAI">
-      <span class="history-label">AI suggestion</span>
-      <button class="diff-action-btn cancel" @mousedown.prevent @click="emit('reject-all')">Reject</button>
-      <button class="diff-action-btn accept" @mousedown.prevent @click="emit('accept-all')">Accept</button>
-    </template>
-    <template v-else>
-      <button class="diff-action-btn reject" @mousedown.prevent @click="emit('reject-all')">Reject All</button>
-      <button class="diff-action-btn accept" @mousedown.prevent @click="emit('accept-all')">Accept All</button>
-    </template>
+      <template v-if="diff.decision || diff.finishing">
+        <span v-if="diff.finishing || diff.decision?.pending" class="review-status" role="status">Applying…</span>
+        <button v-else type="button" class="review-text" @click="emit('finish')">Retry</button>
+      </template>
+      <template v-else-if="isHistory">
+        <span class="review-status history-label" :title="historyLabel">{{ historyLabel }}</span>
+        <button type="button" class="review-text" @mousedown.prevent @click="emit('reject-all')">Cancel</button>
+        <button type="button" class="review-text review-restore" @mousedown.prevent @click="emit('accept-all')">Restore</button>
+      </template>
+      <template v-else>
+        <div class="review-history" role="group" aria-label="Review history">
+          <button type="button" class="review-icon" :disabled="!diff.canUndo" aria-label="Undo review decision" title="Undo review decision (⌘Z)" @mousedown.prevent @click="diff.undoReview()"><IconArrowBackUp :size="14" aria-hidden="true" /></button>
+          <button type="button" class="review-icon" :disabled="!diff.canRedo" aria-label="Redo review decision" title="Redo review decision (⇧⌘Z)" @mousedown.prevent @click="diff.redoReview()"><IconArrowForwardUp :size="14" aria-hidden="true" /></button>
+        </div>
+        <ReviewActions :scope="batchOverview ? 'in all files' : 'in this file'" :pending="diff.pendingChanges > 0"
+          @accept="emit('accept-all')" @reject="emit('reject-all')" />
+        <button v-if="diff.reviewError && diff.canFinish" type="button" class="review-text" @click="emit('finish')">Retry</button>
+      </template>
+    </div>
+    <div v-if="diff.reviewError" role="alert" class="review-error">{{ diff.reviewError }}</div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import { IconArrowUp, IconArrowDown, IconArrowBackUp, IconArrowForwardUp } from '@tabler/icons-vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { relativeTime } from '../../../shared/time.js'
-import { basename } from '../../../shared/utils/path.js'
+import ReviewActions from './ReviewActions.vue'
 
 const diff = useDiffStore()
-const emit = defineEmits(['accept-all', 'reject-all', 'navigate-chunk', 'navigate-file'])
-
+const emit = defineEmits(['accept-all', 'reject-all', 'finish', 'navigate-chunk', 'navigate-file'])
+const batchOverview = computed(() => diff.isBatch && !diff.isBatchFileFocused)
 const isHistory = computed(() => diff.reviewMeta?.type === 'history')
-const isInlineAI = computed(() => diff.reviewMeta?.type === 'inline-ai')
 const historyLabel = computed(() => {
   const meta = diff.reviewMeta
-  if (!meta) return ''
-  const time = meta.timestamp ? relativeTime(meta.timestamp) : ''
-  return time ? `${meta.hash} · ${time}` : meta.hash || ''
+  return meta ? `${meta.hash || ''} ${meta.timestamp ? relativeTime(meta.timestamp) : ''}`.trim() : ''
 })
-
-const viewModes = [
-  { value: 'original', label: 'Original' },
-  { value: 'diff', label: 'Diff' },
-  { value: 'result', label: 'Result' },
-]
-
-let currentPendingIdx = 0
-
-function onPrevPending() {
-  const pending = diff.pendingFiles
-  if (pending.length === 0) return
-  currentPendingIdx = (currentPendingIdx - 1 + pending.length) % pending.length
-  emit('navigate-file', pending[currentPendingIdx].path)
-}
-
-function onNextPending() {
-  const pending = diff.pendingFiles
-  if (pending.length === 0) return
-  currentPendingIdx = (currentPendingIdx + 1) % pending.length
-  emit('navigate-file', pending[currentPendingIdx].path)
-}
-
-function onPrevChunk() {
-  diff.prevChunk()
+const views = [{ value: 'original', label: 'Original' }, { value: 'diff', label: 'Diff' }, { value: 'result', label: 'Result' }]
+const layouts = [{ value: 'unified', label: 'Unified' }, { value: 'split', label: 'Split' }]
+const fileIndex = ref(-1)
+const pendingCount = computed(() => batchOverview.value ? diff.pendingFiles.length : diff.pendingChanges)
+const pendingLabel = computed(() => `${pendingCount.value} ${batchOverview.value ? (pendingCount.value === 1 ? 'file' : 'files') : (pendingCount.value === 1 ? 'change' : 'changes')} left`)
+const positionLabel = computed(() => pendingCount.value
+  ? `${Math.min(pendingCount.value, (batchOverview.value ? Math.max(0, fileIndex.value) : diff.currentChunk) + 1)}/${pendingCount.value}` : '0')
+const previousLabel = computed(() => batchOverview.value ? 'Previous pending file' : 'Previous change')
+const nextLabel = computed(() => batchOverview.value ? 'Next pending file' : 'Next change')
+async function navigate(direction) {
+  diff.setViewMode('diff')
+  if (direction < 0) diff.prevChunk(); else diff.nextChunk()
+  await nextTick()
   emit('navigate-chunk', diff.currentChunk)
 }
-
-function onNextChunk() {
-  diff.nextChunk()
-  emit('navigate-chunk', diff.currentChunk)
+function navigateFile(direction) {
+  const files = diff.pendingFiles
+  if (!files.length) return
+  fileIndex.value = fileIndex.value < 0 ? (direction < 0 ? files.length - 1 : 0)
+    : (fileIndex.value + direction + files.length) % files.length
+  emit('navigate-file', files[fileIndex.value].path)
 }
 </script>
 
 <style scoped>
-.diff-bar {
-  background: var(--color-chrome-mid);
-}
-
-/* ── Batch dots ── */
-.batch-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  border: none;
-  padding: 0;
-}
-.batch-dot:hover {
-  transform: scale(1.5);
-}
-.batch-dot-pending {
-  background: var(--color-ink-3);
-}
-.batch-dot-accepted {
-  background: var(--color-add);
-}
-.batch-dot-rejected {
-  background: var(--color-rule);
-}
-
-/* ── Segmented control ── */
-.seg-ctrl {
-  display: flex;
-  height: 20px;
-  background: var(--color-chrome);
-  border: 1px solid var(--color-rule);
-  border-radius: 100px;
-  padding: 1px;
-  gap: 0;
-}
-
-.seg-btn {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  color: var(--color-ink-3);
-  background: none;
-  border: none;
-  border-radius: 100px;
-  padding: 0 9px;
-  height: 16px;
-  white-space: nowrap;
-  line-height: 16px;
-}
-.seg-btn:hover:not(.active) {
-  color: var(--color-ink-2);
-  background: var(--color-chrome-mid);
-}
-.seg-btn.active {
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-weight: 600;
-}
-
-/* ── Chunk navigation ── */
-.chunk-nav-btn {
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 3px;
-  background: none;
-  color: var(--color-ink-3);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.chunk-nav-btn:hover:not(:disabled) {
-  color: var(--color-ink);
-  background: var(--color-chrome-high);
-}
-.chunk-nav-btn:disabled {
-  color: var(--color-ink-3);
-  cursor: default;
-}
-
-.chunk-counter {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  color: var(--color-ink-3);
-  min-width: 28px;
-  text-align: center;
-}
-.chunk-sep {
-  color: var(--color-ink-3);
-  margin: 0 1px;
-}
-
-/* ── History label ── */
-.history-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  color: var(--color-ink-3);
-}
-
-/* ── Action buttons ── */
-.diff-action-btn {
-  font-family: var(--font-sans);
-  font-size: 10.5px;
-  font-weight: 500;
-  height: 22px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 3px;
-  background: none;
-}
-
-.diff-action-btn.reject {
-  color: var(--color-ink-3);
-}
-.diff-action-btn.reject:hover {
-  color: var(--color-rem);
-  background: color-mix(in srgb, var(--color-rem) 15%, transparent);
-}
-
-.diff-action-btn.cancel {
-  color: var(--color-ink-2);
-  border: 1px solid var(--color-rule);
-}
-.diff-action-btn.cancel:hover {
-  color: var(--color-ink);
-  background: var(--color-chrome-high);
-}
-
-.diff-action-btn.accept {
-  color: var(--color-accent-ink);
-  background: var(--color-accent);
-  font-weight: 600;
-}
-.diff-action-btn.accept:hover {
-  opacity: 0.9;
-}
+.diff-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-height: 32px; padding: 2px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-rule-light); background: var(--color-chrome-high); font: 11px var(--font-sans); }
+.diff-views, .diff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 27px; }
+.diff-actions { margin-left: auto; gap: 4px; }
+.view-switch { display: flex; padding: 2px; border-radius: 5px; background: var(--color-chrome); }
+.view-switch button { height: 20px; padding: 0 7px; border-radius: 3px; color: var(--color-ink-3); font-size: 10px; white-space: nowrap; }
+.view-switch button:hover { color: var(--color-ink); }
+.view-switch button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-ink); box-shadow: 0 0 0 1px var(--color-rule-light); }
+.review-navigation, .review-history { display: flex; align-items: center; }
+.review-history { padding-inline: 4px; border-inline: 1px solid var(--color-rule-light); }
+.review-status { color: var(--color-ink-3); padding: 0 4px; white-space: nowrap; }
+.history-label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.review-count { min-width: 25px; color: var(--color-ink-3); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }
+.review-icon, .review-text { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 5px; border-radius: 3px; color: var(--color-ink-2); white-space: nowrap; }
+.review-icon { width: 24px; padding: 0; }
+.review-icon:hover:not(:disabled), .review-text:hover:not(:disabled) { background: var(--color-chrome); color: var(--color-ink); }
+.review-restore { color: var(--color-accent); }
+button:disabled { opacity: .35; cursor: default; }
+button:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
+.review-error { flex-basis: 100%; padding: 4px; color: var(--color-rem); overflow-wrap: anywhere; }
 </style>

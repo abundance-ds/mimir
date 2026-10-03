@@ -11,6 +11,53 @@ import { commentConcealment } from './comments.js'
 const mergeViewCompartment = new Compartment()
 const diffConfig = { scanLimit: 5000 }
 
+function changeButton(action, run) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.name = action
+  button.className = `cm-review-action cm-review-${action}`
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  icon.setAttribute('viewBox', '0 0 24 24')
+  icon.setAttribute('width', '12')
+  icon.setAttribute('height', '12')
+  icon.setAttribute('fill', 'none')
+  icon.setAttribute('stroke', 'currentColor')
+  icon.setAttribute('stroke-width', '2')
+  icon.setAttribute('stroke-linecap', 'round')
+  icon.setAttribute('stroke-linejoin', 'round')
+  icon.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', action === 'accept' ? 'M5 12l4 4L19 6' : 'M6 6l12 12M6 18L18 6')
+  icon.appendChild(path)
+  button.appendChild(icon)
+  button.title = action === 'accept' ? 'Accept change' : 'Reject change'
+  button.setAttribute('aria-label', button.title)
+  // The library delegates mousedown in split view. Both actions use click so
+  // keyboard and pointer activation have the same path.
+  button.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation() })
+  button.addEventListener('click', event => {
+    event.preventDefault()
+    event.stopPropagation()
+    const focused = document.activeElement === button
+    const root = button.closest('.cm-mergeView') || button.closest('.cm-editor')
+    const index = root ? [...root.querySelectorAll(`button[name="${action}"]`)].indexOf(button) : 0
+    run(event)
+    if (focused) requestAnimationFrame(() => {
+      if (!root?.isConnected) return
+      const remaining = root.querySelectorAll(`button[name="${action}"]`)
+      const next = remaining[Math.min(index, remaining.length - 1)] || root.querySelector('.cm-content')
+      next?.focus()
+    })
+  })
+  return button
+}
+
+function reviewAction(update) {
+  if (update.transactions.some(tr => tr.isUserEvent('accept'))) return 'accept'
+  if (update.transactions.some(tr => tr.isUserEvent('revert'))) return 'reject'
+  return 'edit'
+}
+
 export function resolvedDiffContent(doc, modified, original = '') {
   const lineEnding = modified.match(/\r\n?|\n/)?.[0] || original.match(/\r\n?|\n/)?.[0] || '\n'
   return doc.sliceString(0, doc.length, lineEnding)
@@ -73,6 +120,7 @@ export function createUnifiedDiffView({
   onAllResolved,
   onChunkCountChange,
   onChange,
+  onReviewChange,
 }) {
   const state = EditorState.create({
     doc: modifiedContent,
@@ -80,7 +128,15 @@ export function createUnifiedDiffView({
       ...sharedDiffExtensions,
       EditorView.updateListener.of(update => {
         if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
+        if (update.docChanged || getOriginalDoc(update.startState) !== getOriginalDoc(update.state)) {
+          onReviewChange?.(
+            resolvedDiffContent(getOriginalDoc(update.state), modifiedContent, originalContent),
+            resolvedDiffContent(update.state.doc, modifiedContent, originalContent),
+            reviewAction(update),
+          )
+        }
       }),
+      EditorView.editorAttributes.of({ class: mergeControls ? 'cm-review-unified' : '' }),
       ...(editable ? [] : [EditorView.editable.of(false)]),
       mergeViewCompartment.of([
         unifiedMergeView({
@@ -88,7 +144,7 @@ export function createUnifiedDiffView({
           gutter: true,
           highlightChanges: true,
           syntaxHighlightDeletions: false,
-          mergeControls,
+          mergeControls: mergeControls ? changeButton : false,
           diffConfig,
           ...(collapse ? { collapseUnchanged: { margin: 3, minSize: 4 } } : {}),
         }),
@@ -128,8 +184,36 @@ export function createSplitDiffView({
   onAllResolved,
   onChunkCountChange,
   onChange,
+  onReviewChange,
 }) {
   let mv
+
+  function report(update, side) {
+    if (!update.docChanged || !mv) return
+    onReviewChange?.(
+      resolvedDiffContent(side === 'a' ? update.state.doc : mv.a.state.doc, modifiedContent, originalContent),
+      resolvedDiffContent(side === 'b' ? update.state.doc : mv.b.state.doc, modifiedContent, originalContent),
+      reviewAction(update),
+    )
+  }
+
+  function decide(index, action) {
+    const chunk = mv?.chunks[index]
+    if (!chunk) return
+    const accepting = action === 'accept'
+    const source = accepting ? mv.b : mv.a
+    const target = accepting ? mv.a : mv.b
+    const from = accepting ? chunk.fromB : chunk.fromA
+    const to = accepting ? chunk.toB : chunk.toA
+    const targetFrom = accepting ? chunk.fromA : chunk.fromB
+    const targetTo = accepting ? chunk.toA : chunk.toB
+    let insert = source.state.sliceDoc(from, Math.max(from, to - 1))
+    if (from !== to && targetTo <= target.state.doc.length) insert += source.state.lineBreak
+    target.dispatch({
+      changes: { from: targetFrom, to: Math.min(target.state.doc.length, targetTo), insert },
+      userEvent: accepting ? 'accept' : 'revert',
+    })
+  }
 
   mv = new MergeView({
     a: {
@@ -137,6 +221,7 @@ export function createSplitDiffView({
       extensions: [
         ...sharedDiffExtensions,
         EditorView.editable.of(false),
+        EditorView.updateListener.of(update => report(update, 'a')),
       ],
     },
     b: {
@@ -145,6 +230,7 @@ export function createSplitDiffView({
         ...sharedDiffExtensions,
         EditorView.updateListener.of(update => {
           if (update.docChanged) onChange?.(resolvedDiffContent(update.state.doc, modifiedContent, originalContent))
+          report(update, 'b')
         }),
         ...(editable ? [] : [EditorView.editable.of(false)]),
         chunkWatcherPlugin(onAllResolved, onChunkCountChange),
@@ -157,34 +243,9 @@ export function createSplitDiffView({
       const wrap = document.createElement('div')
       wrap.className = 'cm-merge-chunk-buttons'
 
-      const acceptBtn = document.createElement('button')
-      acceptBtn.className = 'cm-merge-accept-btn'
-      acceptBtn.textContent = '✓'
-      acceptBtn.title = 'Accept this change'
-      acceptBtn.addEventListener('mousedown', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const chunkIdx = parseInt(wrap.dataset.chunk)
-        if (isNaN(chunkIdx) || !mv) return
-        const chunk = mv.chunks[chunkIdx]
-        if (!chunk) return
-        let insert = mv.b.state.sliceDoc(chunk.fromB, Math.max(chunk.fromB, chunk.toB - 1))
-        if (chunk.fromB !== chunk.toB && chunk.toA <= mv.a.state.doc.length)
-          insert += mv.b.state.lineBreak
-        mv.a.dispatch({
-          changes: { from: chunk.fromA, to: Math.min(mv.a.state.doc.length, chunk.toA), insert },
-          // Tagged so the comment concealment change filter admits it.
-          userEvent: 'accept',
-        })
-      })
-
-      const revertBtn = document.createElement('button')
-      revertBtn.className = 'cm-merge-revert-btn'
-      revertBtn.textContent = '✗'
-      revertBtn.title = 'Reject this change'
-
-      wrap.appendChild(acceptBtn)
-      wrap.appendChild(revertBtn)
+      for (const action of ['accept', 'reject']) {
+        wrap.appendChild(changeButton(action, () => decide(Number(wrap.dataset.chunk), action)))
+      }
       return wrap
     } : undefined,
     highlightChanges: true,

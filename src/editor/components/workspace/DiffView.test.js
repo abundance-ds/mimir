@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
-import { rejectChunk } from '@codemirror/merge'
+import { acceptChunk, rejectChunk } from '@codemirror/merge'
 import { useDiffStore } from '../../../stores/diff.js'
 import DiffView from './DiffView.vue'
 
@@ -31,7 +31,7 @@ describe('DiffView', () => {
     wrapper.unmount()
   })
 
-  it('emits accept with the resolved document once every chunk is settled', async () => {
+  it('keeps the completed review open until Finish review', async () => {
     const { wrapper } = mountActive()
     const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
     expect(view).toBeTruthy()
@@ -42,7 +42,9 @@ describe('DiffView', () => {
     })
     await vi.runAllTimersAsync()
 
-    expect(wrapper.emitted('accept')).toEqual([['before\nsame']])
+    expect(wrapper.emitted('accept')).toBeUndefined()
+    expect(wrapper.vm.getResolvedContent()).toBe('before\nsame')
+    expect(useDiffStore().canFinish).toBe(true)
     wrapper.unmount()
   })
 
@@ -60,7 +62,8 @@ describe('DiffView', () => {
     vi.useFakeTimers()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'before\nsame\n' } })
     await vi.runAllTimersAsync()
-    expect(wrapper.emitted('accept')).toEqual([['before\r\nsame\r\n']])
+    expect(wrapper.vm.getResolvedContent()).toBe('before\r\nsame\r\n')
+    expect(wrapper.emitted('accept')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -148,4 +151,71 @@ describe('DiffView', () => {
     expect(wrapper.find('.cm-mergeButtons').exists()).toBe(false)
     wrapper.unmount()
   })
+  it.each(['unified', 'split'])('retains mixed decisions, result, and Undo through every view from %s', async layout => {
+    const middle = Array.from({ length: 12 }, (_, i) => `same ${i}`).join('\n')
+    const original = `old A\n${middle}\nold B\n${middle}\nold C`
+    const modified = `new A\n${middle}\nnew B\n${middle}\nnew C`
+    const { diff, wrapper } = mountActive({ original, modified })
+    diff.setLayout(layout)
+    await flushPromises()
+    const click = async action => {
+      await vi.waitFor(() => expect(wrapper.find(`button[name=${action}]`).exists()).toBe(true))
+      await wrapper.find(`button[name=${action}]`).trigger('click')
+      await flushPromises()
+    }
+    await click('accept')
+    expect(diff.pendingChanges).toBe(2)
+    await click('reject')
+    expect(diff.pendingChanges).toBe(1)
+    const expected = `new A\n${middle}\nold B\n${middle}\nnew C`
+    for (const next of ['split', 'unified', 'result', 'original', 'split']) {
+      if (next === 'split' || next === 'unified') { diff.setLayout(next); diff.setViewMode('diff') }
+      else diff.setViewMode(next)
+      await flushPromises()
+      expect(wrapper.vm.getResolvedContent()).toBe(expected)
+      expect(diff.pendingChanges).toBe(1)
+    }
+    expect(diff.currentReview.original).toBe(original)
+    diff.undoReview()
+    await flushPromises()
+    expect(diff.pendingChanges).toBe(2)
+    expect(wrapper.vm.getResolvedContent()).toBe(modified)
+    diff.undoReview()
+    await flushPromises()
+    expect(diff.pendingChanges).toBe(3)
+    diff.redoReview()
+    diff.redoReview()
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe(expected)
+    expect(diff.pendingChanges).toBe(1)
+    wrapper.unmount()
+  })
+
+  it.each(['accept', 'reject'])('preserves a pure deletion decision in split view (%s)', async action => {
+    const { diff, wrapper } = mountActive({ original: 'remove me\r\n', modified: '' })
+    diff.setLayout('split')
+    await flushPromises()
+    await vi.waitFor(() => expect(wrapper.find(`button[name=${action}]`).exists()).toBe(true))
+    await wrapper.find(`button[name=${action}]`).trigger('click')
+    expect(diff.pendingChanges).toBe(0)
+    expect(diff.canFinish).toBe(true)
+    expect(wrapper.vm.getResolvedContent()).toBe(action === 'accept' ? '' : 'remove me\r\n')
+    await wrapper.trigger('keydown', { key: 'z', metaKey: true })
+    expect(diff.pendingChanges).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('preserves manual result edits and history across view replacement', async () => {
+    const { diff, wrapper } = mountActive()
+    const view = EditorView.findFromDOM(wrapper.element.querySelector('.cm-editor'))
+    view.dispatch({ changes: { from: 0, to: 5, insert: 'custom' }, userEvent: 'input.type' })
+    diff.setLayout('split')
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe('custom\nsame')
+    diff.undoReview()
+    await flushPromises()
+    expect(wrapper.vm.getResolvedContent()).toBe('after\nsame')
+    wrapper.unmount()
+  })
+
 })

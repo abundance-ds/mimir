@@ -67,7 +67,8 @@
       <!-- Response -->
       <template v-else-if="responseText || pendingEdit">
         <p class="flex-1 min-w-0 font-sans text-[11px] leading-snug text-ink-2">{{ responseText || 'Review the proposed edit.' }}</p>
-        <template v-if="pendingEdit">
+        <button v-if="pendingEdit && reviewActive" type="button" class="shrink-0 h-[28px] px-2 font-sans text-[11px] text-ink-2 hover:bg-chrome-high" @click="onReject">Refine</button>
+        <template v-if="pendingEdit && !reviewActive">
           <button class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-medium text-ink-3 iai-reject-btn" @mousedown.prevent @click="onReject">Reject</button>
           <button
             aria-label="Accept AI edit"
@@ -119,9 +120,10 @@ const props = defineProps({
   getDocument: { type: Function, default: null },
   projectPath: { type: String, default: null },
   escapeBlocked: { type: Boolean, default: false },
+  reviewActive: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['apply', 'activate-diff', 'deactivate-diff', 'close', 'configure-models'])
+const emit = defineEmits(['apply', 'activate-diff', 'deactivate-diff', 'close', 'configure-models', 'accept-review'])
 
 const inputRef = ref(null)
 const modelList = ref([])
@@ -307,6 +309,7 @@ function onInputKeydown(e) {
     onClose()
   } else if (action === 'accept') {
     e.preventDefault()
+    e.stopPropagation()
     onAccept()
   } else if (action === 'submit') {
     e.preventDefault()
@@ -352,6 +355,10 @@ function onRetry() {
 
 function onAccept() {
   if (!pendingEdit.value) return
+  if (props.reviewActive) {
+    emit('accept-review')
+    return
+  }
   emit('apply', pendingEdit.value.replacement, props.selection.from, props.selection.to)
 }
 

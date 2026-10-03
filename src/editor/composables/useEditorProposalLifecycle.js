@@ -160,7 +160,7 @@ export function useEditorProposalLifecycle({
     const next = [...kept, ...added]
     if (next.length === 0) {
       fileManager.clearFileReviews(file)
-      if (!file.reviewDecision) diffStore.deactivate()
+      if (!file.reviewDecision && !diffStore.finishing) diffStore.deactivate()
     } else {
       fileManager.setFileReviews(file, next)
       activateDiffFromReviews(file)
@@ -168,6 +168,7 @@ export function useEditorProposalLifecycle({
   }
 
   function activateDiffFromReviews(file) {
+    if (diffStore.finishing) return true
     if (file?.reviewDecision) {
       const decision = file.reviewDecision
       diffStore.activate({
@@ -180,6 +181,16 @@ export function useEditorProposalLifecycle({
       return true
     }
     if (!file?.reviews?.length || file.kind === 'graph') return false
+    const proposalKey = file.reviews.map(review => review.proposalId).slice().sort().join('\n')
+    const session = file.reviewSession?.proposalKey === proposalKey ? file.reviewSession : null
+    if (session) {
+      diffStore.activate({
+        original: session.original, modified: session.proposed,
+        path: file.path || '', fileId: file.id, session,
+        review: { ids: file.reviews.map(review => review.proposalId), sessionId: file.reviews[0].sessionId, path: file.path },
+      })
+      return true
+    }
     if (fileManager.currentFile === file) flushEditorContent()
     const content = file.content || ''
     const diff = file.reviews.length === 1
@@ -197,12 +208,15 @@ export function useEditorProposalLifecycle({
       original: diff.original,
       modified: diff.modified,
       path: file.path || '',
+      fileId: file.id,
       review: {
         ids: file.reviews.map(review => review.proposalId),
         sessionId: first.sessionId,
         path: first.path,
       },
     })
+    file.reviewSession = diffStore.reviewSession
+    file.reviewSession.proposalKey = proposalKey
     return true
   }
 

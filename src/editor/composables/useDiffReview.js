@@ -1,6 +1,7 @@
 import { singleDiffTargetsFile } from '../workspaceDiffProjection.js'
 import { graphSource, saveGraphSource } from '../../services/businessGraph.js'
 import { graphDocumentState, isGraphSourceCandidate } from '../../stores/graphDocuments.js'
+import { reviewStatus } from '../reviewSession.js'
 
 const SOURCE_REQUIRED = 'Open Source before applying a Markdown review to this Graph entry.'
 
@@ -92,7 +93,7 @@ export function useDiffReview({
     }
   }
 
-  async function onBatchAllResolved() {
+  async function finishBatchReview() {
     // Captured references, mutated directly: a proposals-changed broadcast
     // arriving between awaits can deactivate the store and empty its file
     // list, and a path re-lookup would then silently skip the remaining
@@ -204,38 +205,22 @@ export function useDiffReview({
       }
     }
 
-    diffStore.deactivate()
-    reviewTabActive.value = false
+    if (diffStore.isBatch && allFiles.every(file => diffStore.files.includes(file))) {
+      diffStore.deactivate()
+      reviewTabActive.value = false
+    }
     return { ok: true }
   }
 
   async function onDiffAcceptAll() {
-    if (diffStore.isBatchFileFocused) {
-      const path = diffStore.focusedFile
-      diffStore.acceptFile(path)
-      diffStore.clearBatchFocus()
-      reviewTabActive.value = true
-      if (diffStore.allResolved) await onBatchAllResolved()
-      return
-    }
-    if (diffStore.isBatch) {
-      diffStore.acceptAllFiles()
-      await onBatchAllResolved()
-    } else {
+    if (diffStore.decision) return onDiffFinish()
+    if (!diffStore.isBatch) {
       const targetResult = requireActiveSingleDiffTarget()
       if (!targetResult.ok) return targetResult
-      const target = targetResult.target
-      if (diffStore.reviewMeta?.type === 'history') {
-        restoreConfirmMeta.value = diffStore.reviewMeta
-      } else if (diffStore.reviewMeta?.type === 'inline-ai') {
-        applyDiffResult(diffStore.modifiedContent, target)
-        inlineAIState.value = null
-      } else {
-        // Commit the resolved review text before reporting the decision.
-        const modified = diffViewRef.value?.getResolvedContent?.() ?? diffStore.modifiedContent
-        return completeReview(target, 'applied', modified)
-      }
     }
+    if (diffStore.reviewMeta?.type === 'history') restoreConfirmMeta.value = diffStore.reviewMeta
+    else diffStore.decideRemainingChanges('accept')
+    return { ok: true }
   }
 
   function onRestoreConfirm(action) {
@@ -248,51 +233,51 @@ export function useDiffReview({
   }
 
   async function onDiffRejectAll() {
-    if (diffStore.isBatchFileFocused) {
-      const path = diffStore.focusedFile
-      diffStore.rejectFile(path)
-      diffStore.clearBatchFocus()
-      reviewTabActive.value = true
-      if (diffStore.allResolved) await onBatchAllResolved()
-      return
-    }
-    if (diffStore.isBatch) {
-      diffStore.rejectAllFiles()
-      await onBatchAllResolved()
-    } else {
+    if (diffStore.decision) return onDiffFinish()
+    if (!diffStore.isBatch) {
       const targetResult = requireActiveSingleDiffTarget()
       if (!targetResult.ok) return targetResult
-      const target = targetResult.target
-      if (diffStore.reviewMeta?.type === 'history') {
-        diffStore.deactivate()
-      } else if (diffStore.reviewMeta?.type === 'inline-ai') {
-        diffStore.deactivate()
-      } else {
-        // Reject dismisses the proposal and retains the document's current text.
-        const original = diffStore.originalContent
-        return completeReview(target, 'rejected', original)
-      }
     }
+    if (diffStore.reviewMeta?.type === 'history') diffStore.deactivate()
+    else diffStore.decideRemainingChanges('reject')
+    return { ok: true }
   }
 
-  async function onDiffChunksResolved(content) {
-    if (diffStore.isBatchFileFocused) {
-      const path = diffStore.focusedFile
-      diffStore.resolveBatchFile(path, content)
-      diffStore.clearBatchFocus()
-      reviewTabActive.value = true
-      if (diffStore.allResolved) await onBatchAllResolved()
-      return
+  async function onDiffFinish() {
+    if (diffStore.decision) {
+      const targetResult = requireActiveSingleDiffTarget()
+      if (!targetResult.ok) return targetResult
+      return completeReview(targetResult.target, diffStore.decision.status, diffStore.decision.content)
+    }
+    if (!diffStore.canFinish) return { ok: false, error: 'Decide the remaining changes before finishing review.' }
+    if (diffStore.isBatch) {
+      diffStore.finishing = true
+      diffStore.setReviewError('')
+      const rows = diffStore.files
+      try {
+        for (const file of rows) {
+          if (file.lifecycleResolved) continue
+          file.modified = file.review.result
+          file.status = file.applied ? 'accepted' : reviewStatus(file.review)
+        }
+        const result = await finishBatchReview()
+        if (!result.ok && diffStore.files === rows) {
+          diffStore.setReviewError('Some files could not be applied. Check the file errors, then retry.')
+        }
+        return result
+      } catch (error) {
+        if (diffStore.files === rows) diffStore.setReviewError(error?.message || error)
+        return { ok: false, error: String(error?.message || error) }
+      } finally {
+        // A newer review can arrive while the native operation is pending.
+        if (diffStore.files === rows) diffStore.finishing = false
+      }
     }
     const targetResult = requireActiveSingleDiffTarget()
     if (!targetResult.ok) return targetResult
-    const target = targetResult.target
+    const session = diffStore.currentReview
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
-    else if (proposalIdsFromReviewMeta(diffStore.reviewMeta).length > 0) {
-      const status = content === diffStore.originalContent ? 'rejected' : 'applied'
-      return completeReview(target, status, content)
-    }
-    return applyDiffResult(content, target)
+    return completeReview(targetResult.target, reviewStatus(session) === 'rejected' ? 'rejected' : 'applied', session.result)
   }
 
   function completeReview(target, status, content) {
@@ -312,6 +297,7 @@ export function useDiffReview({
       }
       diffStore.decision = {
         targetId: target.id, original, content, status,
+        reviewSession: diffStore.reviewSession,
         ids: proposalIdsFromReviewMeta(diffStore.reviewMeta),
         sessionId: diffStore.reviewMeta?.sessionId,
         reported: new Set(), pending: false, operation: null, error: '',
@@ -341,6 +327,7 @@ export function useDiffReview({
       if (remaining.length) fileManager.setFileReviews(target, remaining)
       else fileManager.clearFileReviews(target)
       target.reviewDecision = null
+      if (target.reviewSession === decision.reviewSession) target.reviewSession = null
       if (diffStore.decision === decision) diffStore.deactivate()
       return { ok: true }
     })().finally(() => {
@@ -371,6 +358,10 @@ export function useDiffReview({
       fileId: file?.id ?? null,
       review: opts?.review || null,
     })
+    if (file) {
+      file.reviewSession = diffStore.reviewSession
+      file.reviewSession.proposalKey = proposalIdsFromReviewMeta(opts?.review).slice().sort().join('\n')
+    }
   }
 
   async function activateBatchDiff(fileList, meta) {
@@ -388,12 +379,11 @@ export function useDiffReview({
   return {
     onDiffAcceptAll,
     onDiffRejectAll,
-    onDiffChunksResolved,
+    onDiffFinish,
     onDiffNavigateChunk,
     onDiffNavigateFile,
     onRestoreConfirm,
     activateDiffForCurrentFile,
     activateBatchDiff,
-    onBatchAllResolved,
   }
 }

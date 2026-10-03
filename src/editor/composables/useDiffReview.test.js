@@ -34,6 +34,14 @@ function makeReviewHarness() {
   return { diffStore, currentFile, fileManager, review }
 }
 
+async function finishReview(review, diff, action = 'accept') {
+  if (!diff.decision) {
+    const staged = await (action === 'accept' ? review.onDiffAcceptAll() : review.onDiffRejectAll())
+    if (!staged.ok) return staged
+  }
+  return review.onDiffFinish()
+}
+
 describe('useDiffReview proposal responses', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -46,7 +54,7 @@ describe('useDiffReview proposal responses', () => {
     diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
     let finish
     invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
-    const deciding = action === 'accept' ? review.onDiffAcceptAll() : review.onDiffRejectAll()
+    const deciding = finishReview(review, diffStore, action)
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     expect(currentFile.value.content).toBe(action === 'accept' ? 'proposal text' : 'old text')
     fileManager.updateContent('Newer user edit', currentFile.value)
@@ -60,12 +68,12 @@ describe('useDiffReview proposal responses', () => {
     const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
     diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { ids: ['p1', 'p2'] } })
     invoke.mockImplementation(async (_command, { result }) => { if (result.id === 'p2') throw new Error('offline') })
-    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false })
+    await expect(finishReview(review, diffStore)).resolves.toMatchObject({ ok: false })
     expect(currentFile.value.content).toBe('proposal text')
     fileManager.updateContent('Newer edit', currentFile.value)
     currentFile.value.reviews.push({ proposalId: 'p3' })
     invoke.mockClear().mockResolvedValue(undefined)
-    await expect(review.onDiffAcceptAll()).resolves.toEqual({ ok: true })
+    await expect(finishReview(review, diffStore)).resolves.toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p2', status: 'applied' }) })
     expect(currentFile.value).toMatchObject({ content: 'Newer edit', reviews: [{ proposalId: 'p3' }] })
@@ -75,7 +83,7 @@ describe('useDiffReview proposal responses', () => {
     const { diffStore, currentFile, review } = makeReviewHarness()
     diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
     currentFile.value.content = 'Edited before accept'
-    expect(await review.onDiffAcceptAll()).toMatchObject({ ok: false, error: expect.stringContaining('document changed') })
+    expect(await finishReview(review, diffStore)).toMatchObject({ ok: false, error: expect.stringContaining('document changed') })
     expect(currentFile.value.content).toBe('Edited before accept')
     expect(invoke).not.toHaveBeenCalled()
   })
@@ -85,8 +93,8 @@ describe('useDiffReview proposal responses', () => {
     diffStore.activate({ original: 'old text', modified: 'proposal text', path: '/doc.md', review: { id: 'p1' } })
     let finish
     invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
-    const first = review.onDiffAcceptAll()
-    const repeated = review.onDiffAcceptAll()
+    const first = finishReview(review, diffStore)
+    const repeated = finishReview(review, diffStore)
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     diffStore.activate({ original: 'another', modified: 'new proposal', path: '/other.md', review: { id: 'p2' } })
     finish()
@@ -106,7 +114,8 @@ describe('useDiffReview proposal responses', () => {
     const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
     diffStore.activateBatch({ fileList: [{ path: '/doc.md', original: 'old text', modified: 'proposed', proposalId: 'p1' }] })
     diffStore.focusBatchFile('/doc.md')
-    await review.onDiffChunksResolved('old text')
+    diffStore.recordReviewChange(diffStore.currentReview, 'old text', 'old text', 'reject')
+    await review.onDiffFinish()
     expect(fileManager.updateContent).not.toHaveBeenCalled()
     expect(currentFile.value.content).toBe('old text')
     expect(invoke).toHaveBeenCalledWith('proposal_respond', { result: expect.objectContaining({ id: 'p1', status: 'rejected' }) })
@@ -126,7 +135,7 @@ describe('useDiffReview proposal responses', () => {
     diffStore.activate({ original: 'old text', modified: 'new text', path: '/doc.md', review: { id: 'p1' } })
     currentFile.value.kind = 'graph'
     expect(() => review.activateDiffForCurrentFile('old text', 'new text')).toThrow('Open Source')
-    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Open Source') })
+    await expect(finishReview(review, diffStore)).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Open Source') })
     expect(currentFile.value.content).toBe('old text')
     expect(invoke).not.toHaveBeenCalled()
   })
@@ -134,12 +143,12 @@ describe('useDiffReview proposal responses', () => {
   it('saves an unopened Graph batch source through its native revision gate', async () => {
     const { diffStore, review } = makeReviewHarness()
     diffStore.activateBatch({ fileList: [{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }] })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     invoke.mockImplementation(async command => command === 'graph_source'
       ? { content: 'old', sourceRevision: 'revision-1' }
       : undefined)
 
-    await expect(review.onBatchAllResolved()).resolves.toEqual({ ok: true })
+    await expect(review.onDiffFinish()).resolves.toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledWith('graph_source_save', {
       request: { path: '/graph/item.md', content: 'new', expectedRevision: 'revision-1' },
     })
@@ -154,9 +163,9 @@ describe('useDiffReview proposal responses', () => {
     await review.activateBatchDiff([{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }])
     expect(diffStore.files[0].graphSourceRevision).toBe('revision-1')
     invoke.mockReset().mockResolvedValue(null)
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
 
-    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    await expect(review.onDiffFinish()).resolves.toMatchObject({ ok: false })
     expect(diffStore.files[0].error).toContain('unavailable')
     expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
@@ -175,7 +184,7 @@ describe('useDiffReview proposal responses', () => {
       expect(target.reviewPending).toBe(true)
       target.dirty = true
     })
-    const decision = review.onDiffAcceptAll()
+    const decision = finishReview(review, diffStore)
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     expect(file.reviewPending).toBe(true)
     finish()
@@ -188,7 +197,7 @@ describe('useDiffReview proposal responses', () => {
     currentFile.value.graph = { sourceRevision: 'r1' }
     diffStore.activate({ original: 'old text', modified: 'new text', path: '/doc.md', review: { id: 'p1' } })
     invoke.mockRejectedValue(new Error('Registry offline'))
-    await expect(review.onDiffAcceptAll()).resolves.toMatchObject({ ok: false })
+    await expect(finishReview(review, diffStore)).resolves.toMatchObject({ ok: false })
     expect(currentFile.value.reviewPending).toBe(false)
     expect(currentFile.value.content).toBe('new text')
   })
@@ -196,13 +205,13 @@ describe('useDiffReview proposal responses', () => {
   it('keeps a conflicting unopened Graph batch source pending without a generic write fallback', async () => {
     const { diffStore, review } = makeReviewHarness()
     diffStore.activateBatch({ fileList: [{ path: '/graph/item.md', original: 'old', modified: 'new', proposalId: 'p1' }] })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     invoke.mockImplementation(async command => {
       if (command === 'graph_source') return { content: 'old', sourceRevision: 'revision-1' }
       if (command === 'graph_source_save') throw new Error('Graph source changed on disk')
     })
 
-    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    await expect(review.onDiffFinish()).resolves.toMatchObject({ ok: false })
     expect(diffStore.files[0]).toMatchObject({ status: 'pending', error: 'Graph source changed on disk' })
     expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
     expect(invoke).not.toHaveBeenCalledWith('proposal_respond', expect.anything())
@@ -218,9 +227,9 @@ describe('useDiffReview proposal responses', () => {
     fileManager.save = vi.fn()
     fileManager.setGraphView = vi.fn()
     diffStore.activateBatch({ fileList: [{ path: target.path, original: 'old', modified: 'new', proposalId: 'p1' }] })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
 
-    await expect(review.onBatchAllResolved()).resolves.toMatchObject({ ok: false })
+    await expect(review.onDiffFinish()).resolves.toMatchObject({ ok: false })
     expect(target.content).toBe('old')
     expect(fileManager.save).not.toHaveBeenCalled()
     expect(fileManager.setGraphView).not.toHaveBeenCalled()
@@ -240,9 +249,9 @@ describe('useDiffReview proposal responses', () => {
       return false
     })
     diffStore.activateBatch({ fileList: [{ path: target.path, original: 'old', modified: 'new', proposalId: 'p1' }] })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
 
-    await expect(review.onBatchAllResolved()).resolves.toEqual({ ok: true })
+    await expect(review.onDiffFinish()).resolves.toEqual({ ok: true })
     expect(fileManager.save).toHaveBeenCalledWith(target)
     expect(target).toMatchObject({ content: 'edit during save', dirty: true })
     if (target.graph) expect(target.graph.sourceRevision).toBe('new revision')
@@ -262,7 +271,7 @@ describe('useDiffReview proposal responses', () => {
     currentFile.value = { id: 8, path: '/other.md', content: 'other text' }
     fileManager.openFiles.push(currentFile.value)
 
-    const result = await review.onDiffAcceptAll()
+    const result = await finishReview(review, diffStore)
 
     expect(result).toEqual({
       ok: false,
@@ -283,7 +292,7 @@ describe('useDiffReview proposal responses', () => {
       review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
     })
 
-    await review.onDiffAcceptAll()
+    await finishReview(review, diffStore)
 
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
       result: {
@@ -306,7 +315,8 @@ describe('useDiffReview proposal responses', () => {
       review: { ids: ['p1', 'p2'], sessionId: 's1', path: '/doc.md' },
     })
 
-    await review.onDiffChunksResolved('new text')
+    diffStore.recordReviewChange(diffStore.currentReview, 'new text', 'new text', 'accept')
+    await review.onDiffFinish()
 
     expect(invoke).toHaveBeenCalledTimes(2)
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
@@ -344,7 +354,7 @@ describe('useDiffReview proposal responses', () => {
       return undefined
     })
 
-    const result = await review.onDiffAcceptAll()
+    const result = await finishReview(review, diffStore)
 
     expect(result).toEqual({ ok: true })
     expect(currentFile.value.content).toBe('new text')
@@ -364,7 +374,7 @@ describe('useDiffReview proposal responses', () => {
       return undefined
     })
 
-    const result = await review.onDiffRejectAll()
+    const result = await finishReview(review, diffStore, 'reject')
 
     expect(result).toEqual({ ok: true })
     expect(currentFile.value.content).toBe('edited text')
@@ -383,7 +393,8 @@ describe('useDiffReview proposal responses', () => {
       return undefined
     })
 
-    const result = await review.onDiffChunksResolved('partially resolved text')
+    diffStore.recordReviewChange(diffStore.currentReview, 'partially resolved text', 'partially resolved text', 'accept')
+    const result = await review.onDiffFinish()
 
     expect(result).toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
@@ -414,7 +425,7 @@ describe('useDiffReview proposal responses', () => {
       ],
       sessionId: 's-batch',
     })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     // The first proposal_respond triggers the proposals-changed broadcast,
     // which can deactivate the store and empty its file list mid-loop. The
     // second proposal must still receive its lifecycle report.
@@ -424,7 +435,7 @@ describe('useDiffReview proposal responses', () => {
       return undefined
     })
 
-    const result = await review.onBatchAllResolved()
+    const result = await review.onDiffFinish()
 
     expect(result).toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {
@@ -446,7 +457,7 @@ describe('useDiffReview proposal responses', () => {
     })
     invoke.mockRejectedValue(new Error('registry offline'))
 
-    const result = await review.onDiffRejectAll()
+    const result = await finishReview(review, diffStore, 'reject')
 
     expect(result).toEqual({
       ok: false,
@@ -480,13 +491,13 @@ describe('useDiffReview proposal responses', () => {
       ],
       sessionId: 's-batch',
     })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     invoke.mockImplementation(async (command, input) => {
       if (command === 'read_text_file') return { content: 'other old' }
       return undefined
     })
 
-    const result = await review.onBatchAllResolved()
+    const result = await review.onDiffFinish()
 
     expect(result).toEqual({ ok: true })
     expect(invoke).toHaveBeenCalledWith('read_text_file', { path: '/work/other.md' })
@@ -527,7 +538,7 @@ describe('useDiffReview proposal responses', () => {
       ],
       sessionId: 's-batch',
     })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     invoke.mockImplementation(async (command, input) => {
       if (command === 'read_text_file') {
         return { content: input.path.endsWith('good.md') ? 'good old' : 'changed elsewhere' }
@@ -535,7 +546,7 @@ describe('useDiffReview proposal responses', () => {
       return undefined
     })
 
-    const result = await review.onBatchAllResolved()
+    const result = await review.onDiffFinish()
 
     expect(result.ok).toBe(false)
     expect(result.failures).toEqual([
@@ -575,14 +586,14 @@ describe('useDiffReview proposal responses', () => {
       }],
       sessionId: 's-batch',
     })
-    diffStore.acceptAllFiles()
+    diffStore.decideRemainingChanges('accept')
     invoke.mockImplementation(async command => {
       if (command === 'read_text_file') return { content: 'old' }
       if (command === 'proposal_respond') throw new Error('registry unavailable')
       return undefined
     })
 
-    const result = await review.onBatchAllResolved()
+    const result = await review.onDiffFinish()
     const file = diffStore.files[0]
 
     expect(result.ok).toBe(false)
@@ -593,8 +604,7 @@ describe('useDiffReview proposal responses', () => {
 
     invoke.mockClear()
     invoke.mockResolvedValue(undefined)
-    diffStore.acceptFile('/work/other.md')
-    await review.onBatchAllResolved()
+    await review.onDiffFinish()
 
     expect(invoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
     expect(invoke).toHaveBeenCalledWith('proposal_respond', {

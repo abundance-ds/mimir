@@ -60,16 +60,19 @@
           :getDocument="getDocumentForInlineAI"
           :projectPath="inlineAIProjectPath"
           :escapeBlocked="editorModalOpen"
+          :reviewActive="visibleDiffActive && diffStore.reviewMeta?.type === 'inline-ai'"
           @apply="onInlineAIApply"
           @activate-diff="onInlineAIActivateDiff"
           @deactivate-diff="onInlineAIDeactivateDiff"
           @close="closeInlineAI"
           @configure-models="openSettings('models')"
+          @accept-review="acceptDiffAndFocus"
         />
         <DiffBar
-          v-else-if="!gitReviewVisible && visibleDiffActive && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
+          v-if="!gitReviewVisible && visibleDiffActive && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
           @accept-all="acceptDiffAndFocus"
           @reject-all="rejectDiffAndFocus"
+          @finish="finishDiffAndFocus"
           @navigate-chunk="onDiffNavigateChunk"
           @navigate-file="onDiffNavigateFile"
         />
@@ -82,7 +85,7 @@
           @close="closeGitReview"
         />
         <PendingProposalBar
-          v-else-if="pendingReviewBarVisible"
+          v-else-if="pendingReviewBarVisible && !inlineAIState"
           :count="currentFile?.reviews?.length || 0"
           :busy="pendingReviewBusy"
           :error="pendingReviewError"
@@ -133,12 +136,10 @@
           <BatchDiffView
             v-else-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
             ref="batchDiffViewRef"
-            @all-resolved="onBatchAllResolved"
           />
           <DiffView
             v-else-if="visibleDiffActive && (!diffStore.isBatch || diffStore.isBatchFileFocused)"
             ref="diffViewRef"
-            @accept="onDiffChunksResolved"
           />
           <FilePreviewPage
             v-if="(isResourcePreview || isSvgFile) && !visibleDiffActive && !gitReviewVisible"
@@ -1157,7 +1158,10 @@ async function dismissEditorSurface() {
     return true
   }
   if (visibleDiffActive.value) {
-    await onDiffRejectAll()
+    if (diffStore.isBatch) {
+      reviewTabActive.value = false
+      diffStore.clearBatchFocus()
+    } else diffStore.deactivate()
     restoreEditorFocus()
     return true
   }
@@ -1396,6 +1400,11 @@ function onFormat(action) {
 
 function onEditCommand(action) {
   if (scratchpadHistoryVisible.value) return
+  if (visibleDiffActive.value && (action === 'undo' || action === 'redo')) {
+    if (action === 'undo') diffStore.undoReview()
+    else diffStore.redoReview()
+    return
+  }
   editorSurfaceRef.value?.edit(action)
 }
 
@@ -1614,6 +1623,16 @@ async function acceptDiffAndFocus() {
 async function rejectDiffAndFocus() {
   await onDiffRejectAll()
   restoreEditorFocus()
+}
+
+async function finishDiffAndFocus() {
+  const targetId = currentFile.value?.id
+  try {
+    const result = await onDiffFinish()
+    if (result.ok && !diffStore.active && currentFile.value?.id === targetId) restoreEditorFocus()
+  } catch (error) {
+    diffStore.setReviewError(error?.message || error)
+  }
 }
 
 const editorCommands = useEditorCommandApi({
@@ -1927,7 +1946,14 @@ const diffReview = useDiffReview({
   scheduleContentSync,
   flushEditorContent,
 })
-const { onDiffAcceptAll, onDiffRejectAll, onDiffChunksResolved, onDiffNavigateChunk, onDiffNavigateFile, onRestoreConfirm, activateDiffForCurrentFile, activateBatchDiff, onBatchAllResolved } = diffReview
+const { onDiffAcceptAll, onDiffRejectAll, onDiffFinish, onDiffNavigateChunk, onDiffNavigateFile, onRestoreConfirm, activateDiffForCurrentFile, activateBatchDiff } = diffReview
+
+// Completion belongs to the review, independent of its CodeMirror layout.
+// Failed writes or reports wait for Retry; they must not start a retry loop.
+watch(() => visibleDiffActive.value && diffStore.canFinish && !diffStore.reviewError
+  && diffStore.reviewMeta?.type !== 'history', ready => {
+  if (ready) void finishDiffAndFocus()
+}, { flush: 'post' })
 
 // --- Keyboard shortcuts ---
 
@@ -1945,12 +1971,13 @@ useKeyboardShortcuts({
 })
 
 function onEditorKeydown(event) {
+  if (event.defaultPrevented || event.isComposing) return
   if (event.key === 'Escape' && gitReviewVisible.value) {
     event.preventDefault()
     closeGitReview()
     return
   }
-  if (event.key === 'Escape' && visibleDiffActive.value) {
+  if (event.key === 'Escape' && visibleDiffActive.value && diffStore.reviewMeta?.type === 'history') {
     event.preventDefault()
     void rejectDiffAndFocus().catch((error) => {
       diffStore.setReviewError(error?.message || error)
@@ -1963,18 +1990,19 @@ function onEditorKeydown(event) {
     && (event.metaKey || event.ctrlKey)
   ) {
     event.preventDefault()
-    void acceptDiffAndFocus().catch((error) => {
+    void (diffStore.reviewError ? finishDiffAndFocus() : acceptDiffAndFocus()).catch((error) => {
       diffStore.setReviewError(error?.message || error)
     })
     return
   }
   if (visibleDiffActive.value && diffStore.viewMode === 'diff') {
-    if (event.key === '[' || (event.key === 'ArrowUp' && event.altKey)) {
+    const editing = event.target?.closest?.('input, textarea, [contenteditable="true"]')
+    if ((!editing && event.key === '[') || (event.key === 'ArrowUp' && event.altKey)) {
       event.preventDefault()
       diffStore.prevChunk()
       diffViewRef.value?.scrollToChunk(diffStore.currentChunk)
     }
-    if (event.key === ']' || (event.key === 'ArrowDown' && event.altKey)) {
+    if ((!editing && event.key === ']') || (event.key === 'ArrowDown' && event.altKey)) {
       event.preventDefault()
       diffStore.nextChunk()
       diffViewRef.value?.scrollToChunk(diffStore.currentChunk)

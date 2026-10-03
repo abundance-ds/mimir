@@ -57,7 +57,7 @@ describe('diff store', () => {
 
     store.activate({ original: 'x', modified: 'y' })
     expect(store.viewMode).toBe('diff')
-    expect(store.chunkCount).toBe(0)
+    expect(store.chunkCount).toBe(1)
     expect(store.currentChunk).toBe(0)
   })
 
@@ -207,53 +207,53 @@ describe('diff store', () => {
     expect(store.fileId).toBeNull()
   })
 
-  it('acceptFile marks a file as accepted', () => {
+  it('accept remaining in a file marks a file as accepted', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
       ],
     })
 
-    store.acceptFile('a.md')
+    store.decideRemainingChanges('accept', 'a.md')
     expect(store.files[0].status).toBe('accepted')
     expect(store.files[1].status).toBe('pending')
   })
 
-  it('rejectFile marks a file as rejected', () => {
+  it('reject remaining in a file marks a file as rejected', () => {
     const store = useDiffStore()
     store.activateBatch({
-      fileList: [{ path: 'a.md', original: '', modified: '' }],
+      fileList: [{ path: 'a.md', original: 'old', modified: 'new' }],
     })
 
-    store.rejectFile('a.md')
+    store.decideRemainingChanges('reject', 'a.md')
     expect(store.files[0].status).toBe('rejected')
   })
 
-  it('acceptAllFiles marks all files as accepted', () => {
+  it('accept remaining in all files marks all files as accepted', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
       ],
     })
 
-    store.acceptAllFiles()
+    store.decideRemainingChanges('accept')
     expect(store.files.every(f => f.status === 'accepted')).toBe(true)
   })
 
-  it('rejectAllFiles marks all files as rejected', () => {
+  it('reject remaining in all files marks all files as rejected', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
       ],
     })
 
-    store.rejectAllFiles()
+    store.decideRemainingChanges('reject')
     expect(store.files.every(f => f.status === 'rejected')).toBe(true)
   })
 
@@ -261,14 +261,14 @@ describe('diff store', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
-        { path: 'c.ts', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
+        { path: 'c.ts', original: 'old', modified: 'new' },
       ],
     })
 
-    store.acceptFile('a.md')
-    store.rejectFile('b.js')
+    store.decideRemainingChanges('accept', 'a.md')
+    store.decideRemainingChanges('reject', 'b.js')
     expect(store.pendingFiles).toHaveLength(1)
     expect(store.pendingFiles[0].path).toBe('c.ts')
   })
@@ -277,17 +277,17 @@ describe('diff store', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
       ],
     })
 
     expect(store.allResolved).toBe(false)
 
-    store.acceptFile('a.md')
+    store.decideRemainingChanges('accept', 'a.md')
     expect(store.allResolved).toBe(false)
 
-    store.rejectFile('b.js')
+    store.decideRemainingChanges('reject', 'b.js')
     expect(store.allResolved).toBe(true)
   })
 
@@ -295,23 +295,23 @@ describe('diff store', () => {
     const store = useDiffStore()
     store.activateBatch({
       fileList: [
-        { path: 'a.md', original: '', modified: '' },
-        { path: 'b.js', original: '', modified: '' },
-        { path: 'c.ts', original: '', modified: '' },
+        { path: 'a.md', original: 'old', modified: 'new' },
+        { path: 'b.js', original: 'old', modified: 'new' },
+        { path: 'c.ts', original: 'old', modified: 'new' },
       ],
     })
 
     expect(store.resolvedCount).toBe(0)
-    store.acceptFile('a.md')
+    store.decideRemainingChanges('accept', 'a.md')
     expect(store.resolvedCount).toBe(1)
-    store.rejectFile('c.ts')
+    store.decideRemainingChanges('reject', 'c.ts')
     expect(store.resolvedCount).toBe(2)
   })
 
   it('deactivate clears batch state', () => {
     const store = useDiffStore()
     store.activateBatch({
-      fileList: [{ path: 'a.md', original: '', modified: '' }],
+      fileList: [{ path: 'a.md', original: 'old', modified: 'new' }],
     })
 
     store.deactivate()
@@ -450,7 +450,7 @@ describe('diff store', () => {
 
     store.focusBatchFile('b.js')
     expect(store.viewMode).toBe('diff')
-    expect(store.chunkCount).toBe(0)
+    expect(store.chunkCount).toBe(1)
     expect(store.currentChunk).toBe(0)
   })
 })

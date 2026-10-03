@@ -2,182 +2,76 @@
   <div
     class="diff-view flex-1 min-w-0 flex bg-surface relative overflow-hidden"
     :style="wrapperStyle"
+    @keydown.capture="onKeydown"
   >
     <div ref="viewHost" class="flex-1 min-w-0 h-full" :class="hostClass"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { EditorView } from '@codemirror/view'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { editorTypographyVars } from '../../../shared/fonts.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
-import {
-  createUnifiedDiffView,
-  createSplitDiffView,
-  createReadOnlyView,
-  getUnifiedChunks,
-  getSplitChunks,
-  resolvedDiffContent,
-} from '../../codemirror/merge.js'
+import { createReviewView } from '../../codemirror/reviewView.js'
 
 const diff = useDiffStore()
 const settings = useSettingsStore()
 const editorUI = useEditorUIStore()
-const resultContent = computed(() => diff.decision?.content ?? (
-  diff.isBatchFileFocused
-    ? diff.files.find(file => file.path === diff.focusedFile)?.modified ?? diff.modifiedContent
-    : diff.modifiedContent
-))
-
-const emit = defineEmits(['accept', 'reject'])
-
 const viewHost = ref(null)
-let currentView = null
-let currentType = null // 'unified' | 'split' | 'readonly'
+let projection = null
 
-const wrapperStyle = computed(() => {
-  return editorTypographyVars({
-    fontSize: settings.editorFontSize,
-    zoom: editorUI.zoomLevel / 100,
-    fontKey: settings.editorFontFamily,
-    dark: settings.isDarkTheme,
-  })
-})
+const wrapperStyle = computed(() => editorTypographyVars({
+  fontSize: settings.editorFontSize,
+  zoom: editorUI.zoomLevel / 100,
+  fontKey: settings.editorFontFamily,
+  dark: settings.isDarkTheme,
+}))
+const hostClass = computed(() => diff.viewMode !== 'diff' ? 'diff-readonly'
+  : diff.layout === 'split' ? 'side-by-side-merge' : '')
 
-const hostClass = computed(() => {
-  if (diff.viewMode === 'diff' && diff.layout === 'split') return 'side-by-side-merge'
-  if (diff.viewMode !== 'diff') return 'diff-readonly'
-  return ''
-})
-
-function destroyCurrent() {
-  if (!currentView) return
-  currentView.destroy()
-  currentView = null
-  currentType = null
-  if (viewHost.value) viewHost.value.innerHTML = ''
+function destroyCurrent(save = true) {
+  projection?.destroy(save)
+  projection = null
 }
 
 function buildView() {
-  destroyCurrent()
-  if (!viewHost.value || !diff.active) return
+  destroyCurrent(false)
+  const session = diff.currentReview
+  if (!viewHost.value || !diff.active || !session) return
+  projection = createReviewView({
+    parent: viewHost.value,
+    session,
+    layout: diff.layout,
+    mode: diff.viewMode,
+    locked: Boolean(diff.decision || diff.finishing || diff.reviewMeta?.type === 'history'),
+    content: diff.decision?.content,
+    collapse: diff.reviewMeta?.type === 'inline-ai',
+    onChange: (base, result, action) => diff.recordReviewChange(session, base, result, action),
+  })
+  diff.setChunkCount(session.pending)
+}
 
-  const { viewMode, layout, originalContent } = diff
-  const modifiedContent = resultContent.value
-
-  if (viewMode === 'original') {
-    currentView = createReadOnlyView({
-      parent: viewHost.value,
-      content: originalContent,
-    })
-    currentType = 'readonly'
-  } else if (viewMode === 'result') {
-    currentView = createReadOnlyView({
-      parent: viewHost.value,
-      content: modifiedContent,
-    })
-    currentType = 'readonly'
-  } else if (layout === 'unified') {
-    const collapse = diff.reviewMeta?.type === 'inline-ai'
-    currentView = createUnifiedDiffView({
-      parent: viewHost.value,
-      originalContent,
-      modifiedContent,
-      collapse,
-      editable: !diff.decision,
-      mergeControls: !diff.decision,
-      onChunkCountChange: (count) => diff.setChunkCount(count),
-      onChange: content => {
-        if (diff.isBatchFileFocused) diff.updateBatchContent(diff.focusedFile, content)
-      },
-      onAllResolved: () => {
-        emit('accept', getResolvedContent())
-      },
-    })
-    currentType = 'unified'
-    if (collapse) {
-      nextTick(() => {
-        const chunks = getUnifiedChunks(currentView)
-        if (chunks.length > 0) {
-          currentView.dispatch({
-            effects: EditorView.scrollIntoView(chunks[0].fromA, { y: 'center' }),
-          })
-        }
-      })
-    }
-  } else {
-    const collapse = diff.reviewMeta?.type === 'inline-ai'
-    currentView = createSplitDiffView({
-      parent: viewHost.value,
-      originalContent,
-      modifiedContent,
-      collapse,
-      editable: !diff.decision,
-      mergeControls: !diff.decision,
-      onChunkCountChange: (count) => diff.setChunkCount(count),
-      onChange: content => {
-        if (diff.isBatchFileFocused) diff.updateBatchContent(diff.focusedFile, content)
-      },
-      onAllResolved: () => {
-        emit('accept', getResolvedContent())
-      },
-    })
-    currentType = 'split'
+function onKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.isComposing) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) diff.redoReview()
+    else diff.undoReview()
   }
 }
 
-function scrollToChunk(index) {
-  if (!currentView) return
-
-  if (currentType === 'unified') {
-    const chunks = getUnifiedChunks(currentView)
-    if (!chunks[index]) return
-    const chunk = chunks[index]
-    currentView.dispatch({
-      effects: EditorView.scrollIntoView(chunk.fromA, { y: 'center' }),
-    })
-  } else if (currentType === 'split') {
-    const chunks = getSplitChunks(currentView)
-    if (!chunks[index]) return
-    const chunk = chunks[index]
-    currentView.b.dispatch({
-      effects: EditorView.scrollIntoView(chunk.fromB, { y: 'center' }),
-    })
-    currentView.a.dispatch({
-      effects: EditorView.scrollIntoView(chunk.fromA, { y: 'center' }),
-    })
-  }
-}
-
-function getResolvedContent() {
-  if (!currentView) return resultContent.value
-  const doc = currentType === 'unified' ? currentView.state.doc
-    : currentType === 'split' ? currentView.b.state.doc : null
-  if (!doc) return resultContent.value
-  return resolvedDiffContent(doc, resultContent.value, diff.originalContent)
-}
-
+function scrollToChunk(index) { projection?.scrollToChunk(index) }
+function getResolvedContent() { return diff.decision?.content ?? diff.currentReview?.result ?? diff.modifiedContent }
 defineExpose({ scrollToChunk, getResolvedContent })
 
-watch(() => [diff.viewMode, diff.layout, diff.originalContent, diff.modifiedContent, diff.decision], () => {
-  if (diff.active) nextTick(buildView)
-})
-
-watch(() => diff.active, (active) => {
-  if (active) nextTick(buildView)
-  else destroyCurrent()
-})
-
-onMounted(() => {
-  if (diff.active) buildView()
-})
-
-onUnmounted(() => {
-  destroyCurrent()
-})
+const viewInputs = () => [diff.active, diff.currentReview, diff.currentReview?.revision, diff.viewMode, diff.layout, diff.decision, diff.finishing]
+// Capture before Vue changes the host's layout class and its scroll geometry.
+watch(viewInputs, () => projection?.savePosition(), { flush: 'pre' })
+watch(viewInputs, buildView, { flush: 'post' })
+onMounted(buildView)
+onBeforeUnmount(() => destroyCurrent())
 </script>
 
 <style scoped>
