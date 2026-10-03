@@ -117,7 +117,7 @@ describe('lineIndicatorExtensions', () => {
 describe('editorInputAttributesExtension', () => {
   it('disables writing suggestions and grammar tooling while toggling spellcheck', () => {
     const on = makeView(editorInputAttributesExtension(true))
-    expect(on.contentDOM.getAttribute('spellcheck')).toBe('true')
+    expect(on.contentDOM.getAttribute('spellcheck')).toBe('false')
     expect(on.contentDOM.getAttribute('autocorrect')).toBe('off')
     expect(on.contentDOM.getAttribute('autocomplete')).toBe('off')
     expect(on.contentDOM.getAttribute('writingsuggestions')).toBe('false')
@@ -156,7 +156,7 @@ describe('createEditor', () => {
       initialSettings: { wordWrap: false, spellCheck: true, lineNumbers: true, isDark: true },
     })
     expect(view.contentDOM.classList.contains('cm-lineWrapping')).toBe(false)
-    expect(view.contentDOM.getAttribute('spellcheck')).toBe('true')
+    expect(view.contentDOM.getAttribute('spellcheck')).toBe('false')
     expect(view.dom.querySelector('.cm-lineNumbers')).toBeTruthy()
     expect(view.state.facet(EditorView.darkTheme)).toBe(true)
   })

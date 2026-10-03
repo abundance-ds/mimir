@@ -94,6 +94,7 @@
 
     <div
       ref="editorHost"
+      @contextmenu="openSpellingMenu" @keydown="spellingMenuKeydown"
       data-today-editor
       :aria-busy="loading || historyLoading"
       class="min-h-0 w-full flex-1 overflow-hidden bg-surface"
@@ -173,7 +174,8 @@
             >
               {{ navigationDateLabel }}
             </time>
-          </template>
+          
+</template>
         </DatePicker>
         <button
           type="button"
@@ -186,10 +188,19 @@
         </button>
       </nav>
     </PaneBand>
+    <EditorContextMenu :visible="spellingMenu.show" :x="spellingMenu.x" :y="spellingMenu.y"
+      :position="spellingMenu.position" :has-selection="spellingMenu.hasSelection" :view="editorView"
+      :spellcheck-enabled="spellingSettings.editorSpellCheck" :ai-enabled="false" :allow-comments="false"
+      @close="spellingMenu.show = false" />
   </section>
 </template>
 
 <script setup>
+import EditorContextMenu from '../../editor/components/workspace/EditorContextMenu.vue'
+import { useSpellingContextMenu } from '../../editor/composables/useSpellingContextMenu.js'
+import { spellingExtension } from '../../editor/codemirror/spelling.js'
+import { useSettingsStore } from '../../stores/settings.js'
+
 import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
 
 import {
@@ -265,6 +276,13 @@ let noticeTimer = null
 let historyRequest = 0
 let disposed = false
 let editorView = null
+const spellingSettings = useSettingsStore()
+const spellingCompartment = new Compartment()
+const { menu: spellingMenu, open: openSpellingMenu, keydown: spellingMenuKeydown } = useSpellingContextMenu(() => editorView)
+watch(() => spellingSettings.editorSpellCheck, enabled => {
+  editorView?.dispatch({ effects: spellingCompartment.reconfigure(enabled ? spellingExtension() : []) })
+})
+
 let applyingExternalText = false
 const readOnlyCompartment = new Compartment()
 const contextCompartment = new Compartment()
@@ -420,6 +438,7 @@ function createMarkdownEditor() {
   const state = EditorState.create({
     doc: text.value,
     extensions: [
+      spellingCompartment.of(spellingSettings.editorSpellCheck ? spellingExtension() : []),
       EditorView.lineWrapping,
       contextCompartment.of(editorContextExtensions()),
       readOnlyCompartment.of(readOnlyExtensions(true)),
@@ -497,6 +516,7 @@ function editorContextExtensions() {
       'aria-label': label,
       spellcheck: 'false',
       autocomplete: 'off',
+        writingsuggestions: 'false',
       autocorrect: 'off',
       autocapitalize: 'off',
     }),

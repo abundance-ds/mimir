@@ -2,9 +2,9 @@
   <Teleport to="body">
     <template v-if="visible">
       <div class="ctx-overlay" @click="$emit('close')" @contextmenu.prevent="$emit('close')"></div>
-      <div class="ctx-menu" :style="menuStyle" @click.stop>
+      <div ref="menuElement" class="ctx-menu" role="menu" aria-label="Text actions" :style="menuStyle" @click.stop @keydown="onMenuKeydown">
         <template v-if="suggestions.length > 0">
-          <button
+          <button role="menuitem"
             v-for="s in suggestions.slice(0, 5)"
             :key="s"
             class="ctx-item spell-item"
@@ -14,16 +14,16 @@
         </template>
 
         <template v-if="hasSelection">
-          <button class="ctx-item" @click="cut">Cut <span class="ctx-shortcut">⌘X</span></button>
-          <button class="ctx-item" @click="copy">Copy <span class="ctx-shortcut">⌘C</span></button>
-          <button class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
+          <button role="menuitem" class="ctx-item" @click="cut">Cut <span class="ctx-shortcut">⌘X</span></button>
+          <button role="menuitem" class="ctx-item" @click="copy">Copy <span class="ctx-shortcut">⌘C</span></button>
+          <button role="menuitem" class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
           <div class="ctx-divider" />
-          <button class="ctx-item" @click="addComment">Add Comment <span class="ctx-shortcut">⇧⌘M</span></button>
-          <button v-if="aiEnabled" class="ctx-item ctx-ai" @click="askAI">Ask AI <span class="ctx-shortcut">⌘K</span></button>
+          <button role="menuitem" v-if="allowComments" class="ctx-item" @click="addComment">Add Comment <span class="ctx-shortcut">⇧⌘M</span></button>
+          <button role="menuitem" v-if="aiEnabled" class="ctx-item ctx-ai" @click="askAI">Ask AI <span class="ctx-shortcut">⌘K</span></button>
         </template>
         <template v-else>
-          <button class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
-          <button class="ctx-item" @click="selectAll">Select All <span class="ctx-shortcut">⌘A</span></button>
+          <button role="menuitem" class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
+          <button role="menuitem" class="ctx-item" @click="selectAll">Select All <span class="ctx-shortcut">⌘A</span></button>
         </template>
       </div>
     </template>
@@ -31,9 +31,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-
-const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
+import { nextTick, ref, toRaw, watch } from 'vue'
+import { spellingSuggestions } from '../../../services/spelling.js'
+import { spellingWordAt } from '../../codemirror/spelling.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -43,83 +43,89 @@ const props = defineProps({
   view: { type: Object, default: null },
   spellcheckEnabled: { type: Boolean, default: false },
   aiEnabled: { type: Boolean, default: true },
+  allowComments: { type: Boolean, default: true },
+  position: { type: Number, default: null },
 })
 
 const emit = defineEmits(['close', 'comment', 'ask-agent'])
 
 const suggestions = ref([])
-let wordFrom = 0
-let wordTo = 0
-
+let target = null
+let request = 0
+const menuElement = ref(null)
 const menuStyle = ref({})
 
-watch(() => props.visible, async (show) => {
-  if (!show) {
-    suggestions.value = []
-    return
-  }
-
+watch(() => [props.visible, props.x, props.y, props.position, props.view, props.spellcheckEnabled], async () => {
+  const generation = ++request
+  suggestions.value = []
+  target = null
+  if (!props.visible) return
   const menuW = 200, menuH = props.hasSelection ? 240 : 100
-  const x = Math.min(props.x, window.innerWidth - menuW - 8)
-  const y = Math.min(props.y, window.innerHeight - menuH - 8)
+  const x = Math.max(0, Math.min(props.x, window.innerWidth - menuW - 8))
+  const y = Math.max(0, Math.min(props.y, window.innerHeight - menuH - 8))
   menuStyle.value = { position: 'fixed', left: x + 'px', top: y + 'px' }
+  await nextTick()
+  if (generation !== request) return
+  menuElement.value?.querySelector('button')?.focus({ preventScroll: true })
 
-  if (props.spellcheckEnabled && props.view && isTauri) {
-    const pos = props.view.posAtCoords({ x: props.x, y: props.y })
-    if (pos !== null) {
-      const word = getWordAt(props.view.state, pos)
-      if (word) {
-        wordFrom = word.from
-        wordTo = word.to
-        try {
-          const { invoke } = await import('@tauri-apps/api/core')
-          const result = await invoke('spell_suggest', { word: word.text })
-          if (props.visible) {
-            suggestions.value = result
-          }
-        } catch { /* non-macOS or invoke error */ }
-      }
+  if (!props.spellcheckEnabled || !props.view) return
+  const view = toRaw(props.view)
+  const doc = view.state.doc
+  const pos = props.position ?? view.posAtCoords({ x: props.x, y: props.y })
+  if (pos === null) return
+  const word = spellingWordAt(view.state, pos)
+  if (!word) return
+  try {
+    const result = await spellingSuggestions(word.text)
+    if (props.visible && generation === request && toRaw(props.view) === view && view.state.doc === doc) {
+      target = { ...word, doc, view }
+      suggestions.value = result
+      await nextTick()
+      // Suggestions can increase the menu height after the first paint.
+      const height = menuElement.value?.getBoundingClientRect().height || menuH
+      menuStyle.value.top = Math.max(0, Math.min(props.y, window.innerHeight - height - 8)) + 'px'
     }
+  } catch { /* A failed system lookup must not disable the other text actions. */ }
+}, { immediate: true })
+
+function applySuggestion(text) {
+  if (target && toRaw(props.view) === target.view && !target.view.state.readOnly && target.view.state.doc === target.doc) {
+    target.view.dispatch({ changes: { from: target.from, to: target.to, insert: text }, userEvent: 'input.spelling' })
+    target.view.focus()
   }
-})
-
-function getWordAt(state, pos) {
-  const line = state.doc.lineAt(pos)
-  const text = line.text
-  const col = pos - line.from
-
-  let start = col
-  while (start > 0 && /[\wÀ-ɏ'-]/.test(text[start - 1])) start--
-  let end = col
-  while (end < text.length && /[\wÀ-ɏ'-]/.test(text[end])) end++
-
-  if (start === end) return null
-  return {
-    text: text.slice(start, end),
-    from: line.from + start,
-    to: line.from + end,
-  }
-}
-
-function applySuggestion(s) {
-  if (!props.view) return
-  props.view.dispatch({
-    changes: { from: wordFrom, to: wordTo, insert: s },
-  })
   emit('close')
 }
 
+function onMenuKeydown(event) {
+  const buttons = [...(menuElement.value?.querySelectorAll('button') || [])]
+  const current = buttons.indexOf(document.activeElement)
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    toRaw(props.view)?.focus()
+    emit('close')
+  } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault()
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+    buttons[index]?.focus()
+  } else if (event.key === 'Tab') emit('close')
+}
+
 function cut() {
+  toRaw(props.view)?.focus()
   document.execCommand('cut')
   emit('close')
 }
 
 function copy() {
+  toRaw(props.view)?.focus()
   document.execCommand('copy')
   emit('close')
 }
 
 function paste() {
+  toRaw(props.view)?.focus()
   document.execCommand('paste')
   emit('close')
 }
@@ -136,7 +142,7 @@ function askAI() {
 
 function selectAll() {
   if (props.view) {
-    props.view.dispatch({
+    toRaw(props.view).dispatch({
       selection: { anchor: 0, head: props.view.state.doc.length },
     })
   }

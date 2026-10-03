@@ -1,6 +1,9 @@
 import { createApp } from 'vue'
 import { createPinia } from './stores/index.js'
 import './shared/styles/app.css'
+import { installTextInputPolicy } from './shared/textInputPolicy.js'
+
+installTextInputPolicy()
 
 const params = new URLSearchParams(window.location.search)
 const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || ''

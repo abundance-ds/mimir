@@ -1,3 +1,5 @@
+import { spellingExtension } from './spelling.js'
+import { manualTextInputAttributes } from '../../shared/textInputPolicy.js'
 import { editorKeyBinding } from '../../shared/shortcuts.js'
 import { EditorState, Compartment, Prec } from '@codemirror/state'
 import { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, lineNumbers } from '@codemirror/view'
@@ -196,22 +198,14 @@ export function lineIndicatorExtensions(showLineNumbers = false) {
     : highlightActiveLine()
 }
 
-const editorInputAttributes = {
-  autocorrect: 'off',
-  autocapitalize: 'off',
-  autocomplete: 'off',
-  writingsuggestions: 'false',
-  translate: 'no',
-  'data-gramm': 'false',
-  'data-gramm_editor': 'false',
-  'data-enable-grammarly': 'false',
-}
-
 export function editorInputAttributesExtension(spellcheck = false) {
-  return EditorView.contentAttributes.of({
-    ...editorInputAttributes,
-    spellcheck: spellcheck ? 'true' : 'false',
-  })
+  return [EditorView.contentAttributes.of({
+    ...manualTextInputAttributes,
+    translate: 'no',
+    'data-gramm': 'false',
+    'data-gramm_editor': 'false',
+    'data-enable-grammarly': 'false',
+  }), spellcheck ? spellingExtension() : []]
 }
 
 // Remap Markdown node tags: HeaderMark gets the heading colour, CodeText

@@ -998,6 +998,9 @@ pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
             sdk_js_content().as_bytes().to_vec(),
         );
     }
+    if path == "_sdk/text-input.js" || path.ends_with("/_sdk/text-input.js") {
+        return response(200, "application/javascript", include_str!("../../src/shared/textInputPolicy.js").as_bytes().to_vec());
+    }
     if path == "_sdk/theme.css" || path.ends_with("/_sdk/theme.css") {
         return response(200, "text/css", theme_css_content().as_bytes().to_vec());
     }
@@ -1067,7 +1070,7 @@ fn response(
 }
 
 fn inject_sdk(html: &str) -> String {
-    let sdk = r#"<link rel="stylesheet" href="/_sdk/theme.css"><script src="/_sdk/mimir-sdk.js"></script>"#;
+    let sdk = r#"<link rel="stylesheet" href="/_sdk/theme.css"><script src="/_sdk/mimir-sdk.js"></script><script type="module">import { installTextInputPolicy } from "/_sdk/text-input.js"; installTextInputPolicy();</script>"#;
     if let Some(position) = html.find("</head>") {
         format!("{}{}{}", &html[..position], sdk, &html[position..])
     } else {

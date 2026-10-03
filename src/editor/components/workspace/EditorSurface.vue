@@ -4,12 +4,13 @@
     :class="showBorder ? 'border-r border-rule-light' : ''"
     :style="wrapperStyle"
   >
-    <div ref="cmHost" class="flex-1 min-w-0" @contextmenu.prevent="onContextMenu"></div>
+    <div ref="cmHost" class="flex-1 min-w-0" @contextmenu.prevent="onContextMenu" @keydown="onContextMenuKeydown"></div>
     <EditorContextMenu
       :visible="ctxMenu.show"
       :x="ctxMenu.x"
       :y="ctxMenu.y"
       :has-selection="ctxMenu.hasSelection"
+      :position="ctxMenu.position"
       :view="view"
       :spellcheck-enabled="settings.editorSpellCheck"
       :ai-enabled="inlineAIEnabled"
@@ -31,6 +32,7 @@ import { useSettingsStore } from '../../../stores/settings.js'
 import { editorTypographyVars } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
 import EditorContextMenu from './EditorContextMenu.vue'
+import { useSpellingContextMenu } from '../../composables/useSpellingContextMenu.js'
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -68,15 +70,7 @@ let activeLineEnding = lineEndingFor(props.content)
 const featureCompartment = new Compartment()
 const fileStates = new Map()
 
-const ctxMenu = reactive({ show: false, x: 0, y: 0, hasSelection: false })
-function onContextMenu(e) {
-  if (!view.value) return
-  const sel = view.value.state.selection.main
-  ctxMenu.hasSelection = sel.from !== sel.to
-  ctxMenu.x = e.clientX
-  ctxMenu.y = e.clientY
-  ctxMenu.show = true
-}
+const { menu: ctxMenu, open: onContextMenu, keydown: onContextMenuKeydown } = useSpellingContextMenu(() => view.value)
 
 defineExpose({
   focus() {

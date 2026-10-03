@@ -16,16 +16,26 @@
     <p v-if="(canvasStyle || !showTools) && linkError" role="status" class="text-ink-3 text-xs">{{ linkError }}</p>
     <div
       ref="host"
+      @contextmenu="openSpellingMenu" @keydown="spellingMenuKeydown"
       data-graph-markdown-editor
       class="graph-markdown-editor"
       :class="{ 'graph-markdown-editor-unframed': !framed }"
       :style="{ '--graph-editor-min-height': `${minHeight}px` }"
       :aria-busy="disabled"
     />
+    <EditorContextMenu :visible="spellingMenu.show" :x="spellingMenu.x" :y="spellingMenu.y"
+      :position="spellingMenu.position" :has-selection="spellingMenu.hasSelection" :view="view"
+      :spellcheck-enabled="spellingSettings.editorSpellCheck" :ai-enabled="false" :allow-comments="false"
+      @close="spellingMenu.show = false" />
   </div>
+
 </template>
 
 <script setup>
+import EditorContextMenu from '../../../editor/components/workspace/EditorContextMenu.vue'
+import { useSpellingContextMenu } from '../../../editor/composables/useSpellingContextMenu.js'
+import { spellingExtension } from '../../../editor/codemirror/spelling.js'
+
 import {
   computed,
   onMounted,
@@ -86,16 +96,26 @@ const settings = props.canvasStyle ? useSettingsStore() : null
 const canvasTypography = computed(() => settings ? editorTypographyVars({ fontSize: settings.editorFontSize, fontKey: settings.editorFontFamily, dark: settings.isDarkTheme }) : null)
 const editableCompartment = new Compartment()
 let view = null
+const spellingSettings = useSettingsStore()
+const spellingCompartment = new Compartment()
+const { menu: spellingMenu, open: openSpellingMenu, keydown: spellingMenuKeydown } = useSpellingContextMenu(() => view)
+watch(() => spellingSettings.editorSpellCheck, enabled => {
+  view?.dispatch({ effects: spellingCompartment.reconfigure(enabled ? spellingExtension() : []) })
+})
+
 let applyingExternal = false
 
 onMounted(() => {
   const config = {
     doc: props.modelValue,
     extensions: [
+      spellingCompartment.of(spellingSettings.editorSpellCheck ? spellingExtension() : []),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({
         'aria-label': props.ariaLabel,
-        spellcheck: 'true',
+        spellcheck: 'false',
+        autocomplete: 'off',
+        writingsuggestions: 'false',
         autocorrect: 'off',
         autocapitalize: 'off',
         'data-graph-control': props.controlId,

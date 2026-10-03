@@ -1,13 +1,24 @@
 <template>
   <div
     ref="host"
+      @contextmenu="openSpellingMenu" @keydown="spellingMenuKeydown"
     data-scribe-markdown-editor
     class="scribe-markdown-editor"
     :aria-busy="disabled"
-  />
+  >
+    <EditorContextMenu :visible="spellingMenu.show" :x="spellingMenu.x" :y="spellingMenu.y"
+      :position="spellingMenu.position" :has-selection="spellingMenu.hasSelection" :view="view"
+      :spellcheck-enabled="spellingSettings.editorSpellCheck" :ai-enabled="false" :allow-comments="false"
+      @close="spellingMenu.show = false" />
+  </div>
 </template>
 
 <script setup>
+import EditorContextMenu from '../../../editor/components/workspace/EditorContextMenu.vue'
+import { useSpellingContextMenu } from '../../../editor/composables/useSpellingContextMenu.js'
+import { spellingExtension } from '../../../editor/codemirror/spelling.js'
+import { useSettingsStore } from '../../../stores/settings.js'
+
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder as editorPlaceholder } from '@codemirror/view'
@@ -38,6 +49,13 @@ const emit = defineEmits(['update:modelValue', 'change', 'save'])
 const host = ref(null)
 const editableCompartment = new Compartment()
 let view = null
+const spellingSettings = useSettingsStore()
+const spellingCompartment = new Compartment()
+const { menu: spellingMenu, open: openSpellingMenu, keydown: spellingMenuKeydown } = useSpellingContextMenu(() => view)
+watch(() => spellingSettings.editorSpellCheck, enabled => {
+  view?.dispatch({ effects: spellingCompartment.reconfigure(enabled ? spellingExtension() : []) })
+})
+
 let applyingExternal = false
 
 const highlightStyle = HighlightStyle.define([
@@ -90,11 +108,13 @@ onMounted(() => {
   const state = EditorState.create({
     doc: props.modelValue,
     extensions: [
+      spellingCompartment.of(spellingSettings.editorSpellCheck ? spellingExtension() : []),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({
         'aria-label': props.ariaLabel,
         spellcheck: 'false',
         autocomplete: 'off',
+        writingsuggestions: 'false',
         autocorrect: 'off',
         autocapitalize: 'off',
       }),
