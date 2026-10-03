@@ -53,7 +53,7 @@ reaches 7:1 on the four base surfaces; structural rules reach 3.5:1. Row rules
 remain quieter. Teal selection fills, code blocks, and diff fills have explicit
 colours. The terminal uses a bright ANSI palette and a 7:1 text contrast floor,
 which updates when the theme changes. Fonts, geometry, border widths, and link
-styles keep their existing treatment. This theme adds no control outlines.
+styles keep their existing treatment.
 
 ## Controls
 

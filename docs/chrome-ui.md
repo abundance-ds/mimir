@@ -17,6 +17,8 @@ an installed-app check.
 - `PaneTab`, `PaneTabButton`, and `PaneTabClose` own tab typography, shape,
   selected/hover/focus states, separators, and the close glyph and hit area.
   Main and Editor use these same parts. Neither defines a local tab skin.
+  In Dark Contrast, inactive tabs have an inset one-pixel outline in the rule
+  colour. It replaces the short separator and does not change tab size.
   Preview italics and document save indicators retain their meaning.
 - `PaneRestoreControls` and `PaneSizeControls` render both content headers'
   layout actions. `paneControls.js` owns the six-state placement policy,

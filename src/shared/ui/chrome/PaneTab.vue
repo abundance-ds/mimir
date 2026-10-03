@@ -41,6 +41,15 @@ defineProps({ selected: Boolean, label: { type: String, default: '' } })
   opacity: 0;
 }
 
+:root[data-theme="slate-contrast"] .pane-tab:not(.selected) {
+  outline: 1px solid var(--color-rule);
+  outline-offset: -1px;
+}
+
+:root[data-theme="slate-contrast"] .pane-tab:not(.selected)::after {
+  opacity: 0;
+}
+
 .pane-tab button:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
