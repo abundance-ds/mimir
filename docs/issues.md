@@ -5,6 +5,11 @@ task scope.
 
 ## Open
 
+- Release 0.4.1: CI, published-file digests, source manifest, update feed,
+  macOS signature, and notarization checks passed. Installed-app launch,
+  relaunch, file save, terminal, permissions, Scribe, and managed Git checks
+  remain open. Follow [release smoke](building.md#release-smoke).
+
 - Workspace moves: native macOS checks remain open for the folder picker and
   a real Codex conversation resumed in a second folder. The sandbox blocks
   the local preview server and Chrome launch. Renderer tests and a native
