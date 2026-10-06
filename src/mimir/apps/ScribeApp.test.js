@@ -1116,7 +1116,9 @@ describe('ScribeApp', () => {
     })
     vi.mocked(loadMeeting).mockImplementation(async () => ({ ...complete }))
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
-    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: complete.summary }))
+    vi.mocked(loadMeetingTranscriptPage).mockImplementation(async () => (
+      transcriptPage({ summary: complete.summary })
+    ))
     vi.mocked(updateMeeting).mockImplementation(async (_, patch) => {
       Object.assign(complete, patch)
       return snapshot({ meetings: [{ ...complete }] })
@@ -1364,6 +1366,8 @@ describe('ScribeApp', () => {
       setProperties: { sourceSummaryHash: expect.stringMatching(/^[a-f0-9]{64}$/) },
     }))
     expect(updateMeeting).toHaveBeenCalledWith('m1', { summary: 'Reviewed replacement.' })
+    // A later transcript read must return the saved summary, as native I/O does.
+    await useMeetingsStore().refresh()
     // The summary watcher hashes through Web Crypto, beyond Vue's promise queue.
     await vi.waitFor(() => {
       expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Reviewed replacement.')
