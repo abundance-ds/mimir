@@ -36,6 +36,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'graph_create', 'graph_move_scope', 'graph_delete', 'graph_restore', 'graph_migration_report',
   'graph_context', 'graph_events',
   'workspace_config_load', 'workspace_config_save', 'workspace_project_paths',
+  'workspace_agents_ensure',
   'workspace_project_file_resolve',
   // git
   'git_status', 'git_changes', 'git_file_diff', 'git_stage_file', 'git_unstage_file',

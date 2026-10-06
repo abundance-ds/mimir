@@ -5,10 +5,15 @@ task scope.
 
 ## Open
 
-- Workspace tests: three `workbenchControllers.test.js` assertions count the
-  new `set_smart_quotes` startup call as workspace I/O. Two `WorkbenchApp.test.js`
-  menu assertions read a Vue `v-if` comment node through `firstChild`. These five
-  failures remain outside the comment review change.
+- Workspace tests: two `WorkbenchApp.test.js` menu assertions read a Vue
+  `v-if` comment node through `firstChild`. These failures remain outside the
+  comment review change.
+
+- Project instructions: browser layout and native macOS checks remain open
+  for the default template editor and project creation/restoration. The
+  sandbox blocks the local preview server. Check Settings > CLI tools and
+  a disposable workspace in the native app; behavior belongs to
+  [agent-setup.md](agent-setup.md#project-instructions).
 
 - Review discussions: visual macOS checks and a real restart check of saved
   review records remain open. See

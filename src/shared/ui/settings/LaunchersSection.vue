@@ -136,6 +136,8 @@
       CLI presets saved. New launches use them immediately.
     </p>
 
+    <AgentInstructionsSettings />
+
     <footer
       v-if="dirty || saving"
       class="sticky -bottom-6 mt-4 flex items-center justify-between border-t border-rule bg-surface py-3"
@@ -173,6 +175,7 @@ import IconProviderOpenAI from '../../../shared/icons/IconProviderOpenAI.vue'
 import { useLaunchersStore } from '../../../stores/launchers.js'
 import { formatLauncherFlags, parseLauncherFlags } from './launcherFlags.js'
 import LauncherGroup from './LauncherGroup.vue'
+import AgentInstructionsSettings from './AgentInstructionsSettings.vue'
 
 const launchers = useLaunchersStore()
 const draft = ref([])

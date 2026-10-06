@@ -23,6 +23,30 @@ connection while preserving unrelated client configuration:
 A conflicting unrelated entry with the same name is an error. Resume uses the
 exact recorded session and launch policy, never an implicit “latest” session.
 
+## Project instructions
+
+After a local workspace opens, Mimir creates `AGENTS.md` at its root if the
+file is absent. Creation also runs for new workspaces and startup restoration,
+before automatic agent resume. Setup cancellation, workspace configuration
+reads, and Graph Project creation alone do not create instruction files.
+
+Settings stores the editable `agentsTemplate` in the editor snapshot. Its
+default comes from `src/shared/agents-starter.md`; blank or invalid settings
+use that default. Saving or resetting the template never changes existing
+project files. An existing empty `AGENTS.md` also prevents creation. Deleted
+files are created again on the next open, using the current template.
+
+`agent_instructions.rs` publishes complete contents without replacing an
+existing entry, including symbolic links. Write failures leave the workspace
+open and appear with other startup diagnostics. Generated files follow normal
+Project Git rules. Mimir does not create, migrate, or remove `CLAUDE.md` in
+user projects. Claude must support `AGENTS.md` directly; its own instruction
+selection rules still apply.
+
+The Settings control is `AgentInstructionsSettings.vue` under CLI tools;
+`useWorkspaceBootstrap.js` calls the native command through
+`services/agentInstructions.js` after workspace opening succeeds.
+
 ## Skills and packages
 
 Mimir installs four packaged skills into the Private scope from `skills/`:

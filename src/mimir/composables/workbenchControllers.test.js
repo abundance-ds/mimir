@@ -948,8 +948,10 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
-  it('creates an empty workspace folder and retains the complete workspace history', async () => {
+  it('creates a workspace with instructions and retains the complete workspace history', async () => {
     const settings = useSettingsStore()
+    await settings.load()
+    await nextTick()
     const workbench = useWorkbenchStore()
     const activities = useActivitiesStore()
     const workspaceFiles = {
@@ -1002,6 +1004,9 @@ describe('Workbench controllers', () => {
         initialize: false,
       })
       expect(workspaceFiles.openWorkspace).toHaveBeenCalledWith('/work/new-project')
+      expect(invoke).toHaveBeenCalledWith('workspace_agents_ensure', {
+        workspace: '/work/new-project', template: settings.agentsTemplate,
+      })
 
       for (let index = 0; index < 10; index++) {
         await controller.openWorkspace(`/work/project-${index}`)
@@ -1017,6 +1022,8 @@ describe('Workbench controllers', () => {
 
   it('checks project folders in one background batch and caches the result', async () => {
     const settings = useSettingsStore()
+    await settings.load()
+    await nextTick()
     const workbench = useWorkbenchStore()
     const activities = useActivitiesStore()
     settings.settingsReady = true
@@ -1068,6 +1075,8 @@ describe('Workbench controllers', () => {
 
   it('keeps Create workspace cancellation and failures recoverable', async () => {
     const settings = useSettingsStore()
+    await settings.load()
+    await nextTick()
     const workbench = useWorkbenchStore()
     const activities = useActivitiesStore()
     const diagnostic = ref('')

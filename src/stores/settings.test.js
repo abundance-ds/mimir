@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useSettingsStore } from './settings.js'
+import { AGENTS_STARTER } from '../shared/agentInstructions.js'
 
 // happy-dom localStorage is incomplete — provide a working mock
 const storage = new Map()
@@ -24,6 +25,26 @@ describe('settings store', () => {
   })
 
   // ── Defaults & Computed ──
+
+  it('persists the instruction template and restores invalid values to the default', async () => {
+    const store = useSettingsStore()
+    await store.load()
+    expect(store.agentsTemplate).toBe(AGENTS_STARTER)
+    store.set('agentsTemplate', '# Rules\nKeep exact whitespace.\n')
+    await store.flush()
+    setActivePinia(createPinia())
+    const restored = useSettingsStore()
+    await restored.load()
+    expect(restored.agentsTemplate).toBe('# Rules\nKeep exact whitespace.\n')
+    for (const value of [null, 42, {}, '', '  ']) {
+      restored.set('agentsTemplate', value)
+      expect(restored.agentsTemplate).toBe(AGENTS_STARTER)
+    }
+    await restored.flush()
+    storage.set('mimir:editor:settings:v1', JSON.stringify({ agentsTemplate: false }))
+    await restored.load({ force: true })
+    expect(restored.agentsTemplate).toBe(AGENTS_STARTER)
+  })
 
   it('initializes all settings with correct defaults', () => {
     const store = useSettingsStore()

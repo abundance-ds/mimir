@@ -62,6 +62,7 @@ fn complete_windowless_meeting_quit(
 
 pub mod activities;
 mod activity_commands;
+mod agent_instructions;
 pub mod agent_packages;
 mod ai;
 mod ai_keys;
@@ -73,10 +74,10 @@ mod ai_usage;
 mod apps;
 pub mod business_graph;
 pub mod chat;
+mod comment_text;
 mod connections;
 mod document_files;
 mod document_reviews;
-mod comment_text;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
@@ -740,9 +741,19 @@ fn apply_proposal_to_file(
 
     let modified = match comment_text::replace(&content, target, replacement) {
         Ok(Some(modified)) => modified,
-        Ok(None) => return ("accepted".into(), "Proposal was already applied".into(), None),
+        Ok(None) => {
+            return (
+                "accepted".into(),
+                "Proposal was already applied".into(),
+                None,
+            )
+        }
         Err(detail) => {
-            let status = if detail.contains("no longer found") { "stale" } else { "conflict" };
+            let status = if detail.contains("no longer found") {
+                "stale"
+            } else {
+                "conflict"
+            };
             return (status.into(), detail, None);
         }
     };
@@ -1247,6 +1258,7 @@ pub fn run() {
             create_dir,
             list_dir,
             workspace_config::workspace_config_load,
+            agent_instructions::workspace_agents_ensure,
             workspace_config::workspace_config_save,
             workspace_config::workspace_project_paths,
             workspace_config::workspace_project_file_resolve,

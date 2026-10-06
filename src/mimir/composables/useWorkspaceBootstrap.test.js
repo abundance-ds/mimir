@@ -18,10 +18,12 @@ const config = vi.hoisted(() => ({
 }))
 vi.mock('../../services/businessGraph.js', () => graphApi)
 vi.mock('../../services/workspaceConfig.js', () => config)
+vi.mock('../../services/agentInstructions.js', () => ({ ensureWorkspaceAgentInstructions: vi.fn() }))
 
 import { invoke } from '@tauri-apps/api/core'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { useWorkspaceBootstrap } from './useWorkspaceBootstrap.js'
+import { ensureWorkspaceAgentInstructions } from '../../services/agentInstructions.js'
 
 const teamRoot = '/home/me/.mimir/team-graph'
 const project = { id: 'vandage-engagement', kind: 'project', title: 'Vandage', scopeId: 'team:main' }
@@ -31,12 +33,14 @@ const controllers = []
 
 function setup(overrides = {}) {
   const settings = {
+    agentsTemplate: 'Custom project rules\n',
     recentWorkspaceFolders: [],
     set: vi.fn((key, value) => { settings[key] = value }),
   }
   const workspaceFiles = {
     workspacePath: '/old',
     openWorkspace: vi.fn(async path => { workspaceFiles.workspacePath = path }),
+    refresh: vi.fn(async () => ({ added: 1 })),
   }
   const editorFiles = { currentFile: null, setWorkspaceScope: vi.fn(), refreshGraphDocuments: vi.fn(async () => {}) }
   const requestWorkspaceSetup = vi.fn(async () => ({ project: project.id, graphScope: 'team' }))
@@ -69,6 +73,7 @@ beforeEach(() => {
   config.loadWorkspaceConfig.mockResolvedValue(null)
   config.saveWorkspaceConfig.mockResolvedValue(savedConfig)
   config.cachedWorkspaceConfig.mockReturnValue(savedConfig)
+  vi.mocked(ensureWorkspaceAgentInstructions).mockResolvedValue({ created: false })
 })
 afterEach(() => {
   controllers.splice(0).forEach(bootstrap => bootstrap.dispose())
@@ -150,6 +155,7 @@ describe('workspace Graph hydration', () => {
     expect(await pending).toBe(false)
     expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
     expect(graphApi.openBusinessGraph.mock.calls).toEqual([['/old'], ['/new'], ['/old']])
+    expect(ensureWorkspaceAgentInstructions).not.toHaveBeenCalled()
     expect(graph.projectRoot).toBe('/old')
     expect(editorFiles.refreshGraphDocuments).toHaveBeenCalledOnce()
   })
@@ -195,6 +201,7 @@ describe('workspace Graph hydration', () => {
     expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
     expect(config.saveWorkspaceConfig).not.toHaveBeenCalled()
     expect(graphApi.listenForGraphChanges).not.toHaveBeenCalled()
+    expect(ensureWorkspaceAgentInstructions).not.toHaveBeenCalled()
     expect(editorFiles.refreshGraphDocuments).not.toHaveBeenCalled()
   })
 
@@ -212,5 +219,75 @@ describe('workspace Graph hydration', () => {
     expect(graph.status).toBeNull()
     expect(graphApi.listenForGraphChanges).not.toHaveBeenCalled()
     expect(editorFiles.refreshGraphDocuments).not.toHaveBeenCalled()
+  })
+})
+
+describe('workspace instruction creation', () => {
+  it.each([
+    ['open', {}],
+    ['create', { create: true }],
+    ['restore', { persist: false, activate: false }],
+  ])('creates missing instructions on %s and refreshes Files', async (_name, options) => {
+    vi.mocked(ensureWorkspaceAgentInstructions).mockResolvedValue({ created: true })
+    const { bootstrap, workspaceFiles } = setup()
+    expect(await bootstrap.openWorkspace('/new', { activate: false, ...options })).toBe(true)
+    expect(ensureWorkspaceAgentInstructions).toHaveBeenCalledExactlyOnceWith('/new', 'Custom project rules\n')
+    expect(workspaceFiles.refresh).toHaveBeenCalledOnce()
+    expect(workspaceFiles.openWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
+      ensureWorkspaceAgentInstructions.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('also creates instructions without Team configuration', async () => {
+    vi.mocked(invoke).mockResolvedValue(null)
+    const { bootstrap, requestWorkspaceSetup } = setup()
+    expect(await bootstrap.openWorkspace('/new', { create: true, activate: false })).toBe(true)
+    expect(requestWorkspaceSetup).not.toHaveBeenCalled()
+    expect(ensureWorkspaceAgentInstructions).toHaveBeenCalledWith('/new', 'Custom project rules\n')
+  })
+
+  it('does not refresh Files when instructions already exist', async () => {
+    const { bootstrap, workspaceFiles } = setup()
+    await bootstrap.openWorkspace('/new', { activate: false })
+    expect(workspaceFiles.refresh).not.toHaveBeenCalled()
+  })
+
+  it('keeps the project open and retains both Graph and instruction errors', async () => {
+    const { bootstrap, graph, diagnostic, workspaceFiles } = setup()
+    vi.spyOn(graph, 'start').mockRejectedValue(new Error('Graph unavailable'))
+    vi.mocked(ensureWorkspaceAgentInstructions).mockRejectedValue(new Error('Read-only folder'))
+    expect(await bootstrap.openWorkspace('/new', { activate: false })).toBe(true)
+    expect(workspaceFiles.workspacePath).toBe('/new')
+    expect(diagnostic.value).toContain('Graph unavailable')
+    expect(diagnostic.value).toContain('AGENTS.md could not be created: Read-only folder')
+  })
+
+  it('does not create instructions after file opening fails', async () => {
+    const { bootstrap, workspaceFiles } = setup()
+    workspaceFiles.openWorkspace.mockRejectedValue(new Error('Folder unavailable'))
+    expect(await bootstrap.openWorkspace('/new', { activate: false })).toBe(false)
+    expect(ensureWorkspaceAgentInstructions).not.toHaveBeenCalled()
+  })
+
+  it('does not create project instructions during configuration or browser previews', async () => {
+    const { bootstrap } = setup()
+    await bootstrap.configureWorkspace()
+    expect(ensureWorkspaceAgentInstructions).not.toHaveBeenCalled()
+    delete window.__TAURI_INTERNALS__
+    await bootstrap.openWorkspace('/new', { activate: false })
+    expect(ensureWorkspaceAgentInstructions).not.toHaveBeenCalled()
+  })
+
+  it.each(['dispose', 'switch'])('does not apply late instruction results after %s', async (action) => {
+    const { bootstrap, workspaceFiles } = setup()
+    let finish
+    vi.mocked(ensureWorkspaceAgentInstructions).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const pending = bootstrap.openWorkspace('/new', { activate: false })
+    await vi.waitFor(() => expect(ensureWorkspaceAgentInstructions).toHaveBeenCalled())
+    if (action === 'dispose') bootstrap.dispose()
+    else workspaceFiles.workspacePath = '/different'
+    finish({ created: true })
+    expect(await pending).toBe(false)
+    expect(workspaceFiles.refresh).not.toHaveBeenCalled()
   })
 })

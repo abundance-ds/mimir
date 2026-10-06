@@ -12,6 +12,7 @@ import {
   saveWorkspaceConfig,
 } from '../../services/workspaceConfig.js'
 import { workspacePathStatuses } from '../../services/workspaceAvailability.js'
+import { ensureWorkspaceAgentInstructions } from '../../services/agentInstructions.js'
 import {
   managedProjectStatus,
   setManagedProjectEnabled,
@@ -342,12 +343,14 @@ export function useWorkspaceBootstrap({
         mountedStatus: mountIntent.root === String(path || '').trim() ? mountIntent.status : null,
       })
       if (disposed) return false
+      const instructionsWarning = await prepareAgentInstructions(path)
+      if (disposed || normalizedWorkspacePath(workspaceFiles.workspacePath) !== normalizedWorkspacePath(path)) return false
       ensureCoreActivities(path)
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
       markWorkspaceAvailable(path)
       editorFiles.setWorkspaceScope?.(path, settings.recentWorkspaceFolders)
-      diagnostic.value = graphWarning
+      diagnostic.value = [graphWarning, instructionsWarning].filter(Boolean).join('\n')
       const workspaceView = rememberedWorkspaceView(path)
       const activityId = restorableActivityId(workspaceView)
       workbench.selectWorkspaceActivity(activityId)
@@ -369,6 +372,18 @@ export function useWorkspaceBootstrap({
       return false
     } finally {
       graphTransitionDepth -= 1
+    }
+  }
+
+  async function prepareAgentInstructions(path) {
+    if (!window.__TAURI_INTERNALS__) return ''
+    try {
+      const result = await ensureWorkspaceAgentInstructions(path, settings.agentsTemplate)
+      if (disposed || normalizedWorkspacePath(workspaceFiles.workspacePath) !== normalizedWorkspacePath(path) || !result?.created) return ''
+      await workspaceFiles.refresh()
+      return workspaceFiles.error ? `AGENTS.md was created, but Files could not refresh: ${workspaceFiles.error}` : ''
+    } catch (cause) {
+      return `AGENTS.md could not be created: ${errorMessage(cause)}`
     }
   }
 
