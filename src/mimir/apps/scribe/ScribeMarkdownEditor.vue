@@ -93,7 +93,7 @@ const editorTheme = EditorView.theme({
     padding: '16px 0 48px',
     caretColor: 'var(--color-accent)',
   },
-  '.cm-line': { padding: '0' },
+  '.cm-line': { padding: '0 2px' },
   '.cm-cursor': { borderLeftColor: 'var(--color-accent)' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: 'var(--selection) !important',
