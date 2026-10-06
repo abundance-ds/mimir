@@ -28,8 +28,7 @@ entry = "index.html"
 
 Modes require one key: `embedded`/`window` → `entry`, `terminal` → `preset`,
 `process` → `command`, `rust-helper` → `helper`, `action` → `actionTool`.
-Optional keys are `args`, `env`, `launchOnly`, and `tools`. Routine files
-refresh automatically. Reload edited apps in Settings → Apps.
+Optional keys: `args`, `env`, `launchOnly`, `tools`. Routine files refresh automatically.
 
 Add skills with `mimir skill add <dir> --private|--project|--team` and agents
 with `mimir agent add <dir> --private|--project|--team`. Use only the scoped

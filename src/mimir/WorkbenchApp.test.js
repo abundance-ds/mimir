@@ -604,7 +604,7 @@ describe('WorkbenchApp', () => {
     await flushPromises()
     const menu = document.querySelector('[role="dialog"][aria-label="Open views"]')
     expect([...menu.querySelectorAll('[role="option"]:not([data-menu-action])')]
-      .map(option => option.firstChild.textContent.trim())).toEqual(['Ledger', 'Routines', 'two', 'one', 'Files'])
+      .map(option => option.querySelector('span').textContent.trim())).toEqual(['Ledger', 'Routines', 'two', 'one', 'Files'])
     expect(workbench.openTabIds).toEqual(savedOrder)
     expect(editorScratchpad).not.toHaveBeenCalled()
     expect(appsApi.resolveAppLaunch).toHaveBeenCalledTimes(1)

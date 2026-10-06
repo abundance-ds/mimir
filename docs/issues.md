@@ -11,15 +11,9 @@ task scope.
   shell PTY check pass; they do not prove the installed Codex UI. Behavior is
   defined in [Workspace moves](activities.md#workspace-moves).
 
-- Sidebar resize: browser geometry and native macOS checks remain open for
-  120 px controls, drag collapse/reopen, and window-button clearance. The
-  sandbox blocks the Vite listener and Chrome launch. Renderer tests pass;
-  run `scripts/check-sidebar-geometry.mjs` and check the native app when those
-  surfaces are available.
-
-- Workspace tests: two `WorkbenchApp.test.js` menu assertions read a Vue
-  `v-if` comment node through `firstChild`. These failures remain outside the
-  comment review change.
+- Sidebar resize: native macOS checks remain open for 120 px controls,
+  drag collapse/reopen, and window-button clearance. Renderer tests and
+  `scripts/check-sidebar-geometry.mjs` pass; they do not prove native layout.
 
 - Project instructions: browser layout and native macOS checks remain open
   for the default template editor and project creation/restoration. The
@@ -43,9 +37,6 @@ task scope.
 - Code comments in `useBoardDrag.js` and `BusinessGraphApp.test.js` cite a
   `gotchas.md` anchor that does not exist; the constraint is a bullet under
   [UI and input](gotchas.md#ui-and-input).
-
-- Packaged skills: `skills/mimir-config/SKILL.md` has 227 words; limit in
-  `mimir_cli.rs` is 220. `packaged_skills_stay_lean` test fails.
 
 - Interactive sheets (deferred): Markdown tables lack cell editing and live
   formulas. Candidates: Jspreadsheet CE, Univer Sheets, Handsontable +
