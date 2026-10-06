@@ -141,7 +141,7 @@ export function useWorkspaceBootstrap({
     })
 
     for (const activity of activities.visibleActivities) {
-      if (!isCurrentProjectInterruptedAgent(activity, projectPath)) continue
+      if (!isCurrentProjectInterruptedAgent(activity, projectPath) || activityRuntime.movingActivityIds?.has(activity.id)) continue
       if (
         attemptedAutomaticResumeIds.has(activity.id)
         || queuedAutomaticResumeIds.has(activity.id)
@@ -171,7 +171,7 @@ export function useWorkspaceBootstrap({
 
       const current = activities.byId(item.activity.id)
       if (!current || !isCurrentProjectInterruptedAgent(current, item.projectPath)) continue
-      if (attemptedAutomaticResumeIds.has(current.id)) continue
+      if (attemptedAutomaticResumeIds.has(current.id) || activityRuntime.movingActivityIds?.has(current.id)) continue
       attemptedAutomaticResumeIds.add(current.id)
       automaticResumeWorkers += 1
       Promise.resolve(activityRuntime.resumePreset(item.preset, current, {

@@ -1360,6 +1360,7 @@ pub fn run() {
             activity_commands::activity_search_history,
             activity_commands::activity_spawn,
             activity_commands::activity_respawn,
+            activity_commands::activity_prepare_workspace_move,
             activity_commands::activity_snapshot,
             activity_commands::activity_terminal_attach,
             activity_commands::activity_terminal_checkpoint,

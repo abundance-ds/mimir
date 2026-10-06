@@ -4,6 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 let eventCallback = null
 vi.mock('../services/activities.js', () => ({
   clearActivity: vi.fn(),
+  activitySnapshot: vi.fn(),
+  prepareActivityWorkspaceMove: vi.fn(),
   closeActivity: vi.fn(),
   listActivities: vi.fn(),
   renameActivity: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock('../services/activities.js', () => ({
 
 import * as api from '../services/activities.js'
 import { useActivitiesStore } from './activities.js'
-import { exactResumeArguments, useActivityRuntimeStore } from './activityRuntime.js'
+import { codexWorkspaceArguments, exactResumeArguments, useActivityRuntimeStore } from './activityRuntime.js'
 import { useWorkbenchStore } from './workbench.js'
 
 const backendRecord = {
@@ -640,5 +642,122 @@ describe('activity runtime store', () => {
     expect(api.renameActivity).not.toHaveBeenCalled()
     expect(api.setActivityArchived).not.toHaveBeenCalled()
     expect(api.clearActivity).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('workspace moves', () => {
+  const preset = { id: 'review', kind: 'agent', agentId: 'codex', cwd: { mode: 'home' } }
+  const original = {
+    ...backendRecord,
+    source: { ...backendRecord.source, workspaceScope: 'global' },
+    session: { runId: 'old-run', cliSessionId: 'exact-thread', agentId: 'codex' },
+    launch: {
+      command: '/bin/codex', cwd: '/w',
+      args: ['-m', 'recorded-model', '--cd=/w', '-c', 'key="-Cvalue"', '--sandbox', 'workspace-write'],
+      env: { CUSTOM: 'preserved' },
+    },
+  }
+  const ended = { ...original, status: 'stopped', session: { ...original.session, exit: { reason: 'stopped' } } }
+  let runtime
+  beforeEach(async () => {
+    vi.resetAllMocks()
+    setActivePinia(createPinia())
+    api.listActivities.mockResolvedValue([original])
+    api.prepareActivityWorkspaceMove.mockResolvedValue(original)
+    api.activitySnapshot.mockResolvedValue({ record: ended, live: false })
+    api.resolveLauncher.mockResolvedValue({
+      agentId: 'codex', presetId: 'review', resumeStrategy: 'codex',
+      command: '/bin/codex', args: [], cwd: '/destination', env: {},
+    })
+    api.respawnActivity.mockImplementation(async (record, _size, cliSessionId) => ({
+      record: { ...record, status: 'idle', session: { runId: 'new-run', cliSessionId } }, live: true,
+    }))
+    runtime = useActivityRuntimeStore()
+    await runtime.initialize()
+  })
+  afterEach(async () => { await runtime.dispose(); vi.useRealTimers() })
+
+  it('stops the source, resumes its exact conversation, and keeps the destination on later resume', async () => {
+    const beforeStop = vi.fn(async () => true)
+    const moved = await runtime.moveToWorkspace(preset, original.id, '/destination', { beforeStop })
+    expect(api.resolveLauncher).toHaveBeenCalledWith({ ...preset, cwd: { mode: 'workspace' } }, '/destination')
+    expect(api.stopActivity).toHaveBeenCalledWith(original.id)
+    expect(api.stopActivity.mock.invocationCallOrder[0]).toBeGreaterThan(beforeStop.mock.invocationCallOrder[0])
+    expect(api.respawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: original.id, title: original.title, workspacePath: '/destination',
+      source: expect.objectContaining({ workspaceScope: 'workspace' }),
+      launch: expect.objectContaining({
+        cwd: '/destination',
+        args: ['resume', 'exact-thread', '-m', 'recorded-model', '-c', 'key="-Cvalue"', '--sandbox', 'workspace-write', '--cd', '/destination'],
+        env: expect.objectContaining({ CUSTOM: 'preserved', MIMIR_MCP_URL: expect.stringContaining('cwd=%2Fdestination') }),
+      }),
+    }), {}, 'exact-thread')
+    expect(useActivitiesStore().byId(original.id).workspacePath).toBe('/destination')
+    eventCallback({ type: 'exit', activityId: original.id, record: ended })
+    expect(useActivitiesStore().byId(original.id).workspacePath).toBe('/destination')
+    expect(useActivitiesStore().byId(original.id).session.runId).toBe('new-run')
+    expect(useWorkbenchStore().openTabIds).not.toContain(original.id)
+    await runtime.resumePreset(preset, { ...moved, status: 'stopped' })
+    expect(api.resolveLauncher).toHaveBeenLastCalledWith({ ...preset, cwd: { mode: 'workspace' } }, '/destination')
+  })
+
+  it('waits for native exit and prevents concurrent moves and resumes', async () => {
+    vi.useFakeTimers()
+    api.activitySnapshot.mockResolvedValueOnce({ record: original, live: true })
+      .mockResolvedValueOnce({ record: original, live: true })
+    const move = runtime.moveToWorkspace(preset, original.id, '/destination')
+    await expect(runtime.moveToWorkspace(preset, original.id, '/another')).rejects.toThrow('already')
+    await expect(runtime.resumePreset(preset, original)).rejects.toThrow('being moved')
+    await vi.advanceTimersByTimeAsync(49)
+    expect(api.respawnActivity).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await move
+    expect(api.respawnActivity).toHaveBeenCalledOnce()
+    expect(runtime.movingActivityIds.size).toBe(0)
+  })
+
+  it.each(['binding', 'launcher', 'cancel'])('leaves the process running when preparation fails or is cancelled: %s', async failure => {
+    if (failure === 'binding') api.prepareActivityWorkspaceMove.mockRejectedValue(new Error('No session ID'))
+    if (failure === 'launcher') api.resolveLauncher.mockRejectedValue(new Error('Missing executable'))
+    const move = runtime.moveToWorkspace(preset, original.id, '/destination', { beforeStop: async () => false })
+    if (failure === 'cancel') expect(await move).toBeNull()
+    else await expect(move).rejects.toThrow()
+    expect(api.stopActivity).not.toHaveBeenCalled()
+    expect(api.respawnActivity).not.toHaveBeenCalled()
+    expect(useActivitiesStore().byId(original.id).workspacePath).toBe('/w')
+    expect(runtime.movingActivityIds.size).toBe(0)
+  })
+
+  it('retains the stopped source workspace when spawning fails', async () => {
+    api.respawnActivity.mockRejectedValue(new Error('Spawn failed'))
+    await expect(runtime.moveToWorkspace(preset, original.id, '/destination')).rejects.toThrow('Spawn failed')
+    expect(useActivitiesStore().byId(original.id)).toMatchObject({
+      workspacePath: '/w', session: { cliSessionId: 'exact-thread' },
+      launch: { cwd: '/w' },
+    })
+    expect(runtime.movingActivityIds.size).toBe(0)
+  })
+
+  it('does not stop a replacement run after workspace setup', async () => {
+    api.activitySnapshot.mockResolvedValue({ record: { ...original, session: { runId: 'replacement' } }, live: true })
+    await expect(runtime.moveToWorkspace(preset, original.id, '/destination')).rejects.toThrow('changed')
+    expect(api.stopActivity).not.toHaveBeenCalled()
+  })
+
+  it('does not respawn when the source fails to stop', async () => {
+    vi.useFakeTimers()
+    api.activitySnapshot.mockResolvedValue({ record: original, live: true })
+    const result = runtime.moveToWorkspace(preset, original.id, '/destination').catch(error => error)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect((await result).message).toContain('did not stop')
+    expect(api.respawnActivity).not.toHaveBeenCalled()
+    expect(useActivitiesStore().byId(original.id).workspacePath).toBe('/w')
+  })
+
+  it('replaces long, short, and attached cwd flags without changing option values', () => {
+    expect(codexWorkspaceArguments(['resume', 'id', '-C', '/one', '-C/two', '--cd=/three', '--cd', '/four', '-c', '-C=value', '--add-dir', '/shared'], '/new')).toEqual([
+      'resume', 'id', '-c', '-C=value', '--add-dir', '/shared', '--cd', '/new',
+    ])
   })
 })

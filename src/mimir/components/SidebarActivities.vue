@@ -92,7 +92,7 @@ const props = defineProps({
   restoringIds: { type: Set, default: () => new Set() },
   rail: Boolean,
 })
-const emit = defineEmits(['select', 'close', 'rename', 'new', 'reorder'])
+const emit = defineEmits(['select', 'close', 'rename', 'new', 'reorder', 'moveWorkspace'])
 const rows = ref(null)
 const {
   context, renaming, draft, renameInput,

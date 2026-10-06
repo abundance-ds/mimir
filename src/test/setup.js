@@ -56,7 +56,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // shell_exec
   'shell_exec',
   // Activities and launcher presets
-  'activity_list', 'activity_search_history', 'activity_spawn', 'activity_respawn', 'activity_snapshot', 'activity_write',
+  'activity_list', 'activity_search_history', 'activity_spawn', 'activity_respawn', 'activity_prepare_workspace_move', 'activity_snapshot', 'activity_write',
   'activity_terminal_attach', 'activity_terminal_checkpoint', 'activity_terminal_release',
   'activity_resize', 'activity_stop', 'activity_close', 'activity_interrupt_all', 'activity_flush',
   'activity_rename', 'activity_provisional_title',

@@ -29,6 +29,7 @@
         @select-activity="selectActivity"
         @close-activity="closeMainTab"
         @rename-activity="renameActivity"
+        @move-activity-workspace="activityWorkspaceMove.show"
         @reorder-activities="workbench.reorderTabs"
         @new-activity="openQuickOpen('tabs')"
         :meeting-capture="meetingCapture"
@@ -55,7 +56,7 @@
         :title="activityTitle"
         :meta="activityMeta"
       >
-        <template v-if="settings.showMainTabs" #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
+        <template v-if="settings.showMainTabs" #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @move-workspace="activityWorkspaceMove.show" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
         <template v-if="!settings.showMainTabs && activeMainTab && !activeMainTab.unique" #title>
           <ActivityTitle :activity="activeMainTab" :hidden="workbench.paneLayout.activity.state === 'rail'" @rename="renameActivity" />
         </template>
@@ -197,6 +198,15 @@
     @activate="activateQuickOpenResult"
   />
 
+  <MoveActivityDialog
+    :activity="activityWorkspaceMove.activity.value"
+    :recent-workspaces="recentWorkspaces"
+    :busy="activityWorkspaceMove.busy.value"
+    :error="activityWorkspaceMove.error.value"
+    @cancel="activityWorkspaceMove.cancel"
+    @move="activityWorkspaceMove.move"
+  />
+
   <WorkspaceSetupDialog
     :open="workspaceSetupOpen"
     :workspace-path="workspaceSetupPath"
@@ -243,6 +253,8 @@ import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { useTodayStore } from '../stores/today.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import ActivityTabs from './components/ActivityTabs.vue'
+import MoveActivityDialog from './components/MoveActivityDialog.vue'
+import { useActivityWorkspaceMove } from './composables/useActivityWorkspaceMove.js'
 import ActivityTitle from './components/ActivityTitle.vue'
 import ActivityTabMenu from './components/ActivityTabMenu.vue'
 import { activityCloseLabel } from './composables/useActivityNavigation.js'
@@ -433,6 +445,10 @@ const {
   restoreActivity,
   stopActivity,
 } = activityLifecycle
+
+const activityWorkspaceMove = useActivityWorkspaceMove({
+  activities, activityRuntime, launchers, openWorkspace, selectActivity, reconcileWorkspaces,
+})
 
 const hostActivities = computed(() => activities.visibleActivities)
 const activityNavigator = computed(() => {

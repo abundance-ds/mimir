@@ -84,6 +84,20 @@ pub async fn activity_respawn(
 }
 
 #[tauri::command]
+pub async fn activity_prepare_workspace_move(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    workspace_path: String,
+) -> Result<ActivityRecord, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor.prepare_workspace_move(&activity_id, &workspace_path)
+    })
+    .await
+    .map_err(|error| format!("Workspace move preparation failed: {error}"))?
+}
+
+#[tauri::command]
 pub fn activity_snapshot(
     supervisor: tauri::State<'_, ActivitySupervisor>,
     activity_id: String,

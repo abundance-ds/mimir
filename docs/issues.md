@@ -5,6 +5,12 @@ task scope.
 
 ## Open
 
+- Workspace moves: native macOS checks remain open for the folder picker and
+  a real Codex conversation resumed in a second folder. The sandbox blocks
+  the local preview server and Chrome launch. Renderer tests and a native
+  shell PTY check pass; they do not prove the installed Codex UI. Behavior is
+  defined in [Workspace moves](activities.md#workspace-moves).
+
 - Workspace tests: two `WorkbenchApp.test.js` menu assertions read a Vue
   `v-if` comment node through `firstChild`. These failures remain outside the
   comment review change.

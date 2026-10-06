@@ -146,6 +146,7 @@
         @select="$emit('selectActivity', $event)"
         @close="$emit('closeActivity', $event)"
         @rename="$emit('renameActivity', $event)"
+        @move-workspace="$emit('moveActivityWorkspace', $event)"
         @reorder="$emit('reorderActivities', $event)"
         @new="$emit('newActivity')"
       />
@@ -245,6 +246,7 @@ const emit = defineEmits([
   'selectActivity',
   'closeActivity',
   'renameActivity',
+  'moveActivityWorkspace',
   'reorderActivities',
   'newActivity',
   'chooseWorkspace',

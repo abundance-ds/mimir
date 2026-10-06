@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   listActivities,
+  activitySnapshot,
+  prepareActivityWorkspaceMove,
   listenToActivityEvents,
   resolveLauncher,
   renameActivity,
@@ -15,6 +17,7 @@ import {
 } from '../services/activities.js'
 import { useActivitiesStore } from './activities.js'
 import { useWorkbenchStore } from './workbench.js'
+import { canMoveActivityWorkspace } from '../mimir/activityWorkspace.js'
 
 const AUTOMATIC_RESTORE_READY_TIMEOUT_MS = 45_000
 
@@ -30,6 +33,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   let nextArchiveMutation = 0
   const archiveMutations = new Map()
   const resumePromises = new Map()
+  const movingActivityIds = ref(new Set())
   const restorationState = new Map()
 
   function upsertBackendRecord(record) {
@@ -133,6 +137,9 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   // The backend respawn preserves the record id and creation time; only the
   // launch spec, session, and scrollback restart.
   function resumePreset(preset, activity, options = {}) {
+    if (movingActivityIds.value.has(activity.id) && !options.prepared) {
+      return Promise.reject(new Error('This session is being moved.'))
+    }
     const existing = resumePromises.get(activity.id)
     if (existing) return existing
     beginSessionRestoration(activity, { automatic: Boolean(options.automatic) })
@@ -163,14 +170,18 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     return promise
   }
 
-  async function resumePresetExact(preset, activity, options) {
+  async function prepareResume(preset, activity) {
     const startedAt = monotonicNow()
-    const resolved = await resolveLauncher(preset, activity.workspacePath)
-    const resolvedAt = monotonicNow()
     const workspaceScope = normalizedWorkspaceScope(
       activity.source?.workspaceScope,
       presetWorkspaceScope(preset),
     )
+    // Recorded workspace ownership survives changes to the launcher preset.
+    const effectivePreset = workspaceScope === 'workspace'
+      ? { ...preset, cwd: { mode: 'workspace' } }
+      : preset
+    const resolved = await resolveLauncher(effectivePreset, activity.workspacePath)
+    const resolvedAt = monotonicNow()
     const resumeStrategy = normalizedResumeStrategy(
       activity.host?.resumeStrategy || resolved.resumeStrategy,
     )
@@ -245,6 +256,12 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         },
       },
     }
+    return { record, cliSessionId, resolved, startedAt, resolvedAt }
+  }
+
+  async function resumePresetExact(preset, activity, options) {
+    const { record, cliSessionId, resolved, startedAt, resolvedAt } = options.prepared
+      || await prepareResume(preset, activity)
     const snapshot = await respawnActivity(record, {}, cliSessionId)
     const spawnedAt = monotonicNow()
     upsertBackendRecord(snapshot.record)
@@ -257,6 +274,51 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       totalMs: spawnedAt - startedAt,
     })
     return snapshot.record
+  }
+
+  async function moveToWorkspace(preset, id, workspacePath, { beforeStop } = {}) {
+    if (movingActivityIds.value.has(id) || resumingActivityIds.value.has(id) || resumePromises.has(id)) {
+      throw new Error('This session is already being moved or resumed.')
+    }
+    movingActivityIds.value = new Set([...movingActivityIds.value, id])
+    try {
+      const original = await prepareActivityWorkspaceMove(id, workspacePath)
+      if (!canMoveActivityWorkspace(original)) throw new Error('This session cannot be moved.')
+      const prepared = await prepareResume(preset, {
+        ...original,
+        workspacePath,
+        source: { ...original.source, workspaceScope: 'workspace' },
+      })
+      prepared.record.launch.args = codexWorkspaceArguments(prepared.record.launch.args, workspacePath)
+      // Preparation and workspace setup can fail or be cancelled without
+      // stopping the original process or changing its saved workspace.
+      if (beforeStop && await beforeStop() === false) return null
+      let snapshot = await activitySnapshot(id, Number.MAX_SAFE_INTEGER)
+      if (snapshot.record.session?.runId !== original.session?.runId || snapshot.record.closeRequestedAt) {
+        throw new Error('The session changed during preparation. Try again.')
+      }
+      await stopActivity(id)
+      const deadline = Date.now() + 10_000
+      do {
+        snapshot = await activitySnapshot(id, Number.MAX_SAFE_INTEGER)
+        if (snapshot.record.session?.runId !== original.session?.runId
+          || snapshot.record.session?.cliSessionId !== original.session?.cliSessionId
+          || snapshot.record.closeRequestedAt || snapshot.record.archivedAt) {
+          throw new Error('The session changed during the move. Its workspace has not changed.')
+        }
+        if (!snapshot.live && (snapshot.record.session?.exit || snapshot.record.status === 'interrupted')) break
+        if (Date.now() >= deadline) throw new Error('The session did not stop. Its workspace has not changed.')
+        await new Promise(resolve => setTimeout(resolve, 50))
+      } while (true)
+      upsertBackendRecord(snapshot.record)
+      // Use the stopped source record for restoration state. The destination
+      // record enters the store only after native respawn succeeds.
+      return await resumePreset(preset, snapshot.record, { prepared, open: false })
+    } finally {
+      const next = new Set(movingActivityIds.value)
+      next.delete(id)
+      movingActivityIds.value = next
+    }
   }
 
   function markAutomaticResumeFailure(id, cause) {
@@ -418,6 +480,10 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       return
     }
     if (event.type === 'exit' && event.record) {
+      // A stop snapshot can reach the caller before the old exit event.
+      // Once a new run is installed, that event must not restore the old cwd.
+      const currentRun = activities.byId(event.record.id)?.session?.runId
+      if (currentRun && event.record.session?.runId && currentRun !== event.record.session.runId) return
       endSessionRestoration(event.activityId || event.record.id)
       setResumePending(event.activityId || event.record.id, false)
       upsertBackendRecord(event.record)
@@ -459,6 +525,8 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     initialize,
     launchPreset,
     resumePreset,
+    moveToWorkspace,
+    movingActivityIds,
     markActivityInteraction,
     markActivityError,
     markAutomaticResumeFailure,
@@ -653,6 +721,8 @@ function codexGlobalArguments(args) {
     '--search',
     '--oss',
     '--no-alt-screen',
+    '--no-daemon',
+    '--approve-for-me',
     '--strict-config',
   ])
   const valued = new Set([
@@ -725,4 +795,22 @@ function normalizedWorkspaceScope(value, fallback) {
 
 function monotonicNow() {
   return globalThis.performance?.now?.() ?? Date.now()
+}
+
+// Remove only working-directory overrides. Other permission/model/tool flags
+// remain part of the recorded launch policy. A final --cd wins over config.
+export function codexWorkspaceArguments(args, workspacePath) {
+  const result = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--cd' || arg === '-C') { index++; continue }
+    if (arg.startsWith('--cd=') || (arg.startsWith('-C') && arg.length > 2)) continue
+    result.push(arg)
+    // Values such as model names and config strings are not CLI switches.
+    if (['-c', '--config', '-m', '--model', '-p', '--profile', '-s', '--sandbox',
+      '-a', '--ask-for-approval', '--add-dir', '--enable', '--disable',
+      '--remote', '--remote-auth-token-env', '--local-provider'].includes(arg)
+      && index + 1 < args.length) result.push(args[++index])
+  }
+  return [...result, '--cd', workspacePath]
 }

@@ -35,3 +35,16 @@ export function activityIsVisibleInWorkspace(activity, workspacePath, findPreset
 export function normalizedWorkspacePath(value) {
   return normalizePath(String(value || '').trim())
 }
+
+// Directory changes are enabled only for a verified local CLI resume path.
+export function canMoveActivityWorkspace(activity) {
+  return activity?.kind === 'agent'
+    && activity.host?.type === 'pty'
+    && activity.host?.resumeStrategy === 'codex'
+    && !activity.source?.appId
+    && !activity.source?.routineId
+    && !activity.closeRequestedAt
+    && !(activity.launch?.args || []).some(arg => (
+      arg === '--remote' || arg.startsWith('--remote=') || arg === '--worktree'
+    ))
+}

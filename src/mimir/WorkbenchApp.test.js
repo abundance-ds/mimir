@@ -111,6 +111,8 @@ vi.mock('./activities/ChatActivity.vue', async () => {
 })
 
 vi.mock('../services/activities.js', () => ({
+  activitySnapshot: vi.fn(),
+  prepareActivityWorkspaceMove: vi.fn(),
   closeActivity: vi.fn(),
   listActivities: vi.fn(),
   listenToActivityEvents: vi.fn(),
@@ -464,6 +466,49 @@ describe('WorkbenchApp', () => {
     expect(activityApi.setActivityArchived).toHaveBeenCalledWith('live', true)
     expect(wrapper.find('[data-main-tab="live"]').exists()).toBe(false)
     expect(wrapper.find('[data-activity-key="live"]').exists()).toBe(false)
+  })
+
+  it('moves a Codex session through the Sidebar menu and selects it in the destination workspace', async () => {
+    const wrapper = await render({ workspace: '/w', teleport: false })
+    const activities = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    const original = {
+      ...activityRecord('move-session', 'Move this conversation', '2026-07-25T10:00:00Z'),
+      kind: 'agent', workspacePath: '/w',
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      source: { launcherId: 'codex', presetId: 'review', workspaceScope: 'workspace' },
+      session: { runId: 'old-run', cliSessionId: 'exact-session' },
+    }
+    activities.upsert(original)
+    workbench.openActivity(original.id)
+    useSettingsStore().set('recentWorkspaceFolders', ['/w', '/next'])
+    activityApi.prepareActivityWorkspaceMove.mockResolvedValue(original)
+    activityApi.activitySnapshot.mockResolvedValue({
+      record: { ...original, status: 'stopped', session: { ...original.session, exit: { reason: 'stopped' } } }, live: false,
+    })
+    activityApi.resolveLauncher.mockResolvedValue({
+      presetId: 'review', agentId: 'codex', resumeStrategy: 'codex', command: '/bin/codex', args: [], cwd: '/next', env: {},
+    })
+    await flushPromises()
+    await wrapper.get('[data-activity-key="move-session"]').trigger('contextmenu')
+    await flushPromises()
+    const action = [...document.querySelectorAll('[role=menuitem]')].find(el => el.textContent.includes('Move to workspace'))
+    expect(action).toBeTruthy()
+    action.click()
+    await flushPromises()
+    document.querySelector('[aria-label="Destination workspace"]').click()
+    await flushPromises()
+    document.querySelector('[data-graph-select-option="/next"]').click()
+    await flushPromises()
+    document.querySelector('[aria-labelledby="move-activity-title"] button[type=submit]').click()
+    await flushPromises()
+    expect(activityApi.respawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: original.id, workspacePath: '/next', launch: expect.objectContaining({ cwd: '/next' }),
+    }), {}, 'exact-session')
+    expect(workbench.activeActivityId).toBe(original.id)
+    expect(activities.byId(original.id).workspacePath).toBe('/next')
+    expect(document.querySelector('[aria-labelledby="move-activity-title"]')).toBeNull()
+    expect(wrapper.find('[data-activity-key="move-session"]').exists()).toBe(true)
   })
 
   it('uses the existing header with tabs hidden and preserves navigation and mounted content', async () => {

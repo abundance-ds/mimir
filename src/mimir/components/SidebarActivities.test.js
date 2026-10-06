@@ -28,6 +28,17 @@ async function menuAction(label) {
 }
 
 describe('Sidebar Activities', () => {
+  it('offers workspace move for local Codex sessions and emits the selected row', async () => {
+    render()
+    await wrapper.setProps({ tabs: [{ ...tabs[0], host: { type: 'pty', resumeStrategy: 'codex' } }, tabs[1]] })
+    await row('agent').trigger('contextmenu')
+    await menuAction('Move to workspace')
+    expect(wrapper.emitted('moveWorkspace')).toEqual([['agent']])
+    await row('terminal').trigger('contextmenu')
+    await flushPromises()
+    expect([...document.querySelectorAll('[role=menuitem]')].some(el => el.textContent.includes('Move to workspace'))).toBe(false)
+  })
+
   it('selects the session without a duplicate row close button', async () => {
     render()
     expect(select('agent').attributes('aria-current')).toBe('page')

@@ -1,4 +1,5 @@
 import { computed, nextTick, ref, watch } from 'vue'
+import { canMoveActivityWorkspace } from '../activityWorkspace.js'
 import { usePointerReorder } from './usePointerReorder.js'
 
 // Shared labels keep every close control on the same lifecycle action.
@@ -83,6 +84,9 @@ export function useActivityNavigation(props, emit, {
           ...(!contextTab.value.unique && !props.rail
             ? [{ id: 'rename', label: 'Rename…', detail: 'F2' }]
             : []),
+          ...(canMoveActivityWorkspace(contextTab.value)
+            ? [{ id: 'move-workspace', label: 'Move to workspace…', disabled: props.restoringIds.has(contextTab.value.id) }]
+            : []),
           { id: 'close', label: closeLabel(contextTab.value), detail: '⌘W' },
           {
             id: 'left',
@@ -124,6 +128,10 @@ export function useActivityNavigation(props, emit, {
     if (!tab) return
     if (action === 'rename') {
       void nextTick(() => beginRename(tab))
+      return
+    }
+    if (action === 'move-workspace') {
+      if (canMoveActivityWorkspace(tab) && !props.restoringIds.has(tab.id)) emit('moveWorkspace', tab.id)
       return
     }
     if (action === 'close') {

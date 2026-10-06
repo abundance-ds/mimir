@@ -38,6 +38,10 @@ function spawnSize({ cols, rows } = {}) {
   return fittedSize || { cols: 64, rows: 20 }
 }
 
+export function prepareActivityWorkspaceMove(activityId, workspacePath) {
+  return invoke('activity_prepare_workspace_move', { activityId, workspacePath })
+}
+
 export function activitySnapshot(activityId, afterSequence = null) {
   return invoke('activity_snapshot', { activityId, afterSequence })
 }

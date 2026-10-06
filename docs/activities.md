@@ -42,10 +42,31 @@ recovered.
 
 Workspace switching hides other Project Activities but never stops or retargets
 them. Home/custom-cwd Activities stay global. Scope is captured at launch and
-does not change. Restoring an Activity from another workspace opens that
-workspace first. Activities do not add folders to the project switcher. Each
-workspace remembers its selected Activity and visible Editor tab for the app
+changes only through an explicit workspace move. Restoring an Activity from
+another workspace opens that workspace first. Activities do not add folders to
+the project switcher. Each workspace remembers its selected Activity and visible Editor tab for the app
 session only.
+
+## Workspace moves
+
+Local Codex agent Activities can move to an existing workspace. Preparation
+validates the folder and reads the exact CLI session binding before stopping
+anything. The native respawn path still requires an ended process; only a
+successful spawn replaces the saved workspace and launch record. A failed
+spawn retains the stopped source Activity for retry. CLI startup failures after
+spawn remain visible at the destination, as with ordinary resume.
+
+The move keeps the Activity identity, title, launch policy, and CLI conversation.
+It replaces the working-directory argument with explicit `--cd`, refreshes the
+Mimir tool context, and sets workspace scope. Subsequent resumes use that
+recorded workspace even if the preset uses home or a custom directory. Project
+files and provider transcripts are not moved. Old project references remain in
+the conversation; Codex loads the destination context on resume. Other CLI
+providers, remote sessions, managed worktrees, Apps, and Routine runs are not
+eligible until their directory-change behavior is verified.
+
+Renderer ownership is `useActivityWorkspaceMove.js`, `MoveActivityDialog.vue`,
+and `activityRuntime.js`; native preparation is in the Activity supervisor.
 
 ## PTY lifecycle and recovery
 

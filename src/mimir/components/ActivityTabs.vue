@@ -100,7 +100,7 @@ const props = defineProps({
   blockingIds: { type: Set, default: () => new Set() },
   restoringIds: { type: Set, default: () => new Set() },
 })
-const emit = defineEmits(['select', 'close', 'rename', 'new', 'reorder'])
+const emit = defineEmits(['select', 'close', 'rename', 'new', 'reorder', 'moveWorkspace'])
 const tabStrip = ref(null)
 const strip = computed(() => tabStrip.value?.scroll)
 const {

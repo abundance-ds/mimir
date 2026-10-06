@@ -814,6 +814,68 @@ impl ActivitySupervisor {
             .collect()
     }
 
+    /// Validate a move before the caller stops the process. Codex writes its
+    /// exact session binding while running; normal exit also collects it.
+    pub fn prepare_workspace_move(
+        &self,
+        activity_id: &str,
+        workspace_path: &str,
+    ) -> Result<ActivityRecord, String> {
+        let destination = Path::new(workspace_path);
+        if !destination.is_absolute() || !destination.is_dir() {
+            return Err("Select an existing workspace folder.".into());
+        }
+        let activity = self
+            .activity(activity_id)
+            .map_err(|error| error.to_string())?;
+        let mut record = lock(&activity.record);
+        if record.kind != ActivityKind::Agent
+            || record.source.app_id.is_some()
+            || record.source.routine_id.is_some()
+            || !matches!(&record.host, ActivityHost::Pty { resume_strategy: Some(strategy) } if strategy == "codex")
+        {
+            return Err("Move to workspace is available for Codex sessions only.".into());
+        }
+        if record.close_requested_at.is_some() {
+            return Err("This session is being archived.".into());
+        }
+        if record.launch.as_ref().is_some_and(|launch| {
+            launch
+                .args
+                .iter()
+                .any(|arg| arg == "--remote" || arg.starts_with("--remote=") || arg == "--worktree")
+        }) {
+            return Err("Remote sessions and managed worktrees cannot be moved.".into());
+        }
+        if capture_cli_session_id(&self.inner.config.persistence_dir, &mut record)
+            && record.retention.should_persist()
+        {
+            self.inner
+                .store
+                .save_record(record.clone(), lock(&activity.scrollback).byte_cap());
+        }
+        if record
+            .session
+            .as_ref()
+            .and_then(|session| session.cli_session_id.as_deref())
+            .filter(|id| !id.is_empty())
+            .is_none()
+        {
+            return Err(
+                "The session ID is not available yet. Complete a reply, then try again.".into(),
+            );
+        }
+        if record
+            .workspace_path
+            .as_deref()
+            .and_then(|path| fs::canonicalize(path).ok())
+            == fs::canonicalize(destination).ok()
+        {
+            return Err("The session already belongs to this workspace.".into());
+        }
+        Ok(record.clone())
+    }
+
     pub fn snapshot(
         &self,
         activity_id: &str,
@@ -3153,6 +3215,121 @@ mod tests {
 
         supervisor.stop("live-completion").unwrap();
         wait_for_end(&supervisor, "live-completion");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_move_prepares_binding_then_respawns_in_destination_and_persists() {
+        let temp = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        let destination = TempDir::new().unwrap();
+        let source_path = source.path().to_string_lossy().into_owned();
+        let target_path = destination.path().to_string_lossy().into_owned();
+        let supervisor = create_supervisor(&temp);
+        let mut first = durable_record(
+            "move",
+            "/bin/sh",
+            vec!["-c".into(), "printf source; IFS= read -r line".into()],
+        );
+        first.workspace_path = Some(source_path.clone());
+        first.host = ActivityHost::pty(Some("codex".into()));
+        first.source.launcher_id = Some("codex".into());
+        first.launch.as_mut().unwrap().cwd = Some(source_path.clone());
+        let running = supervisor
+            .spawn(SpawnActivityRequest::new(first, 80, 24))
+            .unwrap();
+        assert!(supervisor
+            .prepare_workspace_move("move", &target_path)
+            .unwrap_err()
+            .contains("session ID"));
+        assert!(supervisor.snapshot("move", None).unwrap().live);
+        let run_id = running.record.session.unwrap().run_id;
+        let session_id = "11111111-1111-4111-8111-111111111111";
+        let binding_dir = session_bindings_dir(temp.path());
+        fs::create_dir_all(&binding_dir).unwrap();
+        fs::write(
+            binding_dir.join(format!("{run_id}.json")),
+            serde_json::to_vec(&serde_json::json!({
+                "activityId": "move", "runId": run_id, "cliSessionId": session_id,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut prepared = supervisor
+            .prepare_workspace_move("move", &target_path)
+            .unwrap();
+        assert_eq!(
+            prepared.session.as_ref().unwrap().cli_session_id.as_deref(),
+            Some(session_id)
+        );
+        assert!(supervisor.snapshot("move", None).unwrap().live);
+        assert_eq!(
+            prepared.workspace_path.as_deref(),
+            Some(source_path.as_str())
+        );
+        assert!(supervisor
+            .prepare_workspace_move("move", &source_path)
+            .unwrap_err()
+            .contains("already"));
+        assert!(supervisor
+            .prepare_workspace_move("move", "/a/missing/workspace")
+            .is_err());
+        supervisor.stop("move").unwrap();
+        wait_for_end(&supervisor, "move");
+        prepared.workspace_path = Some(target_path.clone());
+        prepared.source.workspace_scope =
+            Some(super::super::model::ActivityWorkspaceScope::Workspace);
+        let launch = prepared.launch.as_mut().unwrap();
+        launch.cwd = Some(target_path.clone());
+        launch.args = vec!["-c".into(), "pwd".into()];
+        launch.command = "/missing/mimir-test-executable".into();
+        assert!(supervisor
+            .respawn(SpawnActivityRequest::new(prepared.clone(), 80, 24))
+            .is_err());
+        let unchanged = supervisor.snapshot("move", None).unwrap();
+        assert_eq!(
+            unchanged.record.workspace_path.as_deref(),
+            Some(source_path.as_str())
+        );
+        prepared.launch.as_mut().unwrap().command = "/bin/sh".into();
+        supervisor
+            .respawn(SpawnActivityRequest::new(prepared, 80, 24))
+            .unwrap();
+        let finished = wait_for_end(&supervisor, "move");
+        assert_eq!(
+            finished
+                .record
+                .session
+                .as_ref()
+                .unwrap()
+                .cli_session_id
+                .as_deref(),
+            Some(session_id)
+        );
+        assert_ne!(finished.record.session.as_ref().unwrap().run_id, run_id);
+        assert_eq!(finished.record.title, "move");
+        let output = String::from_utf8_lossy(&replay_bytes(&finished))
+            .trim()
+            .to_string();
+        assert_eq!(
+            fs::canonicalize(output).unwrap(),
+            fs::canonicalize(destination.path()).unwrap()
+        );
+        supervisor.flush_persistence().unwrap();
+        drop(supervisor);
+        let restored = create_supervisor(&temp).snapshot("move", None).unwrap();
+        assert_eq!(
+            restored.record.workspace_path.as_deref(),
+            Some(target_path.as_str())
+        );
+        assert_eq!(
+            restored.record.launch.unwrap().cwd.as_deref(),
+            Some(target_path.as_str())
+        );
+        assert_eq!(
+            restored.record.session.unwrap().cli_session_id.as_deref(),
+            Some(session_id)
+        );
     }
 
     #[cfg(unix)]
