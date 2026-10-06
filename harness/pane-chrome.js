@@ -10,6 +10,7 @@ import ActivityTabMenu from '../src/mimir/components/ActivityTabMenu.vue'
 import { IconPlus, IconX } from '@tabler/icons-vue'
 import PaneBand from '../src/shared/ui/chrome/PaneBand.vue'
 import AppHeader from '../src/editor/components/shell/AppHeader.vue'
+import { useWorkbenchResize } from '../src/mimir/composables/useWorkbenchResize.js'
 import { useWorkbenchStore } from '../src/stores/workbench.js'
 
 // Real shell components with local content. No project or document writes.
@@ -19,6 +20,7 @@ document.documentElement.dataset.theme = params.get('theme') || 'parchment'
 const app = createApp({
   setup() {
     const store = useWorkbenchStore()
+    const resize = useWorkbenchResize(store)
     if (params.has('sidebarWidth')) store.setPaneWidth('sidebar', Number(params.get('sidebarWidth')))
     if (params.get('sidebar') === 'rail') store.setPaneState('sidebar', 'rail')
     if (params.get('activity') === 'rail') store.setPaneState('activity', 'rail')
@@ -35,7 +37,7 @@ const app = createApp({
     const add = () => { const id = `tab-${Date.now()}`; tabs.value.push({ id, title: 'New terminal', icon: 'terminal' }); activeId.value = id }
     const fileIndex = ref(0)
     const files = ref(params.has('empty') ? [] : [{ id: 'notes', name: 'Notes.md' }, { id: 'draft', name: 'Draft.md', dirty: true }])
-    return () => h(WorkbenchShell, { viewportWidth: width.value, activityTitle: 'Today', editorTitle: 'Notes.md' }, {
+    return () => h(WorkbenchShell, { dragging: resize.dragging.value, sidebarPreview: resize.sidebarPreview.value, onResizeStart: resize.start, viewportWidth: width.value, activityTitle: 'Today', editorTitle: 'Notes.md' }, {
       sidebar: ({ collapsed }) => h(WorkbenchSidebar, {
         collapsed, workspaceName: 'Example project',
         tools: [{ id: 'today', title: 'Today', icon: 'calendar' }],

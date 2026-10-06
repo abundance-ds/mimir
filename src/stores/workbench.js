@@ -1,6 +1,8 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+export const SIDEBAR_MIN_WIDTH = 120
+export const SIDEBAR_MAX_WIDTH = 400
 export const SIDEBAR_RAIL_WIDTH = 52
 export const ACTIVITY_RAIL_WIDTH = 44
 export const EDITOR_RAIL_WIDTH = 44
@@ -15,7 +17,7 @@ const DEFAULT_LAYOUT = Object.freeze({
 })
 
 const WIDTH_RANGES = Object.freeze({
-  sidebar: Object.freeze({ min: 240, max: 400 }),
+  sidebar: Object.freeze({ min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH }),
   activity: Object.freeze({ min: 336 }),
   editor: Object.freeze({ min: 336 }),
 })

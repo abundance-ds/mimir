@@ -16,6 +16,13 @@
         @click="setViewMode(option.id)">
         <component :is="option.icon" :size="14" :stroke-width="1.75" />
       </button>
+      <div class="files-compact-view-menu shrink-0">
+        <WorkbenchMenu :label="`Files view: ${compactViews.find(option => option.id === viewMode)?.label || 'File tree'}`"
+          :items="compactViews.map(option => ({ id: option.id, label: option.label, checked: viewMode === option.id }))"
+          compact @select="setViewMode">
+          <component :is="compactViews.find(option => option.id === viewMode)?.icon || IconFolderOpen" :size="14" :stroke-width="1.75" />
+        </WorkbenchMenu>
+      </div>
       <span class="min-w-0 flex-1" />
       <WorkbenchMenu
         :key="`${files.workspacePath}:${viewMode}:${searchMode}`"
@@ -1994,6 +2001,13 @@ function directionOptions(key) {
 </script>
 
 <style scoped>
+.files-compact-view-menu { display: none; }
+@container files (max-width: 191px) {
+  [data-files-compact-toolbar] > [data-files-mode] { display: none; }
+  .files-compact-view-menu { display: block; }
+  .files-compact .files-search-field kbd { display: none; }
+}
+
 .files-compact .files-search-field { width:100%; flex:none; }
 .files-compact .files-search { align-items:stretch; margin-top:0; }
 .files-compact :deep(.files-ledger-grid) { min-width:0; }

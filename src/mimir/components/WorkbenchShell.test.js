@@ -117,8 +117,8 @@ describe('WorkbenchShell', () => {
     expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('320px')
     expect(wrapper.get('[data-pane="editor"]').element.style.minWidth).toBe('336px')
     await wrapper.setProps({ viewportWidth: 520 })
-    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('240px')
-    expect(wrapper.get('[data-pane="editor"]').element.style.minWidth).toBe('236px')
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('140px')
+    expect(wrapper.get('[data-pane="editor"]').element.style.minWidth).toBe('336px')
     await wrapper.setProps({ viewportWidth: 1280 })
     expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('400px')
     expect(store.paneLayout.sidebar.width).toBe(400)
@@ -240,4 +240,25 @@ describe('WorkbenchShell', () => {
 
     expect(wrapper.get('[data-pane-shell="workbench"]').classes()).toContain('is-dragging')
   })
+
+  it('keeps the same resize edge through a rail preview and fits content without changing saved states', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    store.setPaneState('sidebar', 'rail')
+    await wrapper.setProps({ viewportWidth: 800 })
+    const edge = wrapper.get('[data-resize-handle="sidebar"]').element
+    const saved = store.layoutSnapshot()
+    await wrapper.setProps({ sidebarPreview: { state: 'expanded', width: 280 }, dragging: true })
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('280px')
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
+    expect(store.layoutSnapshot()).toEqual(saved)
+    await wrapper.setProps({ sidebarPreview: { state: 'rail', width: 280 } })
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('52px')
+    expect(wrapper.get('[data-resize-handle="sidebar"]').element).toBe(edge)
+    await wrapper.setProps({ sidebarPreview: null, dragging: false })
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
+    expect(store.layoutSnapshot()).toEqual(saved)
+    wrapper.unmount()
+  })
+
 })

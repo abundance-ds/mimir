@@ -109,7 +109,7 @@ createApp({
       h('div', { class: 'flex items-center gap-2 border-b border-rule p-2' }, [
         h('strong', 'Files UI check'),
         button('Toggle Sidebar', () => { collapsed.value = !collapsed.value }),
-        ...[240, 280, 400].map(value => button(`${value} px`, () => { width.value = value })),
+        ...[120, 240, 280, 400].map(value => button(`${value} px`, () => { width.value = value })),
         button('Dark', () => document.documentElement.setAttribute('data-theme', 'dracula')),
         button('Light', () => document.documentElement.setAttribute('data-theme', 'light')),
         h('span', { class: 'text-ink-3' }, 'Try alpha, beta, limit, error, slow.'),

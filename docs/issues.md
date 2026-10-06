@@ -11,6 +11,12 @@ task scope.
   shell PTY check pass; they do not prove the installed Codex UI. Behavior is
   defined in [Workspace moves](activities.md#workspace-moves).
 
+- Sidebar resize: browser geometry and native macOS checks remain open for
+  120 px controls, drag collapse/reopen, and window-button clearance. The
+  sandbox blocks the Vite listener and Chrome launch. Renderer tests pass;
+  run `scripts/check-sidebar-geometry.mjs` and check the native app when those
+  surfaces are available.
+
 - Workspace tests: two `WorkbenchApp.test.js` menu assertions read a Vue
   `v-if` comment node through `firstChild`. These failures remain outside the
   comment review change.

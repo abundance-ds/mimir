@@ -3,7 +3,8 @@
 ## Sidebar browser
 
 Sidebar has File tree, Favorites, and Recent views, a file actions menu, and
-a search field. Layout and sizing belong to
+a search field. Below 192 px, one view menu replaces the three view buttons.
+Layout and sizing belong to
 [workbench-design.md](workbench-design.md) and
 [design-system.md](design-system.md).
 
@@ -75,7 +76,7 @@ a search field. Layout and sizing belong to
   Native I/O is mocked; check focus sequences in the native macOS app before
   release.
 - `harness/files.html` mounts sidebar and File Manager with fixture native
-  replies. Check 240, 280, and 400 px in light and dark. Search `alpha`/`beta`
+  replies. Check 120, 240, 280, and 400 px in light and dark. Search `alpha`/`beta`
   for matches; `limit`, `error`, `slow` for partial results, failure, and
   cancellation. It does not test the native index.
 - Native-app checks require a disposable workspace in a current build. Open

@@ -19,7 +19,6 @@
     </section>
 
     <div
-      v-if="!isRail('sidebar')"
       data-resize-boundary="sidebar"
       class="relative z-20 -mx-1.5 h-full w-3 shrink-0"
     >
@@ -119,6 +118,7 @@ import {
 
 const props = defineProps({
   dragging: { type: Boolean, default: false },
+  sidebarPreview: { type: Object, default: null },
   activityTitle: { type: String, default: 'Activity' },
   activityMeta: { type: String, default: '' },
   editorTitle: { type: String, default: 'Editor' },
@@ -128,14 +128,26 @@ const props = defineProps({
 
 const emit = defineEmits(['resizeStart', 'restore'])
 const workbench = useWorkbenchStore()
-const layout = workbench.paneLayout
+const savedLayout = workbench.paneLayout
+const layout = computed(() => {
+  if (!props.sidebarPreview) return savedLayout
+  const draft = { ...savedLayout, sidebar: props.sidebarPreview }
+  const sidebar = draft.sidebar.state === 'rail' ? SIDEBAR_RAIL_WIDTH : fittedSidebarWidth(props.viewportWidth, draft.sidebar.width)
+  // Fit a drag preview without saving a temporary content-pane collapse.
+  if (props.viewportWidth - sidebar < CONTENT_PANE_MIN_WIDTH * 2
+    && draft.activity.state === 'expanded' && draft.editor.state === 'expanded') {
+    const pane = document.activeElement?.closest('[data-pane]')?.dataset.pane === 'activity' ? 'editor' : 'activity'
+    draft[pane] = { ...draft[pane], state: 'rail' }
+  }
+  return draft
+})
 
 // A manual Sidebar restore can leave less space than the window's zone allows.
 // Fit the live panes without replacing any saved width or reopening a pane.
-watch(() => [props.viewportWidth, layout.sidebar.width, layout.sidebar.state], () => {
-  const sidebar = layout.sidebar.state === 'rail' ? SIDEBAR_RAIL_WIDTH : fittedSidebarWidth(props.viewportWidth, layout.sidebar.width)
+watch(() => [props.viewportWidth, savedLayout.sidebar.width, savedLayout.sidebar.state], () => {
+  const sidebar = savedLayout.sidebar.state === 'rail' ? SIDEBAR_RAIL_WIDTH : fittedSidebarWidth(props.viewportWidth, savedLayout.sidebar.width)
   const single = props.viewportWidth < FOCUS_WORKBENCH_WIDTH || props.viewportWidth - sidebar < CONTENT_PANE_MIN_WIDTH * 2
-  if (single && layout.activity.state === 'expanded' && layout.editor.state === 'expanded'
+  if (single && savedLayout.activity.state === 'expanded' && savedLayout.editor.state === 'expanded'
     && document.activeElement?.closest('[data-pane]')?.dataset.pane === 'activity') {
     workbench.setPaneState('editor', 'rail')
   }
@@ -174,19 +186,19 @@ const editorStyle = computed(() => {
     minWidth: `${CONTENT_PANE_MIN_WIDTH}px`,
     width: `${fittedEditorWidth(
       props.viewportWidth,
-      layout.editor.width,
+      layout.value.editor.width,
       paneWidth('sidebar'),
     )}px`,
   }
 })
 
 function isRail(pane) {
-  return layout[pane].state === 'rail'
+  return layout.value[pane].state === 'rail'
 }
 
 function paneWidth(pane) {
   if (isRail(pane)) return railWidths[pane]
-  return pane === 'sidebar' ? fittedSidebarWidth(props.viewportWidth, layout.sidebar.width) : layout[pane].width
+  return pane === 'sidebar' ? fittedSidebarWidth(props.viewportWidth, layout.value.sidebar.width) : layout.value[pane].width
 }
 
 function startResize(pane, event) {

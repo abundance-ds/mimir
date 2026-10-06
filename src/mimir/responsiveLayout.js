@@ -1,3 +1,5 @@
+import { SIDEBAR_MIN_WIDTH } from '../stores/workbench.js'
+
 export const COMPACT_WORKBENCH_WIDTH = 1040
 export const FOCUS_WORKBENCH_WIDTH = 760
 export const CONTENT_PANE_MIN_WIDTH = 336
@@ -20,7 +22,7 @@ export function fittedEditorWidth(viewportWidth, requestedWidth, sidebarWidth) {
 }
 
 export function fittedSidebarWidth(viewportWidth, requestedWidth, contentRailWidth = 44) {
-  return Math.min(finiteWidth(requestedWidth), Math.max(240,
+  return Math.min(finiteWidth(requestedWidth), Math.max(SIDEBAR_MIN_WIDTH,
     finiteWidth(viewportWidth) - CONTENT_PANE_MIN_WIDTH - contentRailWidth))
 }
 

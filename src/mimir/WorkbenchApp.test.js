@@ -2172,6 +2172,24 @@ describe('WorkbenchApp', () => {
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
   })
 
+  it('previews Sidebar collapse, reverses the same drag, and saves only on release', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useWorkbenchStore()
+    const edge = wrapper.get('[data-resize-handle="sidebar"]')
+    await edge.trigger('pointerdown', { clientX: 280, pointerId: 1, button: 0 })
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 70, pointerId: 1 }))
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    await nextTick()
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('52px')
+    expect(store.paneLayout.sidebar).toEqual({ state: 'expanded', width: 280 })
+    expect(wrapper.get('[data-resize-handle="sidebar"]').element).toBe(edge.element)
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 120, pointerId: 1 }))
+    await nextTick()
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('120px')
+    expect(store.paneLayout.sidebar).toEqual({ state: 'expanded', width: 120 })
+    expect(useSettingsStore().workbenchLayout.sidebar).toEqual({ state: 'expanded', width: 120 })
+  })
+
   it('contains workbench shortcuts inside Quick Open and resumes them after close', async () => {
     const wrapper = await render({ workspace: '/w' })
 

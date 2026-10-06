@@ -5,9 +5,14 @@ must never replace or disturb the mounted Editor document and review state.
 
 ## Pane grammar
 
-- Sidebar defaults to 280 px, resizes from 240 to 400 px, and collapses to
+- Sidebar defaults to 280 px, resizes from 120 to 400 px, and collapses to
   a mounted 52 px rail. Narrow windows still collapse it automatically; the
   user can expand it manually.
+- Sidebar drag uses a temporary layout until release. Below 86 px it snaps
+  to the rail; at 98 px it reopens. The original pointer origin survives each
+  snap, so a drag can reverse without release. The rail edge also resizes.
+  Releasing in the rail retains the pre-drag saved width for button restore.
+  Escape, pointer cancellation, and window blur discard the preview.
 - Activity defaults to 560 px; Editor defaults to 520 px. Each content pane has
   a 336 px working minimum and collapses to a 44 px rail. A manually restored
   Sidebar fits the available width without replacing its saved width. If the

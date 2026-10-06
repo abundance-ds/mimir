@@ -360,6 +360,16 @@ function launch(id) {
 }
 </script>
 <style scoped>
+[data-sidebar-state] { container: sidebar / inline-size; }
+@container sidebar (max-width: 191px) {
+  [data-sidebar-state="expanded"] .sidebar-recording { padding-right: 4px; }
+  [data-sidebar-state="expanded"] .sidebar-recording-open { grid-template-columns: minmax(0, 1fr); padding-left: 12px; }
+  [data-sidebar-state="expanded"] .sidebar-recording-icon { display: none; }
+  [data-sidebar-state="expanded"] .sidebar-recording-label,
+  [data-sidebar-state="expanded"] .sidebar-recording-time { grid-column: 1; }
+  [data-sidebar-state="expanded"] .sidebar-recording-action { width: 24px; }
+}
+
 .sidebar-navigation-scroll { scrollbar-width: thin; }
 [data-sidebar-state="rail"] .sidebar-navigation-scroll { scrollbar-width: none; }
 [data-sidebar-state="rail"] .sidebar-navigation-scroll::-webkit-scrollbar { display: none; }
@@ -435,6 +445,9 @@ function launch(id) {
 .sidebar-recording-label {
   grid-column: 2;
   grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   line-height: 14px;
 }

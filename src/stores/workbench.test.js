@@ -35,7 +35,7 @@ describe('workbench store', () => {
     store.setPaneWidth('sidebar', 20)
     store.setPaneWidth('activity', 100)
     store.setPaneWidth('editor', 100)
-    expect(store.paneLayout.sidebar.width).toBe(240)
+    expect(store.paneLayout.sidebar.width).toBe(120)
     expect(store.paneLayout.activity.width).toBe(336)
     expect(store.paneLayout.editor.width).toBe(336)
 
@@ -166,4 +166,16 @@ describe('workbench store', () => {
     store.selectWorkspaceActivity('b')
     expect(store.openTabIds).toEqual(['b', 'hidden', 'a'])
   })
+
+  it('restores a saved Sidebar width below the previous minimum', () => {
+    const store = useWorkbenchStore()
+    store.setPaneWidth('sidebar', 120)
+    store.setPaneState('sidebar', 'rail')
+    const saved = store.layoutSnapshot()
+    store.resetForWorkspace()
+    store.restoreLayout(saved)
+    store.togglePane('sidebar')
+    expect(store.paneLayout.sidebar).toEqual({ state: 'expanded', width: 120 })
+  })
+
 })

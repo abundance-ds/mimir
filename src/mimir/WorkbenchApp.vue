@@ -1,6 +1,7 @@
 <template>
   <WorkbenchShell
     :dragging="resize.dragging.value"
+    :sidebar-preview="resize.sidebarPreview.value"
     :activity-title="activityTitle"
     :activity-meta="activityMeta"
     :editor-title="editorTitle"

@@ -160,6 +160,23 @@ describe('FilesActivity', () => {
     wrapper.unmount()
   })
 
+  it('selects and identifies the current view through the narrow Files menu', async () => {
+    const wrapper = render({ compact: true, collapsible: true })
+    await flushPromises()
+    await wrapper.get('[aria-label="Files view: File tree"]').trigger('click')
+    await flushPromises()
+    const menu = new DOMWrapper(document.querySelector('[role="menu"][aria-label="Files view: File tree"]'))
+    expect(menu.findAll('[role="menuitemradio"]').map(item => item.text())).toEqual(['File tree', 'Favorites', 'Recent'])
+    await menu.findAll('[role="menuitemradio"]')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[aria-label="Files view: Favorites"]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-mode="favorites"]').attributes('aria-pressed')).toBe('true')
+    await wrapper.get('[aria-label="Files view: Favorites"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]').textContent.trim()).toBe('Favorites')
+    wrapper.unmount()
+  })
+
   it.each(['project', 'favorites'])('collapses nested folders from the %s menu in both file panels', async mode => {
     const store = useWorkspaceFilesStore()
     const nested = { ...browseEntries[0], path: '/w/docs/deep', name: 'deep', relativePath: 'docs/deep' }
