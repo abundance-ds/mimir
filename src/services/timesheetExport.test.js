@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
-import { exportTimesheetCsv } from './timesheetExport.js'
+import { exportCsvFile, exportTimesheetCsv } from './timesheetExport.js'
 
 afterEach(() => { delete window.__TAURI_INTERNALS__; vi.clearAllMocks() })
 
@@ -23,5 +23,13 @@ describe('time sheet CSV file export', () => {
     vi.mocked(save).mockResolvedValue(null)
     expect(await exportTimesheetCsv('Sheet', 'rows')).toBe(false)
     expect(invoke).not.toHaveBeenCalled()
+  })
+  it('names a generic export and falls back when the name is empty', async () => {
+    window.__TAURI_INTERNALS__ = {}
+    vi.mocked(save).mockResolvedValue(null)
+    await exportCsvFile('Pipeline companies', 'rows', 'pipeline')
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ defaultPath: 'Pipeline-companies.csv' }))
+    await exportCsvFile('', 'rows', 'pipeline')
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ defaultPath: 'pipeline.csv' }))
   })
 })

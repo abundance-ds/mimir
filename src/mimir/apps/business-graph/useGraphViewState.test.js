@@ -156,3 +156,21 @@ describe('Graph display preferences', () => {
     scope.stop()
   })
 })
+
+describe('Pipeline view state', () => {
+  it.each([['plays', 'plays'], ['board', 'companies']])('restores the saved %s view as %s and persists the section', async (saved, expected) => {
+    setActivePinia(createPinia())
+    const graph = useBusinessGraphStore()
+    const scope = effectScope()
+    const settings = reactive({ settingsReady: true, set: vi.fn(), businessGraphViewState: {
+      section: 'pipeline', sectionViews: { pipeline: saved },
+    } })
+    scope.run(() => useGraphViewState({ graph, settings }))
+    expect(graph.section).toBe('pipeline')
+    expect(graph.view).toBe(expected)
+    graph.setView('network')
+    await nextTick()
+    expect(settings.set.mock.lastCall[1]).toMatchObject({ section: 'pipeline', sectionViews: { pipeline: 'network' } })
+    scope.stop()
+  })
+})
