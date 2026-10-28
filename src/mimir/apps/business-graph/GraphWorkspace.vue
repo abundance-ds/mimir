@@ -36,6 +36,17 @@
         @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
         @expand-all="$emit('expandAllBoardStatuses')"
       />
+      <PipelineWorkspace
+        v-if="!composing && graph.section === 'pipeline'"
+        ref="pipelineSurface"
+        :view="graph.view"
+        :view-options="viewOptions"
+        :empty-title="emptyTitle"
+        :empty-copy="emptyCopy"
+        @set-view="$emit('setView', $event)"
+        @open-node="$emit('openNode', $event)"
+        @open-create="$emit('openCreate', $event)"
+      />
       <div v-if="composing" data-graph-loading class="graph-state" role="status">
         <span class="graph-loading-mark" aria-hidden="true" />
         <h2>Loading graph entries</h2>
@@ -131,6 +142,7 @@ import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import EntityList from './EntityList.vue'
 import GraphViewbar from './GraphViewbar.vue'
 import NowView from './NowView.vue'
+import PipelineWorkspace from './PipelineWorkspace.vue'
 import GraphEntries from './GraphEntries.vue'
 import WorkBoard from './WorkBoard.vue'
 
@@ -184,16 +196,18 @@ const entryContext = computed(() => JSON.stringify([graph.activeScopeIds, graph.
 const entityList = ref(null)
 const workBoard = ref(null)
 const viewbar = ref(null)
+const pipelineSurface = ref(null)
 
 defineExpose({
-  closeMenus: options => entityList.value?.closeMenus?.(options) || viewbar.value?.closeMenus(options) || false,
+  closeMenus: options => pipelineSurface.value?.closeMenus(options) || entityList.value?.closeMenus?.(options) || viewbar.value?.closeMenus(options) || false,
   focusListEdge(edge) {
+    if (pipelineSurface.value) return pipelineSurface.value.focusListEdge(edge)
     if (workBoard.value) return workBoard.value.focusEdge(edge)
     if (!entityList.value) return false
     entityList.value.focusEdge(edge)
     return true
   },
-  focusNode: id => entityList.value?.focusNode(id),
+  focusNode: id => pipelineSurface.value?.focusNode(id) || entityList.value?.focusNode(id),
 })
 </script>
 

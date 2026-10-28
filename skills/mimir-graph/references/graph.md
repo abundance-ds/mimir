@@ -38,6 +38,19 @@ Companies use `roles` from
 `teamMember: true` and `status: active`. Projects use `projectType` and
 `projectStatus`. Use tags for loose topics.
 
+Sales pipeline (optional, shown in the Graph **Pipeline** section):
+- Company: `pipelineStage` (`Target|Contacted|In conversation|Proposal|Client|Dormant`),
+  `pipelineTrigger` and `pipelinePlay` (note ids), `pipelineTriggerNote`,
+  `pipelineNextStep`, `companyType`, `hqCity`, `hqCountry`, `portfolio`,
+  `connectionAliases` (list of other names in the connections file).
+- Trigger: `note` tagged `sales-trigger`; title is the trigger, summary is what
+  happens. Optional `triggerCategory`, `triggerRating` (`Strong|Medium|Watch`),
+  `triggerFor`, `triggerSpot`, `triggerWho`, `triggerOpener`, `triggerWhy`.
+- Play: `note` tagged `sales-play`. Optional `playFor`, `playVerdict`
+  (`Working|Too early|Untested|Not working yet|Not a sales route`),
+  `playTriggers` (trigger ids), `playSteps` (list), `playLearned`. The body
+  records each use with Mimir links.
+
 Issue statuses: `backlog plan in-progress waiting review done cancelled`.
 Priorities: `low normal high urgent`.
 

@@ -34,7 +34,7 @@ export const GRAPH_SORT_OPTIONS = Object.freeze([
   { value: 'project', label: 'Project' },
 ])
 
-const VIEWS_BY_SECTION = Object.freeze({
+export const VIEWS_BY_SECTION = Object.freeze({
   home: [{ id: 'home', label: 'Home' }],
   all: [
     { id: 'list', label: 'Entries' },
@@ -44,9 +44,15 @@ const VIEWS_BY_SECTION = Object.freeze({
     { id: 'board', label: 'Board' },
     { id: 'list', label: 'List' },
   ],
+  pipeline: [
+    { id: 'companies', label: 'Companies' },
+    { id: 'triggers', label: 'Triggers' },
+    { id: 'plays', label: 'Plays' },
+    { id: 'network', label: 'Network' },
+  ],
 })
 
-export function useGraphViewState({ graph, settings }) {
+export function useGraphViewState({ graph, settings, pipeline = null }) {
   const projectFilter = toRef(graph, 'workProjectId')
   const priorityFilter = ref('')
   const assigneeFilter = ref('')
@@ -102,6 +108,7 @@ export function useGraphViewState({ graph, settings }) {
   ))
   const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
   const emptyTitle = computed(() => {
+    if (graph.section === 'pipeline') return graph.searchQuery ? 'No matching rows' : 'Nothing matches this view'
     if (graph.section === 'work') return 'No work matches this view'
     if (graph.graphKinds.length || graph.graphProjectIds.length) return 'No entries match these filters'
     if (graph.searchQuery) return 'No matching graph items'
@@ -111,6 +118,7 @@ export function useGraphViewState({ graph, settings }) {
     }[graph.section] || 'Nothing here yet'
   })
   const emptyCopy = computed(() => {
+    if (graph.section === 'pipeline') return 'Clear search or filters, or include another scope.'
     if (graph.section === 'work') {
       return showClosedIssues.value
         ? 'Clear search or filters, include another scope, or create an issue.'
@@ -146,6 +154,7 @@ export function useGraphViewState({ graph, settings }) {
         showClosedIssues,
         showEmptyProjects,
       })
+      pipeline?.restoreViewState(settings.businessGraphViewState?.pipeline || {})
       hydrated = true
     },
     { immediate: true },
@@ -166,6 +175,7 @@ export function useGraphViewState({ graph, settings }) {
       () => graph.graphOrder,
       () => graph.graphKinds,
       () => graph.graphProjectIds,
+      () => pipeline?.viewState(),
     ],
     () => {
       if (!hydrated) return
@@ -187,6 +197,7 @@ export function useGraphViewState({ graph, settings }) {
           showClosedIssues: showClosedIssues.value,
           showEmptyProjects: showEmptyProjects.value,
         },
+        ...(pipeline ? { pipeline: pipeline.viewState() } : {}),
       })
     },
     { deep: true },

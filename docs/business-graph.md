@@ -150,7 +150,7 @@ reload the UI. There is no separate database or persistent index.
 
 ## Product surface
 
-Home, Work, Graph, and Changes share the top navigation.
+Home, Work, Pipeline, Graph, and Changes share the top navigation.
 [Scribe](meetings.md) owns meeting preparation and filing. Entry details open
 in Editor tabs. **Details** and **Source** share one save queue. Changing views
 waits for pending writes; a conflict keeps the draft and view intact. Details
@@ -264,6 +264,45 @@ references. Board and List share one row grammar (`business-graph/workRow.js`).
 Board column visibility follows task filters but ignores search, so typing does
 not move columns. Undo of a UI close or bulk status change restores the prior
 status and rank only at the saved revision; it never overwrites later edits.
+
+### Pipeline
+
+Pipeline is sales work with companies, in four views: Companies, Triggers,
+Plays, and Network. It adds no entry kind; it reads optional properties:
+
+- `company`: `pipelineStage` (Target, Contacted, In conversation, Proposal,
+  Client, Dormant), `pipelineTrigger` and `pipelinePlay` (note id; a title
+  also resolves), `pipelineTriggerNote`, `pipelineNextStep`, `companyType`,
+  `hqCity`, `hqCountry`, `portfolio`, and `connectionAliases` (list).
+- `note` tagged `sales-trigger`: title is the trigger, summary is what
+  happens; `triggerCategory`, `triggerRating` (Strong, Medium, Watch),
+  `triggerFor`, `triggerSpot`, `triggerWho`, `triggerOpener`, `triggerWhy`.
+- `note` tagged `sales-play`: `playFor`, `playVerdict` (Working, Too early,
+  Untested, Not working yet, Not a sales route), `playTriggers` (ids),
+  `playSteps` (list), `playLearned`; the body records uses.
+
+Summaries carry no custom properties, so the store
+(`src/stores/businessGraphPipeline.js`) pages `graph_query` by kind and tag,
+then reads full nodes with six parallel requests and caches them by source
+revision. It loads when the section opens and follows the Graph revision while
+open. A failed load shows **Retry**, not an empty table. Stage and next step
+write with `expectedRevision`; next step saves only on Enter or **Save**.
+Companies shows companies with a stage unless **Show all companies** is set.
+**Export CSV** writes the rows shown with all columns, including hidden ones.
+Hidden columns persist per view in `businessGraphViewState.pipeline`; the
+name column cannot hide.
+
+Connections come from `resources/connections.csv` in the Team checkout, a
+LinkedIn connections export. The file is read when the section opens. A missing
+file or Team root is a normal state. Rows without first name, last name, and
+company are skipped; email addresses are never read into rows. Company names
+match after normalisation: lowercase, no punctuation, no legal suffix or filler
+word (`inc ltd llc gmbh plc ag limited corporation corp co sa bv the group`),
+single spaces. A company matches by its title or any `connectionAliases`.
+Role and company type are guesses from job title and name, and the UI says so.
+Network lists every connection company; **Add to pipeline** sets Target on a
+matching company or creates one in the default write scope. Fixture:
+`harness/shell.html?section=pipeline&view=network`.
 
 Settings > Graph > You selects the reader’s Person node
 (`businessGraphSelfPersonId`). It drives the `you` token in Work.

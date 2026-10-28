@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 
-export async function exportTimesheetCsv(name, content) {
-  const filename = `${name.replace(/[^\p{L}\p{N}_.-]+/gu, '-').slice(0, 100) || 'time-sheet'}.csv`
+/** Save CSV text through the save dialog, or download it in a browser. */
+export async function exportCsvFile(name, content, fallbackName = 'export') {
+  const filename = `${String(name || '').replace(/[^\p{L}\p{N}_.-]+/gu, '-').slice(0, 100) || fallbackName}.csv`
   if (window.__TAURI_INTERNALS__) {
     const path = await save({ defaultPath: filename, filters: [{ name: 'CSV', extensions: ['csv'] }] })
     if (!path) return false
@@ -16,4 +17,8 @@ export async function exportTimesheetCsv(name, content) {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   return true
+}
+
+export function exportTimesheetCsv(name, content) {
+  return exportCsvFile(name, content, 'time-sheet')
 }
