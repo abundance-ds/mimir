@@ -1,4 +1,5 @@
 import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { LOCAL_SEARCH_SECTIONS } from '../../../stores/businessGraph.js'
 
 export function useGraphSearch({ graph, projectionNodes, focusResults, focusInput }) {
   const searchDraft = ref('')
@@ -46,7 +47,7 @@ export function useGraphSearch({ graph, projectionNodes, focusResults, focusInpu
     clearTimeout(timer)
     timer = null
     graph.prepareSearch(value)
-    if (!value.trim() || graph.section === 'work') {
+    if (!value.trim() || LOCAL_SEARCH_SECTIONS.includes(graph.section)) {
       searchPending.value = false
       return
     }

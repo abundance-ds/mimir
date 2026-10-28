@@ -438,6 +438,7 @@ function reportBulkFailures(action, failures, diagnostic) {
 function defaultKind(section) {
   return {
     work: 'issue',
+    pipeline: 'company',
     all: 'note',
   }[section]
 }

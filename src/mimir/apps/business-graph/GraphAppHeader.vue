@@ -26,9 +26,9 @@
         data-graph-search
         data-graph-control="global-search"
         type="search"
-        :placeholder="section === 'work' ? 'Filter work…' : 'Search entries…'"
-        :aria-label="section === 'work' ? 'Filter work' : 'Search the business graph'"
-        :title="section === 'work' ? 'Filter by title, project, owner, tags, or work details' : 'Search graph content'"
+        :placeholder="searchCopy.placeholder"
+        :aria-label="searchCopy.label"
+        :title="searchCopy.title"
         autocomplete="off"
         autocorrect="off"
         autocapitalize="off"
@@ -174,6 +174,13 @@ const props = defineProps({
   scopeCounts: { type: Object, default: () => ({}) },
   refreshing: { type: Boolean, default: false },
 })
+
+const SEARCH_COPY = Object.freeze({
+  work: { placeholder: 'Filter work…', label: 'Filter work', title: 'Filter by title, project, owner, tags, or work details' },
+  pipeline: { placeholder: 'Filter pipeline…', label: 'Filter the pipeline', title: 'Filter by name, type, headquarters, or connection names' },
+})
+const searchCopy = computed(() => SEARCH_COPY[props.section]
+  || { placeholder: 'Search entries…', label: 'Search the business graph', title: 'Search graph content' })
 
 const emit = defineEmits([
   'searchHome',

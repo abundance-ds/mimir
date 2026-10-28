@@ -189,6 +189,16 @@
                 :options="entityStatuses"
               />
             </label>
+            <label>
+              <span>Pipeline stage</span>
+              <GraphSelect
+                v-model="draft.pipelineStage"
+                data-create-pipeline-stage
+                variant="property"
+                aria-label="Pipeline stage"
+                :options="pipelineStages"
+              />
+            </label>
           </div>
 
           <div v-else-if="draft.kind === 'person'" class="create-kind-properties">
@@ -363,6 +373,7 @@ import GraphSelect from './GraphSelect.vue'
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue'
 import { lookupGraph } from '../../../services/businessGraph.js'
 import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
+import { PIPELINE_STAGES } from './pipelineModel.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -374,6 +385,7 @@ const props = defineProps({
   scopeIds: { type: Array, default: () => [] },
   initialKind: { type: String, default: 'issue' },
   initialStatus: { type: String, default: 'backlog' },
+  initialPipelineStage: { type: String, default: '' },
   defaultScope: { type: String, default: 'team' },
   saving: { type: Boolean, default: false },
   graphRevision: { type: [Number, String], default: 0 },
@@ -531,6 +543,10 @@ const companyRoles = Object.freeze([
   { id: 'partner', label: 'Partner' },
   { id: 'vendor', label: 'Vendor' },
 ])
+const pipelineStages = Object.freeze([
+  { id: '', label: 'Not in pipeline' },
+  ...PIPELINE_STAGES.map(stage => ({ id: stage, label: stage })),
+])
 const entityStatuses = Object.freeze([
   { id: 'active', label: 'Active' },
   { id: 'former', label: 'Former' },
@@ -596,6 +612,7 @@ function emptyDraft() {
     projectStatus: 'planned',
     companyRole: '',
     entityStatus: 'active',
+    pipelineStage: props.initialPipelineStage,
     teamMember: false,
     personId: props.initialKind === 'timesheet' ? props.selfPersonId : '',
     dueDate: '',
@@ -655,6 +672,7 @@ function createProperties() {
     return {
       ...(draft.companyRole ? { roles: [draft.companyRole] } : {}),
       status: draft.entityStatus,
+      ...(draft.pipelineStage ? { pipelineStage: draft.pipelineStage } : {}),
     }
   }
   if (draft.kind === 'person') {

@@ -16,7 +16,7 @@
       :search-query="graph.searchQuery"
       :search-pending="searchPending"
       :searching="graph.searching"
-      :result-count="projectionNodes.length"
+      :result-count="searchResultNodes.length"
       :scopes="graph.scopes"
       :active-scope-ids="graph.activeScopeIds"
       :scope-counts="graph.scopeCounts"
@@ -124,6 +124,7 @@
       :scopes="graph.scopes"
       :initial-kind="createKind"
       :initial-status="createStatus"
+      :initial-pipeline-stage="graph.section === 'pipeline' ? 'Target' : ''"
       :default-scope="graph.workspaceGraphScope"
       :saving="creating"
       :error="createError"
@@ -145,6 +146,7 @@ import { computed, ref, watch } from 'vue'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
+import { usePipelineStore } from '../../stores/businessGraphPipeline.js'
 import GraphAppFeedback from './business-graph/GraphAppFeedback.vue'
 import GraphAppHeader from './business-graph/GraphAppHeader.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
@@ -174,6 +176,7 @@ const emit = defineEmits([
 const settings = useSettingsStore()
 const launchers = useLaunchersStore()
 const graph = useBusinessGraphStore()
+const pipeline = usePipelineStore()
 const root = ref(null)
 const appHeader = ref(null)
 const workspaceSurface = ref(null)
@@ -219,7 +222,10 @@ const {
   toggleBoardStatusCollapse,
   viewOptions,
   waitingOnYouIssues,
-} = useGraphViewState({ graph, settings })
+} = useGraphViewState({ graph, settings, pipeline })
+// Pipeline filters loaded rows; other sections count their projection.
+const searchResultNodes = computed(() => (graph.section === 'pipeline'
+  ? Array.from({ length: pipeline.visibleCount }) : projectionNodes.value))
 const {
   clearSearch,
   flushSearch,
@@ -230,7 +236,7 @@ const {
   searchPending,
 } = useGraphSearch({
   graph,
-  projectionNodes,
+  projectionNodes: searchResultNodes,
   focusResults: edge => workspaceSurface.value?.focusListEdge(edge),
   focusInput: () => appHeader.value?.focusSearch(),
 })

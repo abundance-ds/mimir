@@ -24,8 +24,12 @@ import { projectIssues } from '../services/businessGraphProject.js'
 export const BUSINESS_SECTIONS = Object.freeze([
   { id: 'home', label: 'Home', kinds: [] },
   { id: 'work', label: 'Work', kinds: ['issue'] },
+  { id: 'pipeline', label: 'Pipeline', kinds: ['company'] },
   { id: 'all', label: 'Graph', kinds: [] },
 ])
+
+// These sections filter loaded rows in the renderer instead of searching Graph.
+export const LOCAL_SEARCH_SECTIONS = Object.freeze(['work', 'pipeline'])
 
 const EVENT_PAGE_SIZE = 50
 const MAX_SUMMARY_EVENTS = 2_000
@@ -51,6 +55,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     home: 'home',
     all: 'list',
     work: 'board',
+    pipeline: 'companies',
   })
   const searchQuery = ref('')
   const searchResults = ref([])
@@ -446,7 +451,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (query !== searchQuery.value) resetSearchOrder()
     searchQuery.value = query
     const generation = ++searchGeneration
-    if (!query.trim() || section.value === 'work') {
+    if (!query.trim() || LOCAL_SEARCH_SECTIONS.includes(section.value)) {
       searchResults.value = []
       searching.value = false
       searchHasMore.value = false

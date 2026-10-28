@@ -119,7 +119,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(27)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(35)
     expect(BUSINESS_GRAPH_SURFACES).toContain('ProjectHome.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('ProjectMarkdown.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('TimesheetDetails.vue')
@@ -137,6 +137,8 @@ describe('Business Graph UI contract', () => {
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphViewbar.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphWorkspace.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('PipelineWorkspace.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('PipelineColumnsMenu.vue')
     expect(BUSINESS_GRAPH_SURFACES).not.toContain('DispatchBar.vue')
     expect(BUSINESS_GRAPH_SURFACES).not.toContain('GraphFilterBanner.vue')
   })
