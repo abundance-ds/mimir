@@ -1,3 +1,5 @@
+import { toCsv } from '../../../shared/csv.js'
+
 // Time rows are plain Graph properties. View state and totals never enter YAML.
 export const MAX_TIME_ROWS = 10000
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -103,12 +105,6 @@ export function buildTimeProperties(draft, { validate = true } = {}) {
 export function timesheetCsv({ title, project, person, entries }) {
   const problems = timeProblems(entries)
   if (problems.length) throw new Error('Correct the time sheet before exporting it.')
-  // Quote every cell and neutralize spreadsheet formulas in authored text.
-  const cell = value => {
-    let text = String(value ?? '')
-    if (/^[\s]*[=+@-]/.test(text) || /^[\t\r\n]/.test(text)) text = `'${text}`
-    return `"${text.replaceAll('"', '""')}"`
-  }
   const rows = [
     ['Time sheet', 'Project', 'Person', 'Date', 'Work', 'Minutes', 'Duration', 'Invoice'],
     ...entries.map(entry => [title, project, person, entry.date, entry.description,
@@ -116,5 +112,5 @@ export function timesheetCsv({ title, project, person, entries }) {
     ['', '', '', '', 'Total', entries.reduce((sum, entry) => sum + entry.minutes, 0),
       formatMinutes(entries.reduce((sum, entry) => sum + entry.minutes, 0)), ''],
   ]
-  return rows.map(row => row.map(cell).join(',')).join('\r\n') + '\r\n'
+  return toCsv(rows)
 }
