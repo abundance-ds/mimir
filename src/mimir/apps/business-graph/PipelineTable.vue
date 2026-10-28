@@ -1,7 +1,7 @@
 <template>
   <div class="pipeline-table" data-graph-entries :data-pipeline-table="view">
     <div ref="root" class="pipeline-table-scroll">
-      <table :aria-label="label" @keydown="onKeydown">
+      <table :aria-label="label" :style="{ minWidth: `${minWidth}px` }" @keydown="onKeydown">
         <thead><tr>
           <th v-for="column in columns" :key="column.id" scope="col" :class="`pipeline-col-${column.id}`"
             :style="column.width ? { width: column.width } : undefined">
@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { IconChevronRight } from '@tabler/icons-vue'
 import GraphColumnFilter from './GraphColumnFilter.vue'
 
@@ -69,6 +69,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['toggle', 'filter', 'clearFilters', 'loadMore'])
 const root = ref(null), filterMenus = ref([]), selectedId = ref('')
+// Fixed columns keep their width; each free column keeps room to read.
+const minWidth = computed(() => props.columns.reduce((sum, column) => sum + (parseInt(column.width, 10) || 160), 0))
 
 function rowLabel(row) { return row.title || 'Untitled' }
 function toggle(row) {
@@ -116,7 +118,7 @@ defineExpose({ closeMenus, focusEdge, focusRow })
 <style scoped>
 .pipeline-table { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; background: var(--color-surface); }
 .pipeline-table-scroll { min-height: 0; flex: 1; overflow: auto; overflow-anchor: none; }
-.pipeline-table table { width: 100%; min-width: 720px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 11.5px; color: var(--color-ink); }
+.pipeline-table table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 11.5px; color: var(--color-ink); }
 .pipeline-table th, .pipeline-table td { padding: 0 10px; text-align: left; vertical-align: middle; }
 .pipeline-table thead th { position: sticky; top: 0; z-index: 3; height: 28px; border-bottom: 1px solid var(--color-rule); background: var(--color-chrome-high); color: var(--color-ink-2); font-weight: 600; white-space: nowrap; }
 .pipeline-heading { display: flex; min-width: 0; align-items: center; gap: 4px; }
@@ -130,6 +132,7 @@ defineExpose({ closeMenus, focusEdge, focusRow })
 .pipeline-row-chevron { flex: 0 0 auto; color: var(--color-ink-3); }
 .pipeline-row-chevron.open { transform: rotate(90deg); }
 .pipeline-row-name { display: flex; min-width: 0; flex-direction: column; }
+.pipeline-detail-row td > * { position: sticky; left: 0; width: min(100%, 100cqw); }
 .pipeline-detail-row td { padding: 0; border-top: 1px solid var(--color-rule-light); border-bottom: 1px solid var(--color-rule); background: var(--color-chrome-high); white-space: normal; }
 .pipeline-table button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 .pipeline-table-empty { display: grid; min-height: 200px; padding: 28px 16px; place-content: center; justify-items: center; gap: 8px; text-align: center; font-size: 12px; }

@@ -148,10 +148,12 @@ export const usePipelineStore = defineStore('businessGraphPipeline', () => {
         pageAll({ kinds: ['note'], tags: [PLAY_TAG] }, current),
       ])
       if (!current() || !companySummaries || !triggerSummaries || !playSummaries) return
-      const [nextCompanies, nextTriggers, nextPlays] = await Promise.all([
-        fullNodes(companySummaries, current), fullNodes(triggerSummaries, current), fullNodes(playSummaries, current),
-      ])
+      // One worker pool for all lists keeps the concurrency bound.
+      const nodes = await fullNodes([...companySummaries, ...triggerSummaries, ...playSummaries], current)
       if (!current()) return
+      const byId = new Map(nodes.map(node => [node.id, node]))
+      const pick = summaries => summaries.map(summary => byId.get(summary.id)).filter(Boolean)
+      const nextCompanies = pick(companySummaries), nextTriggers = pick(triggerSummaries), nextPlays = pick(playSummaries)
       const ids = new Set([...nextCompanies, ...nextTriggers, ...nextPlays].map(node => node.id))
       for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id)
       companies.value = nextCompanies

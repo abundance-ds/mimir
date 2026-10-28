@@ -153,6 +153,6 @@ defineExpose({
 .pipeline-loading-mark { width: 24px; height: 24px; border: 2px solid var(--color-rule); border-top-color: var(--color-accent); border-radius: 50%; animation: pipeline-spin 750ms linear infinite; }
 @keyframes pipeline-spin { to { transform: rotate(360deg); } }
 @container business-graph (max-width: 620px) {
-  .pipeline-bar-button span, .pipeline-columns-label { display: none; }
+  .pipeline-bar-button span { display: none; }
 }
 </style>
