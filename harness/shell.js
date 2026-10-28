@@ -69,6 +69,76 @@ const summaries = [
     relations: [{ relation: 'part_of', target: 'project-atlas' }],
   },
 ]
+// Fictional Pipeline fixtures: companies with sales properties, sales notes,
+// and a connections export. No real company or person appears here.
+const company = (id, title, extra = {}) => ({
+  id, kind: 'company', title, summary: '', tags: [], scopeId: 'team:main',
+  sourceRevision: `${id}-r1`, updatedAt: stamp(7, 30), relations: [], ...extra,
+})
+const salesNote = (id, title, tag, summary) => ({
+  id, kind: 'note', title, summary, tags: [tag], scopeId: 'team:main',
+  sourceRevision: `${id}-r1`, updatedAt: stamp(7, 40), relations: [],
+})
+summaries.push(
+  company('company-northwind', 'Northwind Health Economics'),
+  company('company-contoso', 'Contoso Therapeutics'),
+  company('company-fabrikam', 'Fabrikam Capital'),
+  company('company-tailspin', 'Tailspin Outcomes'),
+  salesNote('trigger-new-hire', 'New head of HEOR hired', 'sales-trigger', 'A company names a new HEOR lead who will review suppliers.'),
+  salesNote('trigger-launch', 'Launch planned in a new market', 'sales-trigger', 'A product launch needs a value dossier within a year.'),
+  salesNote('trigger-funding', 'Funding round closed', 'sales-trigger', 'A firm closes a round and plans to grow its services.'),
+  salesNote('play-warm-intro', 'Warm introduction through a shared connection', 'sales-play', 'Ask a shared connection for an introduction.'),
+  salesNote('play-webinar', 'Joint method webinar', 'sales-play', 'Run a short webinar with a partner firm.'),
+)
+const properties = {
+  'company-acme': { roles: ['client'] },
+  'company-northwind': {
+    companyType: 'HEOR consultancy', hqCity: 'London', hqCountry: 'United Kingdom', pipelineStage: 'In conversation',
+    pipelineTrigger: 'trigger-new-hire', pipelineTriggerNote: 'Their new lead wants outside model support this quarter.',
+    pipelinePlay: 'play-warm-intro', pipelineNextStep: 'Send the case study', connectionAliases: ['Northwind HE'],
+  },
+  'company-contoso': {
+    companyType: 'Pharma', hqCity: 'Basel', hqCountry: 'Switzerland', pipelineStage: 'Target',
+    pipelineTrigger: 'trigger-launch', pipelineNextStep: 'Find the market access lead',
+  },
+  'company-fabrikam': {
+    companyType: 'Private equity', hqCity: 'New York', hqCountry: 'United States', pipelineStage: 'Contacted',
+    pipelineTrigger: 'trigger-funding', portfolio: 'Northwind Health Economics; Tailspin Outcomes',
+  },
+  'company-tailspin': { companyType: 'HEOR consultancy', hqCity: 'Leeds', hqCountry: 'United Kingdom' },
+  'trigger-new-hire': {
+    triggerCategory: 'People', triggerRating: 'Strong', triggerFor: 'Both', triggerSpot: 'Job change posts',
+    triggerWho: 'The new lead', triggerOpener: 'Congratulations on the new role. We help teams in the first 90 days.',
+    triggerWhy: 'New leads review suppliers early.',
+  },
+  'trigger-launch': {
+    triggerCategory: 'Market', triggerRating: 'Medium', triggerFor: 'Pharma', triggerSpot: 'Company news',
+    triggerWho: 'Market access lead', triggerWhy: 'A launch needs evidence on a fixed date.',
+  },
+  'trigger-funding': { triggerCategory: 'Money', triggerRating: 'Watch', triggerFor: 'HEOR consultancies', triggerSpot: 'Investor news' },
+  'play-warm-intro': {
+    playFor: 'Both', playVerdict: 'Working', playTriggers: ['trigger-new-hire'],
+    playSteps: ['Find a shared connection', 'Ask for a short introduction', 'Offer a 20 minute call'],
+    playLearned: 'A short, specific request gets more replies.',
+  },
+  'play-webinar': { playFor: 'HEOR consultancies', playVerdict: 'Untested', playTriggers: ['trigger-funding', 'Missing trigger'] },
+}
+const connectionsCsv = [
+  'Notes:',
+  '"This is a fictional connections export for the harness."',
+  '',
+  'First Name,Last Name,URL,Email Address,Company,Position,Connected On,Messaged,Previous communication summary',
+  'Ada,Example,https://www.linkedin.com/in/ada-example,ada@example.com,Northwind Health Economics Ltd,Head of Market Access,01 Mar 2025,Yes,"Talked about a cost model, in March."',
+  'Ben,Sample,https://www.linkedin.com/in/ben-sample,,Northwind HE,Senior Health Economist,12 Jan 2024,No,',
+  'Cara,Placeholder,https://www.linkedin.com/in/cara-placeholder,,Contoso Therapeutics AG,Associate Director HEOR,05 May 2023,No,No matching messages',
+  'Dan,Demo,https://www.linkedin.com/in/dan-demo,,University of Exampleton,Research Fellow,20 Feb 2022,No,',
+  'Eve,Fixture,https://www.linkedin.com/in/eve-fixture,,Wingtip Analytics,Consultant,11 Nov 2024,Yes,"Asked about a joint webinar."',
+  'Finn,Test,https://www.linkedin.com/in/finn-test,,"Wingtip Analytics, Inc.",Procurement Manager,02 Jun 2025,No,',
+  'Gus,Mock,https://www.linkedin.com/in/gus-mock,,Fabrikam Capital,Partner,15 Aug 2021,Yes,',
+  'Hana,Sample,https://www.linkedin.com/in/hana-sample,,Litware Pharma,Medical Science Liaison,09 Sep 2023,No,',
+  ',,,,,,,,',
+].join('\n')
+
 const events = [
   {
     id: 'e1', eventType: 'deliverable-added', action: 'issues.add_deliverable',
@@ -105,9 +175,9 @@ const fullNode = id => {
     body: id === 'person-alex' ? 'Primary contact for extraction QC.' : 'Working note.',
     properties: id === 'person-alex'
       ? { role: 'HEOR lead', email: 'alex@acme.example', phone: '+49 30 555 010' }
-      : {},
+      : { ...(properties[id] || {}) },
     relations: id === 'person-alex' ? [{ relation: 'works_at', target: 'company-acme' }] : (summary?.relations || []),
-    provenance: { scopeId: summary?.scopeId || 'project:atlas', sourceRevision: 'r9', sourcePath: `/work/atlas/${id}.md` },
+    provenance: { scopeId: summary?.scopeId || 'project:atlas', sourceRevision: summary?.sourceRevision || 'r9', sourcePath: `/work/atlas/${id}.md` },
   }
 }
 
@@ -119,6 +189,7 @@ function filterNodes(query = {}) {
   })
   return summaries.filter(node => (!query.scopeIds?.length || query.scopeIds.includes(node.scopeId))
     && (!query.kinds?.length || query.kinds.includes(node.kind))
+    && (!query.tags?.length || query.tags.every(tag => node.tags?.includes(tag)))
     && (!query.relatedTo || related.has(node.id)))
 }
 
@@ -149,6 +220,27 @@ window.__TAURI_INTERNALS__ = {
       }
       case 'graph_get':
         return fullNode(args?.id)
+      case 'graph_update': {
+        const patch = args?.patch || {}
+        const summary = summaries.find(item => item.id === patch.id)
+        if (!summary) throw new Error('Graph node not found.')
+        if (patch.expectedRevision && patch.expectedRevision !== summary.sourceRevision) throw new Error('Source changed. Reload and try again.')
+        properties[patch.id] = { ...(properties[patch.id] || {}), ...(patch.setProperties || {}) }
+        for (const key of patch.removeProperties || []) delete properties[patch.id][key]
+        summary.sourceRevision = `${patch.id}-r${Date.now()}`
+        return fullNode(patch.id)
+      }
+      case 'graph_create': {
+        const create = args?.create || {}
+        const id = `${create.kind}-${Date.now()}`
+        summaries.push({ id, kind: create.kind, title: create.title, summary: create.summary || '', tags: create.tags || [],
+          scopeId: create.scopeId || 'team:main', sourceRevision: `${id}-r1`, updatedAt: new Date().toISOString(), relations: [] })
+        properties[id] = { ...(create.properties || {}) }
+        return fullNode(id)
+      }
+      case 'read_text_file':
+        if (String(args?.path || '').endsWith('/resources/connections.csv') && !params.has('noConnections')) return { content: connectionsCsv }
+        throw new Error('No such file or directory (os error 2)')
       case 'graph_neighbors': {
         if (args?.id !== 'issue-map') return []
         return [
@@ -166,8 +258,14 @@ window.__TAURI_INTERNALS__ = {
       }
       case 'graph_context':
         return { graphRevision: 44, markdown: '# Business graph context\n\nBounded snapshot.' }
-      case 'settings_load':
-        return { settings: { editor: { editorTheme: theme } } }
+      case 'settings_load': {
+        // Seed the saved view so hydration keeps ?section= and ?view=.
+        const section = params.get('section') || 'all'
+        const view = params.get('view')
+        return { settings: { editor: { editorTheme: theme, businessGraphViewState: {
+          section, sectionViews: view ? { [section]: view } : {},
+        } } } }
+      }
       case 'settings_save':
       case 'settings_save_editor':
       case 'settings_changed':
@@ -222,6 +320,7 @@ await loadWorkspaceConfig('/work/atlas')
 await graph.start('/work/atlas')
 app.mount('#app')
 graph.setSection(params.get('section') || 'all')
+if (params.get('view')) graph.setView(params.get('view'))
 
 const action = params.get('do')
 if (action) {
@@ -233,6 +332,9 @@ if (action) {
         input.value = 'alex'
         input.dispatchEvent(new Event('input', { bubbles: true }))
       }
+    }
+    if (action === 'expand') {
+      document.querySelector('[data-pipeline-row-button]')?.click()
     }
     if (action === 'board') {
       document.querySelector('[data-graph-section="work"]')?.click()
